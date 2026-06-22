@@ -1,13 +1,38 @@
-require("dotenv").config();
-
-const axios = require("axios");
+require("axios");
 const XLSX = require("xlsx");
 const fs = require("fs");
 const path = require("path");
 const { createClient } = require("@supabase/supabase-js");
 
 // ----------------------
-// CONFIG
+// ENV SAFETY (CI vs local)
+// ----------------------
+if (process.env.CI !== "true") {
+  require("dotenv").config();
+}
+
+// ----------------------
+// REQUIRED ENV CHECK
+// ----------------------
+const requiredEnv = [
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_KEY",
+  "AZURE_TENANT_ID",
+  "AZURE_CLIENT_ID",
+  "AZURE_CLIENT_SECRET",
+  "SITE_ID",
+  "DRIVE_ID",
+  "FILE_ID",
+];
+
+for (const key of requiredEnv) {
+  if (!process.env[key]) {
+    throw new Error(`❌ Missing env var: ${key}`);
+  }
+}
+
+// ----------------------
+// SUPABASE CLIENT
 // ----------------------
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -17,9 +42,11 @@ const supabase = createClient(
 const CHUNK_SIZE = 500;
 
 // ----------------------
-// AUTH
+// GRAPH AUTH
 // ----------------------
 async function getToken() {
+  const axios = require("axios");
+
   const res = await axios.post(
     `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/oauth2/v2.0/token`,
     new URLSearchParams({
@@ -34,9 +61,11 @@ async function getToken() {
 }
 
 // ----------------------
-// DOWNLOAD FILE
+// DOWNLOAD EXCEL
 // ----------------------
 async function getExcelBuffer() {
+  const axios = require("axios");
+
   const token = await getToken();
 
   const metaUrl =
@@ -50,6 +79,10 @@ async function getExcelBuffer() {
 
   const downloadUrl = meta.data["@microsoft.graph.downloadUrl"];
 
+  if (!downloadUrl) {
+    throw new Error("❌ No download URL returned from Graph API");
+  }
+
   console.log("📥 Downloading Excel file...");
 
   const file = await axios.get(downloadUrl, {
@@ -62,13 +95,13 @@ async function getExcelBuffer() {
 // ----------------------
 // HELPERS
 // ----------------------
-
-// Excel time → HH:MM:SS
 function excelTimeToString(value) {
   if (value === null || value === undefined || value === "") return null;
-  if (typeof value === "string") return value;
 
-  const totalSeconds = Math.round(value * 86400);
+  const num = Number(value);
+  if (isNaN(num)) return value;
+
+  const totalSeconds = Math.round(num * 86400);
 
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);
@@ -77,7 +110,6 @@ function excelTimeToString(value) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-// Excel date → ISO date
 function excelDateToJS(serial) {
   if (!serial) return null;
 
@@ -97,7 +129,9 @@ function getSheet(workbook, possibleNames) {
 
   if (!found) {
     throw new Error(
-      `Sheet not found. Expected: ${possibleNames.join(", ")} | Found: ${workbook.SheetNames.join(", ")}`
+      `Sheet not found. Expected: ${possibleNames.join(
+        ", "
+      )} | Found: ${workbook.SheetNames.join(", ")}`
     );
   }
 
@@ -105,7 +139,7 @@ function getSheet(workbook, possibleNames) {
 }
 
 // ----------------------
-// PARSE
+// PARSE DEPUTY
 // ----------------------
 function parseDeputyData(buffer) {
   const workbook = XLSX.read(buffer, { type: "buffer" });
@@ -127,7 +161,6 @@ function parseDeputyData(buffer) {
       const end = excelTimeToString(r[4]);
 
       return {
-        // 🔥 FIXED UNIQUE KEY (prevents Supabase collision)
         shift_key: `${employee}_${date}_${start}_${end}`,
 
         employee_name: employee,
@@ -150,12 +183,17 @@ function parseDeputyData(buffer) {
 
         day_name: r[12] || null,
         month_name: r[13] || null,
+
         week: r[14] ?? null,
 
-        source_file: "DeputyRawData"
+        source_file: "DeputyRawData",
       };
     });
 }
+
+// ----------------------
+// PARSE TT
+// ----------------------
 function parseTTData(buffer) {
   const workbook = XLSX.read(buffer, { type: "buffer" });
 
@@ -165,14 +203,14 @@ function parseTTData(buffer) {
   return rows
     .slice(1)
     .filter(r => r && r[0])
-    .map((r, idx) => ({
-game_key: [
-  excelDateToJS(r[0]),
-  r[1], // Competition
-  r[2], // Round
-  r[3], // Home Team
-  r[4]  // Away Team
-].join("|"),
+    .map(r => ({
+      game_key: [
+        excelDateToJS(r[0]),
+        r[1],
+        r[2],
+        r[3],
+        r[4],
+      ].join("|"),
 
       Date: excelDateToJS(r[0]),
       Competition: r[1],
@@ -188,9 +226,9 @@ game_key: [
       Additional: r[8],
       Week: r[9],
       Column11: r[10],
-
     }));
 }
+
 // ----------------------
 // DEDUPE
 // ----------------------
@@ -205,7 +243,7 @@ function dedupe(records) {
 }
 
 // ----------------------
-// UPLOAD
+// SUPABASE UPLOAD
 // ----------------------
 async function uploadToSupabase(records) {
   for (let i = 0; i < records.length; i += CHUNK_SIZE) {
@@ -217,15 +255,15 @@ async function uploadToSupabase(records) {
         onConflict: "shift_key",
       });
 
-    if (error) {
-      throw new Error(JSON.stringify(error));
-    }
+    if (error) throw new Error(JSON.stringify(error));
 
-    console.log(`✅ Synced ${Math.min(i + CHUNK_SIZE, records.length)}/${records.length}`);
+    console.log(
+      `✅ Synced ${Math.min(i + CHUNK_SIZE, records.length)}/${records.length}`
+    );
   }
 }
 
-async function uploadTTToSupabase(records) {
+async function uploadTT(records) {
   for (let i = 0; i < records.length; i += CHUNK_SIZE) {
     const chunk = records.slice(i, i + CHUNK_SIZE);
 
@@ -235,9 +273,11 @@ async function uploadTTToSupabase(records) {
         onConflict: "game_key",
       });
 
-    if (error) throw error;
+    if (error) throw new Error(JSON.stringify(error));
 
-    console.log(`✅ TT Synced ${Math.min(i + CHUNK_SIZE, records.length)}/${records.length}`);
+    console.log(
+      `✅ TT Synced ${Math.min(i + CHUNK_SIZE, records.length)}/${records.length}`
+    );
   }
 }
 
@@ -250,49 +290,32 @@ async function sync() {
 
     const buffer = await getExcelBuffer();
 
+    // ----------------------
+    // DEPUTY
+    // ----------------------
     console.log("📊 Parsing DeputyRawData...");
-    let records = parseDeputyData(buffer);
+    let deputy = parseDeputyData(buffer);
 
-    console.log(`📦 Parsed ${records.length} rows`);
+    console.log(`📦 Parsed ${deputy.length} rows`);
 
     console.log("🧹 Deduplicating...");
-    records = dedupe(records);
+    deputy = dedupe(deputy);
 
-    console.log(`📦 After dedupe: ${records.length} rows`);
+    console.log(`📦 After dedupe: ${deputy.length}`);
+
+    console.log("🚀 Uploading Deputy...");
+    await uploadToSupabase(deputy);
 
     // ----------------------
-    // Save JSON for Dashboard
+    // TT
     // ----------------------
-    const outputDir = path.join(__dirname, "data");
+    console.log("📊 Parsing TTRawData...");
+    const tt = parseTTData(buffer);
 
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
+    console.log(`📦 Parsed TT rows: ${tt.length}`);
 
-    fs.writeFileSync(
-      path.join(outputDir, "report.json"),
-      JSON.stringify(records, null, 2)
-    );
-
-    console.log("📄 report.json updated");
-
-console.log("🚀 Uploading Deputy to Supabase...");
-await uploadToSupabase(records);
-
-// ----------------------
-// TT PIPELINE
-// ----------------------
-console.log("🎯 Parsing TT_Games...");
-let ttRecords = parseTTData(buffer);
-
-console.log(`📦 Parsed TT rows: ${ttRecords.length}`);
-
-// no dedupe needed (game_key already guarantees uniqueness)
-
-console.log(`📦 After dedupe TT: ${ttRecords.length}`);
-
-console.log("🚀 Uploading TT_Games to Supabase...");
-await uploadTTToSupabase(ttRecords);
+    console.log("🚀 Uploading TT...");
+    await uploadTT(tt);
 
     console.log("🎉 Sync complete!");
   } catch (err) {
