@@ -9,10 +9,6 @@ jobs:
   sync:
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: reporting-ui
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -21,10 +17,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: reporting-ui/package-lock.json
 
-      - name: Install dependencies (reporting-ui only)
+      - name: Install dependencies
         working-directory: reporting-ui
         run: npm install
 
