@@ -1,11 +1,11 @@
-require("axios");
+const axios = require("axios");
 const XLSX = require("xlsx");
 const fs = require("fs");
 const path = require("path");
 const { createClient } = require("@supabase/supabase-js");
 
 // ----------------------
-// ENV SAFETY (CI vs local)
+// ENV
 // ----------------------
 if (process.env.CI !== "true") {
   require("dotenv").config();
@@ -42,11 +42,64 @@ const supabase = createClient(
 const CHUNK_SIZE = 500;
 
 // ----------------------
-// GRAPH AUTH
+// SYNC LOGGING
+// ----------------------
+let syncLogId = null;
+
+async function logStart(source) {
+  console.log("🟡 Creating sync log...");
+
+  const { data, error } = await supabase
+    .from("sync_logs")
+    .insert({
+      source,
+      started_at: new Date(),
+      status: "running",
+      row_count: 0,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error("❌ logStart FAILED:", error);
+    throw error;
+  }
+
+  console.log("🟢 sync_log created:", data);
+
+  syncLogId = data.id;
+}
+
+async function logSuccess(rowCount) {
+  if (!syncLogId) return;
+
+  await supabase
+    .from("sync_logs")
+    .update({
+      finished_at: new Date(),
+      status: "success",
+      row_count: rowCount,
+    })
+    .eq("id", syncLogId);
+}
+
+async function logFailure(err) {
+  if (!syncLogId) return;
+
+  await supabase
+    .from("sync_logs")
+    .update({
+      finished_at: new Date(),
+      status: "failed",
+      error_message: err.message || String(err),
+    })
+    .eq("id", syncLogId);
+}
+
+// ----------------------
+// GRAPH TOKEN
 // ----------------------
 async function getToken() {
-  const axios = require("axios");
-
   const res = await axios.post(
     `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/oauth2/v2.0/token`,
     new URLSearchParams({
@@ -61,11 +114,9 @@ async function getToken() {
 }
 
 // ----------------------
-// DOWNLOAD EXCEL
+// DOWNLOAD FILE
 // ----------------------
 async function getExcelBuffer() {
-  const axios = require("axios");
-
   const token = await getToken();
 
   const metaUrl =
@@ -79,11 +130,7 @@ async function getExcelBuffer() {
 
   const downloadUrl = meta.data["@microsoft.graph.downloadUrl"];
 
-  if (!downloadUrl) {
-    throw new Error("❌ No download URL returned from Graph API");
-  }
-
-  console.log("📥 Downloading Excel file...");
+  if (!downloadUrl) throw new Error("No download URL returned");
 
   const file = await axios.get(downloadUrl, {
     responseType: "arraybuffer",
@@ -96,13 +143,12 @@ async function getExcelBuffer() {
 // HELPERS
 // ----------------------
 function excelTimeToString(value) {
-  if (value === null || value === undefined || value === "") return null;
+  if (!value) return null;
 
   const num = Number(value);
   if (isNaN(num)) return value;
 
   const totalSeconds = Math.round(num * 86400);
-
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);
   const s = totalSeconds % 60;
@@ -112,27 +158,21 @@ function excelTimeToString(value) {
 
 function excelDateToJS(serial) {
   if (!serial) return null;
-
-  const utcDays = Math.floor(serial - 25569);
-  const utcValue = utcDays * 86400;
-
-  return new Date(utcValue * 1000).toISOString().split("T")[0];
+  return new Date((serial - 25569) * 86400 * 1000)
+    .toISOString()
+    .split("T")[0];
 }
 
 // ----------------------
 // SHEET PICKER
 // ----------------------
-function getSheet(workbook, possibleNames) {
+function getSheet(workbook, names) {
   const found = workbook.SheetNames.find(name =>
-    possibleNames.some(p => name.toLowerCase().includes(p.toLowerCase()))
+    names.some(n => name.toLowerCase().includes(n.toLowerCase()))
   );
 
   if (!found) {
-    throw new Error(
-      `Sheet not found. Expected: ${possibleNames.join(
-        ", "
-      )} | Found: ${workbook.SheetNames.join(", ")}`
-    );
+    throw new Error(`Sheet not found: ${workbook.SheetNames.join(", ")}`);
   }
 
   return workbook.Sheets[found];
@@ -143,52 +183,37 @@ function getSheet(workbook, possibleNames) {
 // ----------------------
 function parseDeputyData(buffer) {
   const workbook = XLSX.read(buffer, { type: "buffer" });
-
-  console.log("📑 Sheets found:", workbook.SheetNames);
-
   const sheet = getSheet(workbook, ["DeputyRawData"]);
 
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-  return rows
-    .slice(1)
-    .filter(r => r && r[0])
-    .map(r => {
-      const employee = r[0];
-      const date = r[2];
+  return rows.slice(1).filter(r => r && r[0]).map(r => {
+    const employee = r[0];
+    const date = r[2];
 
-      const start = excelTimeToString(r[3]);
-      const end = excelTimeToString(r[4]);
+    const start = excelTimeToString(r[3]);
+    const end = excelTimeToString(r[4]);
 
-      return {
-        shift_key: `${employee}_${date}_${start}_${end}`,
-
-        employee_name: employee,
-        level: String(r[1] || ""),
-
-        shift_date: excelDateToJS(date),
-
-        start_time: start,
-        end_time: end,
-        meal_break: excelTimeToString(r[5]),
-
-        total_hours: Number(r[6]) || 0,
-        total_cost: Number(r[7]) || 0,
-
-        employee_comment: r[8] || null,
-        hourly_rate: Number(r[9]) || 0,
-
-        area_name: r[10] || null,
-        comment: r[11] || null,
-
-        day_name: r[12] || null,
-        month_name: r[13] || null,
-
-        week: r[14] ?? null,
-
-        source_file: "DeputyRawData",
-      };
-    });
+    return {
+      shift_key: `${employee}_${date}_${start}_${end}`,
+      employee_name: employee,
+      level: String(r[1] || ""),
+      shift_date: excelDateToJS(date),
+      start_time: start,
+      end_time: end,
+      meal_break: excelTimeToString(r[5]),
+      total_hours: Number(r[6]) || 0,
+      total_cost: Number(r[7]) || 0,
+      employee_comment: r[8] || null,
+      hourly_rate: Number(r[9]) || 0,
+      area_name: r[10] || null,
+      comment: r[11] || null,
+      day_name: r[12] || null,
+      month_name: r[13] || null,
+      week: r[14] ?? null,
+      source_file: "DeputyRawData",
+    };
+  });
 }
 
 // ----------------------
@@ -196,37 +221,31 @@ function parseDeputyData(buffer) {
 // ----------------------
 function parseTTData(buffer) {
   const workbook = XLSX.read(buffer, { type: "buffer" });
-
   const sheet = getSheet(workbook, ["TTRawData"]);
+
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-  return rows
-    .slice(1)
-    .filter(r => r && r[0])
-    .map(r => ({
-      game_key: [
-        excelDateToJS(r[0]),
-        r[1],
-        r[2],
-        r[3],
-        r[4],
-      ].join("|"),
+  return rows.slice(1).filter(r => r && r[0]).map(r => ({
+    game_key: [
+      excelDateToJS(r[0]),
+      r[1],
+      r[2],
+      r[3],
+      r[4],
+    ].join("|"),
 
-      Date: excelDateToJS(r[0]),
-      Competition: r[1],
-      Round: r[2],
-
-      home_team: r[3],
-      away_team: r[4],
-
-      home_allocated: r[5],
-      away_allocated: r[6],
-
-      Location: r[7],
-      Additional: r[8],
-      Week: r[9],
-      Column11: r[10],
-    }));
+    Date: excelDateToJS(r[0]),
+    Competition: r[1],
+    Round: r[2],
+    home_team: r[3],
+    away_team: r[4],
+    home_allocated: r[5],
+    away_allocated: r[6],
+    Location: r[7],
+    Additional: r[8],
+    Week: r[9],
+    Column11: r[10],
+  }));
 }
 
 // ----------------------
@@ -234,16 +253,12 @@ function parseTTData(buffer) {
 // ----------------------
 function dedupe(records) {
   const map = new Map();
-
-  for (const r of records) {
-    map.set(r.shift_key, r);
-  }
-
+  for (const r of records) map.set(r.shift_key, r);
   return [...map.values()];
 }
 
 // ----------------------
-// SUPABASE UPLOAD
+// UPLOAD
 // ----------------------
 async function uploadToSupabase(records) {
   for (let i = 0; i < records.length; i += CHUNK_SIZE) {
@@ -251,15 +266,9 @@ async function uploadToSupabase(records) {
 
     const { error } = await supabase
       .from("deputy_shifts")
-      .upsert(chunk, {
-        onConflict: "shift_key",
-      });
+      .upsert(chunk, { onConflict: "shift_key" });
 
     if (error) throw new Error(JSON.stringify(error));
-
-    console.log(
-      `✅ Synced ${Math.min(i + CHUNK_SIZE, records.length)}/${records.length}`
-    );
   }
 }
 
@@ -269,59 +278,45 @@ async function uploadTT(records) {
 
     const { error } = await supabase
       .from("TT_Games")
-      .upsert(chunk, {
-        onConflict: "game_key",
-      });
+      .upsert(chunk, { onConflict: "game_key" });
 
     if (error) throw new Error(JSON.stringify(error));
-
-    console.log(
-      `✅ TT Synced ${Math.min(i + CHUNK_SIZE, records.length)}/${records.length}`
-    );
   }
 }
 
 // ----------------------
 // MAIN
 // ----------------------
+// ----------------------
+// MAIN
+// ----------------------
+// ----------------------
+// MAIN
+// ----------------------
 async function sync() {
+  await logStart("excel-sync");
   try {
     console.log("📥 Starting sync...");
 
+    await logStart("deputy");
+
     const buffer = await getExcelBuffer();
 
-    // ----------------------
-    // DEPUTY
-    // ----------------------
-    console.log("📊 Parsing DeputyRawData...");
     let deputy = parseDeputyData(buffer);
-
-    console.log(`📦 Parsed ${deputy.length} rows`);
-
-    console.log("🧹 Deduplicating...");
     deputy = dedupe(deputy);
 
-    console.log(`📦 After dedupe: ${deputy.length}`);
-
-    console.log("🚀 Uploading Deputy...");
     await uploadToSupabase(deputy);
 
-    // ----------------------
-    // TT
-    // ----------------------
-    console.log("📊 Parsing TTRawData...");
     const tt = parseTTData(buffer);
-
-    console.log(`📦 Parsed TT rows: ${tt.length}`);
-
-    console.log("🚀 Uploading TT...");
     await uploadTT(tt);
+
+    await logSuccess(deputy.length + tt.length);
 
     console.log("🎉 Sync complete!");
   } catch (err) {
-    console.error("💥 Sync failed:");
-    console.error(err.message || err);
+    console.error("💥 Sync failed:", err);
+    await logFailure(err);
   }
 }
-
+console.log("LOG TEST START");
 sync();
