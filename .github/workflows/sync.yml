@@ -2,8 +2,8 @@ name: Sync Excel → Supabase
 
 on:
   schedule:
-    - cron: "0 */6 * * *"
-  workflow_dispatch:
+- cron: "*/5 * * * *"
+workflow_dispatch:
 
 jobs:
   sync:
