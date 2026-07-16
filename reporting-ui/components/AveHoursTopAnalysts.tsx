@@ -3,6 +3,22 @@
 import { useMemo } from "react";
 
 // -------------------------
+// THEME
+// -------------------------
+const THEME = {
+  bg: "#0b1220",
+  panel: "#0f1b2d",
+  panelSoft: "#111f35",
+  border: "rgba(148,163,184,0.15)",
+  text: "#e5e7eb",
+  muted: "#94a3b8",
+  accent: "#38bdf8",
+  success: "#22c55e",
+  warn: "#f59e0b",
+  danger: "#ef4444",
+};
+
+// -------------------------
 // NORMALISE
 // -------------------------
 const norm = (v: any) =>
@@ -19,9 +35,6 @@ export default function AveHoursTopAnalysts({
   deputyData: any[];
   ttData: any[];
 }) {
-  // -------------------------
-  // BUILD BASE DATA
-  // -------------------------
   const data = useMemo(() => {
     const map = new Map<
       string,
@@ -43,12 +56,8 @@ export default function AveHoursTopAnalysts({
       map.set(key, existing);
     };
 
-    // -------------------------
-    // DEPUTY HOURS
-    // -------------------------
     (deputyData ?? []).forEach((r) => {
       const area = String(r.area_name ?? "").trim();
-
       if (area !== "Home Analyst" && area !== "Office Analyst") return;
 
       const name = r.employee_name;
@@ -57,9 +66,6 @@ export default function AveHoursTopAnalysts({
       upsert(name, Number(r.total_hours ?? 0), 0);
     });
 
-    // -------------------------
-    // TT GAMES
-    // -------------------------
     (ttData ?? []).forEach((r) => {
       const home = r.home_allocated;
       const away = r.away_allocated;
@@ -80,140 +86,134 @@ export default function AveHoursTopAnalysts({
 
   const max = Math.max(...data.map((d) => d.avg), 1);
 
-  // -------------------------
-  // SORTED VIEWS
-  // -------------------------
-  const top10 = [...data]
-    .sort((a, b) => a.avg - b.avg)
-    .slice(0, 10);
+  const top10 = [...data].sort((a, b) => a.avg - b.avg).slice(0, 10);
+  const bottom10 = [...data].sort((a, b) => b.avg - a.avg).slice(0, 10);
 
-  const bottom10 = [...data]
-    .sort((a, b) => b.avg - a.avg)
-    .slice(0, 10);
+  const renderTable = (list: any[], tone: "good" | "bad", title: string) => {
+    return (
+      <div
+        style={{
+          background: THEME.panel,
+          border: `1px solid ${THEME.border}`,
+          borderRadius: 14,
+          overflow: "hidden",
+        }}
+      >
+        {/* HEADER */}
+        <div
+          style={{
+            padding: "12px 14px",
+            borderBottom: `1px solid ${THEME.border}`,
+            background: THEME.panelSoft,
+            fontWeight: 700,
+            fontSize: 20,
+            color: THEME.text,
+          }}
+        >
+          {title}
+        </div>
 
-  // -------------------------
-  // RENDER ROWS
-  // -------------------------
-  const renderList = (list: any[], tone: "good" | "bad") => (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {list.map((d, i) => {
-        const percent = Math.min((d.avg / max) * 100, 100);
+        {/* COLUMN HEADER */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "60px 1fr 90px 90px 90px 140px",
+            padding: "10px 14px",
+            fontSize: 15,
+            fontWeight: 700,
+            color: THEME.muted,
+            borderBottom: `1px solid ${THEME.border}`,
 
-        const color =
-          tone === "good"
-            ? i === 0
-              ? "#22c55e"
-              : "#3b82f6"
-            : i === 0
-            ? "#ef4444"
-            : "#f97316";
-
-        return (
-          <div
-            key={d.name}
-            style={{
-              display: "flex",
               alignItems: "center",
-              gap: 10,
-              padding: "8px 10px",
-              borderRadius: 10,
-              background: "#fafafa",
-              border: "1px solid #f0f0f0",
-            }}
-          >
-            {/* Rank */}
+  justifyItems: "center", // ⬅️ centers horizontally
+  textAlign: "center",    // ⬅️ ensures text centering
+          }}
+        >
+          <div>#</div>
+          <div>Analyst</div>
+          <div>Avg</div>
+          <div>Hours</div>
+          <div>Games</div>
+        </div>
+
+        {list.map((d, i) => {
+          const percent = Math.min((d.avg / max) * 100, 100);
+
+          const color =
+            tone === "good"
+              ? i === 0
+                ? THEME.success
+                : THEME.accent
+              : i === 0
+              ? THEME.danger
+              : THEME.warn;
+
+          return (
             <div
-              style={{
-                width: 26,
-                height: 26,
-                borderRadius: 8,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 12,
-                fontWeight: 700,
-                background: color,
-                color: "white",
-              }}
+              key={d.name}
+style={{
+  display: "grid",
+  gridTemplateColumns: "60px 1fr 90px 90px 90px 140px",
+  padding: "10px 14px",
+  fontSize: 14,
+  borderBottom: `1px solid ${THEME.border}`,
+  alignItems: "center",
+  justifyItems: "center", // ⬅️ horizontal centering
+  textAlign: "center",
+  background: i % 2 === 0 ? THEME.panel : THEME.panelSoft,
+  color: THEME.text,
+}}
             >
-              {i + 1}
-            </div>
+              {/* Rank */}
+              <div style={{ fontWeight: 700, color: THEME.muted }}>
+                {i + 1}
+              </div>
 
-            {/* Name */}
-            <div style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>
-              {d.name}
-            </div>
+              {/* Name */}
+              <div style={{ fontWeight: 600 }}>{d.name}</div>
 
-            {/* Value */}
-            <div style={{ fontSize: 12, fontWeight: 600 }}>
-              {d.avg.toFixed(2)}
-            </div>
+              {/* Avg */}
+              <div style={{ fontWeight: 600 }}>
+                {d.avg.toFixed(2)}
+              </div>
 
-            {/* Bar */}
-            <div
-              style={{
-                width: 120,
-                height: 6,
-                background: "#eee",
-                borderRadius: 999,
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  width: `${percent}%`,
-                  height: "100%",
-                  background: color,
-                }}
-              />
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
+              {/* Hours */}
+              <div style={{ color: THEME.muted }}>
+                {d.hours.toFixed(1)}
+              </div>
 
-  // -------------------------
-  // UI
-  // -------------------------
+              {/* Games */}
+              <div style={{ color: THEME.muted }}>
+                {d.games.toFixed(1)}
+              </div>
+
+
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div
       style={{
         marginTop: 20,
         display: "grid",
         gridTemplateColumns: "1fr 1fr",
-        gap: 16,
+        gap: 28,
+        background: THEME.bg,
+        padding: 16,
+        borderRadius: 16,
       }}
     >
-      {/* TOP 10 */}
-      <div
-        style={{
-          padding: 16,
-          background: "white",
-          border: "1px solid #eee",
-          borderRadius: 12,
-        }}
-      >
-        <h3 style={{ margin: 0, marginBottom: 12 }}>
-          🟢 Top 10 Most Efficient
-        </h3>
-        {renderList(top10, "good")}
-      </div>
+      {renderTable(top10, "good", "🟢 Top 10 Most Efficient Analysts")}
 
-      {/* BOTTOM 10 */}
-      <div
-        style={{
-          padding: 16,
-          background: "white",
-          border: "1px solid #eee",
-          borderRadius: 12,
-        }}
-      >
-        <h3 style={{ margin: 0, marginBottom: 12 }}>
-          🔴 Bottom 10 Least Efficient
-        </h3>
-        {renderList(bottom10, "bad")}
-      </div>
+      {renderTable(
+        bottom10,
+        "bad",
+        "🔴 Bottom 10 Least Efficient Analysts"
+      )}
     </div>
   );
 }

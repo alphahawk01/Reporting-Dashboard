@@ -1,7 +1,5 @@
 const axios = require("axios");
 const XLSX = require("xlsx");
-const fs = require("fs");
-const path = require("path");
 const { createClient } = require("@supabase/supabase-js");
 
 // ----------------------
@@ -11,29 +9,6 @@ if (process.env.CI !== "true") {
   require("dotenv").config();
 }
 
-// ----------------------
-// REQUIRED ENV CHECK
-// ----------------------
-const requiredEnv = [
-  "SUPABASE_URL",
-  "SUPABASE_SERVICE_KEY",
-  "AZURE_TENANT_ID",
-  "AZURE_CLIENT_ID",
-  "AZURE_CLIENT_SECRET",
-  "SITE_ID",
-  "DRIVE_ID",
-  "FILE_ID",
-];
-
-for (const key of requiredEnv) {
-  if (!process.env[key]) {
-    throw new Error(`❌ Missing env var: ${key}`);
-  }
-}
-
-// ----------------------
-// SUPABASE CLIENT
-// ----------------------
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
@@ -41,14 +16,12 @@ const supabase = createClient(
 
 const CHUNK_SIZE = 500;
 
-// ----------------------
-// SYNC LOGGING
-// ----------------------
 let syncLogId = null;
 
+// ----------------------
+// LOGGING
+// ----------------------
 async function logStart(source) {
-  console.log("🟡 Creating sync log...");
-
   const { data, error } = await supabase
     .from("sync_logs")
     .insert({
@@ -60,12 +33,7 @@ async function logStart(source) {
     .select()
     .single();
 
-  if (error) {
-    console.error("❌ logStart FAILED:", error);
-    throw error;
-  }
-
-  console.log("🟢 sync_log created:", data);
+  if (error) throw error;
 
   syncLogId = data.id;
 }
@@ -94,49 +62,6 @@ async function logFailure(err) {
       error_message: err.message || String(err),
     })
     .eq("id", syncLogId);
-}
-
-// ----------------------
-// GRAPH TOKEN
-// ----------------------
-async function getToken() {
-  const res = await axios.post(
-    `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/oauth2/v2.0/token`,
-    new URLSearchParams({
-      client_id: process.env.AZURE_CLIENT_ID,
-      client_secret: process.env.AZURE_CLIENT_SECRET,
-      scope: "https://graph.microsoft.com/.default",
-      grant_type: "client_credentials",
-    })
-  );
-
-  return res.data.access_token;
-}
-
-// ----------------------
-// DOWNLOAD FILE
-// ----------------------
-async function getExcelBuffer() {
-  const token = await getToken();
-
-  const metaUrl =
-    `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}` +
-    `/drives/${process.env.DRIVE_ID}` +
-    `/items/${process.env.FILE_ID}`;
-
-  const meta = await axios.get(metaUrl, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  const downloadUrl = meta.data["@microsoft.graph.downloadUrl"];
-
-  if (!downloadUrl) throw new Error("No download URL returned");
-
-  const file = await axios.get(downloadUrl, {
-    responseType: "arraybuffer",
-  });
-
-  return file.data;
 }
 
 // ----------------------
@@ -179,45 +104,109 @@ function getSheet(workbook, names) {
 }
 
 // ----------------------
+// AUTH (GRAPH)
+// ----------------------
+async function getToken() {
+  const res = await axios.post(
+    `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/oauth2/v2.0/token`,
+    new URLSearchParams({
+      client_id: process.env.AZURE_CLIENT_ID,
+      client_secret: process.env.AZURE_CLIENT_SECRET,
+      scope: "https://graph.microsoft.com/.default",
+      grant_type: "client_credentials",
+    })
+  );
+
+  return res.data.access_token;
+}
+
+// ----------------------
+// DOWNLOAD EXCEL
+// ----------------------
+async function getExcelBuffer() {
+  const token = await getToken();
+
+  const metaUrl =
+    `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}` +
+    `/drives/${process.env.DRIVE_ID}` +
+    `/items/${process.env.FILE_ID}`;
+
+  const meta = await axios.get(metaUrl, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  const downloadUrl = meta.data["@microsoft.graph.downloadUrl"];
+
+  console.log("📥 Downloading Excel file...");
+
+  const file = await axios.get(downloadUrl, {
+    responseType: "arraybuffer",
+  });
+
+  return file.data;
+}
+
+// ----------------------
 // PARSE DEPUTY
 // ----------------------
 function parseDeputyData(buffer) {
   const workbook = XLSX.read(buffer, { type: "buffer" });
   const sheet = getSheet(workbook, ["DeputyRawData"]);
 
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-  return rows.slice(1).filter(r => r && r[0]).map(r => {
-    const employee = r[0];
-    const date = r[2];
+console.log("Raw rows:", rows.length);
 
-    const start = excelTimeToString(r[3]);
-    const end = excelTimeToString(r[4]);
+let skipped = 0;
 
-    return {
-      shift_key: `${employee}_${date}_${start}_${end}`,
-      employee_name: employee,
-      level: String(r[1] || ""),
-      shift_date: excelDateToJS(date),
-      start_time: start,
-      end_time: end,
-      meal_break: excelTimeToString(r[5]),
-      total_hours: Number(r[6]) || 0,
-      total_cost: Number(r[7]) || 0,
-      employee_comment: r[8] || null,
-      hourly_rate: Number(r[9]) || 0,
-      area_name: r[10] || null,
-      comment: r[11] || null,
-      day_name: r[12] || null,
-      month_name: r[13] || null,
-      week: r[14] ?? null,
-      source_file: "DeputyRawData",
-    };
-  });
+const filtered = rows.slice(1).filter((r, i) => {
+  if (!r || !r[0]) {
+    skipped++;
+
+    console.log(
+      "Skipped row",
+      i + 2,
+      JSON.stringify(r)
+    );
+
+    return false;
+  }
+
+  return true;
+});
+
+console.log("Skipped rows:", skipped);
+console.log("Rows after filter:", filtered.length);
+
+return filtered.map(r => ({
+  shift_key: `${r[0]}_${r[2]}_${r[3]}_${r[4]}`,
+
+  employee_name: r[0],
+  level: String(r[1] || ""),
+
+  shift_date: excelDateToJS(r[2]),
+  start_time: excelTimeToString(r[3]),
+  end_time: excelTimeToString(r[4]),
+  meal_break: excelTimeToString(r[5]),
+
+  total_hours: Number(r[6]) || 0,
+  total_cost: Number(r[7]) || 0,
+
+  employee_comment: r[8] || null,
+  hourly_rate: Number(r[9]) || 0,
+
+  area_name: String(r[10] || "").trim(),
+
+  comment: r[11] || null,
+  day_name: r[12] || null,
+  month_name: r[13] || null,
+  week: r[14] == null || r[14] === "" ? 0 : Number(r[14]),
+  source_file: "DeputyRawData",
+}));
 }
 
 // ----------------------
-// PARSE TT
+// PARSE TT (FIXED)
 // ----------------------
 function parseTTData(buffer) {
   const workbook = XLSX.read(buffer, { type: "buffer" });
@@ -225,44 +214,59 @@ function parseTTData(buffer) {
 
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-  return rows.slice(1).filter(r => r && r[0]).map(r => ({
-    game_key: [
-      excelDateToJS(r[0]),
-      r[1],
-      r[2],
-      r[3],
-      r[4],
-    ].join("|"),
+  return rows
+    .slice(1)
+    .filter(r => r && r.length)
+    .map(r => ({
+      game_key: `${r[0]}_${r[3]}_${r[4]}`,
 
-    Date: excelDateToJS(r[0]),
-    Competition: r[1],
-    Round: r[2],
-    home_team: r[3],
-    away_team: r[4],
-    home_allocated: r[5],
-    away_allocated: r[6],
-    Location: r[7],
-    Additional: r[8],
-    Week: r[9],
-    Column11: r[10],
-  }));
+      // 🔥 FIX HERE
+      Date: excelDateToJS(r[0]),
+
+      Competition: r[1] || null,
+      Round: r[2] || null,
+
+      home_team: r[3] || null,
+      away_team: r[4] || null,
+
+      home_allocated: r[5] || null,
+      away_allocated: r[6] || null,
+
+      Location: r[7] || null,
+      Additional: r[8] || null,
+      Week: r[9] == null || r[9] === "" ? 0 : Number(r[9]),
+      Column11: r[10] || null
+    }));
 }
-
 // ----------------------
 // DEDUPE
 // ----------------------
-function dedupe(records) {
+function dedupe(records, key) {
   const map = new Map();
-  for (const r of records) map.set(r.shift_key, r);
+
+  for (const r of records) {
+    if (map.has(r[key])) {
+      console.log("\n==================================");
+      console.log("DUPLICATE SHIFT FOUND");
+      console.log("Key:", r[key]);
+      console.log("First Row:", map.get(r[key]));
+      console.log("Second Row:", r);
+      console.log("==================================\n");
+    }
+
+    map.set(r[key], r);
+  }
+
   return [...map.values()];
 }
-
 // ----------------------
-// UPLOAD
+// UPLOAD DEPUTY
 // ----------------------
 async function uploadToSupabase(records) {
   for (let i = 0; i < records.length; i += CHUNK_SIZE) {
     const chunk = records.slice(i, i + CHUNK_SIZE);
+
+    console.log("Uploading Deputy chunk:", chunk.length);
 
     const { error } = await supabase
       .from("deputy_shifts")
@@ -272,9 +276,14 @@ async function uploadToSupabase(records) {
   }
 }
 
+// ----------------------
+// UPLOAD TT
+// ----------------------
 async function uploadTT(records) {
   for (let i = 0; i < records.length; i += CHUNK_SIZE) {
     const chunk = records.slice(i, i + CHUNK_SIZE);
+
+    console.log("Uploading TT chunk:", chunk.length);
 
     const { error } = await supabase
       .from("TT_Games")
@@ -285,29 +294,36 @@ async function uploadTT(records) {
 }
 
 // ----------------------
-// MAIN
-// ----------------------
-// ----------------------
-// MAIN
-// ----------------------
-// ----------------------
-// MAIN
+// MAIN SYNC
 // ----------------------
 async function sync() {
-  await logStart("excel-sync");
   try {
     console.log("📥 Starting sync...");
 
-    await logStart("deputy");
+    await logStart("excel-sync");
 
     const buffer = await getExcelBuffer();
 
+    // ----------------------
+    // DEPUTY
+    // ----------------------
     let deputy = parseDeputyData(buffer);
-    deputy = dedupe(deputy);
+    deputy = dedupe(deputy, "shift_key");
 
+    console.log("DEPUTY ROWS:", deputy.length);
+
+    // ----------------------
+    // TT (FIXED)
+    // ----------------------
+    let tt = parseTTData(buffer);
+    tt = dedupe(tt, "game_key");
+
+    console.log("TT ROWS:", tt.length);
+
+    // ----------------------
+    // UPLOAD
+    // ----------------------
     await uploadToSupabase(deputy);
-
-    const tt = parseTTData(buffer);
     await uploadTT(tt);
 
     await logSuccess(deputy.length + tt.length);
@@ -318,5 +334,5 @@ async function sync() {
     await logFailure(err);
   }
 }
-console.log("LOG TEST START");
+
 sync();

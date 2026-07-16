@@ -1,0 +1,99 @@
+[
+  {
+    "id": "alex-doe",
+    "name": "Alex Doe",
+    "role": "Senior Performance Analyst",
+
+    "kpis": {
+      "hours": 1200,
+      "games": 340,
+      "cost": 48000,
+      "accuracy": 91
+    },
+
+    "benchmark": {
+      "accuracy": 85,
+      "speed": 72,
+      "depth": 90,
+      "efficiency": 78,
+      "coverage": 66
+    },
+
+    "strengths": [
+      {
+        "label": "EPL tactical specialist",
+        "tag": "High Impact"
+      },
+      {
+        "label": "Fast turnaround time",
+        "tag": "Efficiency"
+      },
+      {
+        "label": "High accuracy opponent analysis",
+        "tag": "Accuracy"
+      }
+    ],
+
+    "weaknesses": [
+      "Limited Bundesliga coverage",
+      "Slower on complex multi-match fixtures",
+      "Lower international sample size"
+    ],
+
+    "leagues": [
+      { "name": "EPL", "value": 42 },
+      { "name": "UCL", "value": 31 },
+      { "name": "La Liga", "value": 22 },
+      { "name": "MLS", "value": 15 }
+    ],
+
+    "teams": [
+      { "name": "Manchester City", "count": 18 },
+      { "name": "Real Madrid", "count": 14 },
+      { "name": "PSG", "count": 11 },
+      { "name": "Bayern Munich", "count": 9 }
+    ]
+  },
+
+  {
+    "id": "sam-lee",
+    "name": "Sam Lee",
+    "role": "Performance Analyst",
+
+    "kpis": {
+      "hours": 980,
+      "games": 280,
+      "cost": 39000,
+      "accuracy": 87
+    },
+
+    "benchmark": {
+      "accuracy": 80,
+      "speed": 75,
+      "depth": 82,
+      "efficiency": 85,
+      "coverage": 70
+    },
+
+    "strengths": [
+      {
+        "label": "Efficient match processing",
+        "tag": "Efficiency"
+      }
+    ],
+
+    "weaknesses": [
+      "Lower depth in tactical reports"
+    ],
+
+    "leagues": [
+      { "name": "EPL", "value": 38 },
+      { "name": "MLS", "value": 25 }
+    ],
+
+    "teams": [
+      { "name": "Arsenal", "count": 10 },
+      { "name": "Inter Milan", "count": 8 }
+    ]
+  }
+]

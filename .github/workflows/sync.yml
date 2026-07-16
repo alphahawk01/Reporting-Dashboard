@@ -3,7 +3,11 @@ name: Sync Excel → Supabase
 on:
   schedule:
     - cron: "0 */6 * * *" # every 6 hours
+<<<<<<< HEAD
 workflow_dispatch:
+=======
+  workflow_dispatch:
+>>>>>>> 1589755 (merge remote changes)
 
 jobs:
   sync:

@@ -9,9 +9,25 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
-  ReferenceLine,
   Cell,
+  ReferenceLine,
 } from "recharts";
+
+// -------------------------
+// THEME
+// -------------------------
+const THEME = {
+  bg: "#0b1220",
+  panel: "#0f1b2d",
+  panelSoft: "#111f35",
+  border: "rgba(148,163,184,0.15)",
+  text: "#e5e7eb",
+  muted: "#94a3b8",
+  accent: "#38bdf8",
+  success: "#22c55e",
+  warn: "#f59e0b",
+  danger: "#ef4444",
+};
 
 // -------------------------
 // NORMALISER
@@ -34,6 +50,8 @@ export default function AveHoursPerGame({
 
   const selected = norm(analyst);
   const isAll = analyst === "all";
+
+  const SLA = 7;
 
   // -------------------------
   // ANALYST LIST
@@ -61,45 +79,25 @@ export default function AveHoursPerGame({
   // CORE DATA BUILD
   // -------------------------
   const chartData = useMemo(() => {
-    const weeks = new Map<
-      string,
-      { week: string; hours: number; games: number }
-    >();
+    const weeks = new Map<string, { week: string; hours: number; games: number }>();
 
-// -------------------------
-// DEPUTY HOURS (FILTERED)
-// -------------------------
-(deputyData ?? []).forEach((r) => {
-  const week = String(r.week ?? "").trim();
-  if (!week) return;
+    (deputyData ?? []).forEach((r) => {
+      const week = String(r.week ?? "").trim();
+      if (!week) return;
 
-  const area = String(r.area_name ?? "").trim();
+      const area = String(r.area_name ?? "").trim();
+      const allowed = area === "Home Analyst" || area === "Office Analyst";
+      if (!allowed) return;
 
-  // ✅ ONLY INCLUDE VALID ANALYST WORK
-  const allowed =
-    area === "Home Analyst" ||
-    area === "Office Analyst";
+      const match = isAll || norm(r.employee_name) === selected;
+      if (!match) return;
 
-  if (!allowed) return;
+      const existing = weeks.get(week) ?? { week, hours: 0, games: 0 };
 
-  const match =
-    isAll || norm(r.employee_name) === selected;
+      existing.hours += Number(r.total_hours ?? 0);
+      weeks.set(week, existing);
+    });
 
-  if (!match) return;
-
-  const existing = weeks.get(week) ?? {
-    week,
-    hours: 0,
-    games: 0,
-  };
-
-  existing.hours += Number(r.total_hours ?? 0);
-
-  weeks.set(week, existing);
-});
-    // -------------------------
-    // TT GAMES
-    // -------------------------
     (ttData ?? []).forEach((r) => {
       const week = String(r.week ?? r.Week ?? "").trim();
       if (!week) return;
@@ -111,18 +109,12 @@ export default function AveHoursPerGame({
       } else {
         if (norm(r.home_allocated) === selected) gameCredit += 1;
         if (norm(r.away_allocated) === selected) gameCredit += 1;
-
         gameCredit = gameCredit / 2;
       }
 
-      const existing = weeks.get(week) ?? {
-        week,
-        hours: 0,
-        games: 0,
-      };
+      const existing = weeks.get(week) ?? { week, hours: 0, games: 0 };
 
       existing.games += gameCredit;
-
       weeks.set(week, existing);
     });
 
@@ -132,45 +124,65 @@ export default function AveHoursPerGame({
         week: w.week,
         hours: Number(w.hours.toFixed(2)),
         games: Number(w.games.toFixed(2)),
-        avg:
-          w.games > 0
-            ? Number((w.hours / w.games).toFixed(2))
-            : 0,
+        avg: w.games > 0 ? Number((w.hours / w.games).toFixed(2)) : 0,
       }));
   }, [deputyData, ttData, selected, isAll]);
 
+  // -------------------------
+  // TOTALS
+  // -------------------------
+  const analystTotals = useMemo(() => {
+    const totalGames = chartData.reduce((s, w) => s + w.games, 0);
+    const totalHours = chartData.reduce((s, w) => s + w.hours, 0);
+    return { games: totalGames, hours: totalHours };
+  }, [chartData]);
+
+  const analystAvg = useMemo(() => {
+    const totalHours = chartData.reduce((s, w) => s + w.hours, 0);
+    const totalGames = chartData.reduce((s, w) => s + w.games, 0);
+    return totalGames > 0 ? totalHours / totalGames : 0;
+  }, [chartData]);
+
+  // -------------------------
+  // TOOLTIP
+  // -------------------------
   const CustomTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload?.length) return null;
+    if (!active || !payload?.length) return null;
 
-  const data = payload[0]?.payload;
+    const data = payload[0]?.payload;
 
-  return (
-    <div
-      style={{
-        background: "white",
-        border: "1px solid #eee",
-        padding: 12,
-        borderRadius: 10,
-        fontSize: 13,
-        boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
-      }}
-    >
-      <div style={{ fontWeight: 700, marginBottom: 6 }}>
-        Week {label}
+    return (
+      <div
+        style={{
+          background: THEME.panel,
+          border: `1px solid ${THEME.border}`,
+          padding: 12,
+          borderRadius: 10,
+          fontSize: 12,
+          color: THEME.text,
+        }}
+      >
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>
+          Week {label}
+        </div>
+
+        <div>Total Games: <b>{data.games.toFixed(2)}</b></div>
+        <div>Total Hours: <b>{data.hours.toFixed(2)}</b></div>
+
+        <div>
+          Hours/Game:{" "}
+          <b
+            style={{
+              color:
+                data.avg <= SLA ? THEME.success : THEME.danger,
+            }}
+          >
+            {data.avg.toFixed(2)}
+          </b>
+        </div>
       </div>
-
-      <div>Total Games: <b>{data.games.toFixed(2)}</b></div>
-      <div>Total Hours: <b>{data.hours.toFixed(2)}</b></div>
-      <div>Avg Hours/Game: <b>{data.avg.toFixed(2)}</b></div>
-    </div>
-  );
-};
-const overall = useMemo(() => {
-  const totalHours = chartData.reduce((sum, w) => sum + w.hours, 0);
-  const totalGames = chartData.reduce((sum, w) => sum + w.games, 0);
-
-  return totalGames > 0 ? totalHours / totalGames : 0;
-}, [chartData]);
+    );
+  };
 
   // -------------------------
   // UI
@@ -180,41 +192,113 @@ const overall = useMemo(() => {
       style={{
         marginTop: 30,
         padding: 24,
-        background: "white",
-        border: "1px solid #eee",
+        background: THEME.panel,
+        border: `1px solid ${THEME.border}`,
         borderRadius: 16,
-        boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+        color: THEME.text,
       }}
     >
       {/* HEADER */}
-  <div style={{ marginBottom: 16 }}>
-  <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
-    Avg Hours per Game
-  </h2>
+      <div style={{ marginBottom: 16 }}>
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
+Weekly Average Hours per Game
+        </h2>
 
-  <p style={{ margin: 0, fontSize: 12, color: "#666" }}>
-    Deputy hours ÷ TT game allocations
-  </p>
+        <p style={{ margin: 0, fontSize: 12, color: THEME.muted }}>
+          Deputy hours ÷ TT game allocations
+        </p>
 
-  {/* GLOBAL KPI */}
-  <div
-    style={{
-      marginTop: 10,
-      padding: "10px 12px",
-      borderRadius: 10,
-      background: "#f8fafc",
-      border: "1px solid #eee",
-      display: "inline-block",
-    }}
-  >
-    <div style={{ fontSize: 12, color: "#666" }}>
-      Overall Avg (selected analyst)
-    </div>
-    <div style={{ fontSize: 20, fontWeight: 700 }}>
-      {overall.toFixed(2)} hrs/game
-    </div>
-  </div>
-</div>
+        {/* KPI ROW */}
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            marginTop: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          {/* SLA */}
+          <div
+            style={{
+              padding: "10px 12px",
+              borderRadius: 10,
+              background: THEME.panelSoft,
+              border: `1px solid ${THEME.border}`,
+              minWidth: 170,
+            }}
+          >
+            <div style={{ fontSize: 12, color: THEME.muted }}>
+              SLA Target
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 700 }}>
+              {SLA.toFixed(1)} hrs/game
+            </div>
+          </div>
+
+          {/* AVG */}
+          <div
+            style={{
+              padding: "10px 12px",
+              borderRadius: 10,
+              background: THEME.panelSoft,
+              border: `1px solid ${THEME.border}`,
+              minWidth: 170,
+            }}
+          >
+            <div style={{ fontSize: 12, color: THEME.muted }}>
+              Avg Hours / Game
+            </div>
+            <div
+              style={{
+                fontSize: 20,
+                fontWeight: 700,
+                color:
+                  analystAvg <= SLA ? THEME.success : THEME.danger,
+              }}
+            >
+              {analystAvg.toFixed(2)}
+            </div>
+          </div>
+
+          {!isAll && (
+            <>
+              <div
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  background: THEME.panelSoft,
+                  border: `1px solid ${THEME.border}`,
+                  minWidth: 170,
+                }}
+              >
+                <div style={{ fontSize: 12, color: THEME.muted }}>
+                  Total Games
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 700 }}>
+                  {analystTotals.games.toFixed(1)}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 10,
+                  background: THEME.panelSoft,
+                  border: `1px solid ${THEME.border}`,
+                  minWidth: 170,
+                }}
+              >
+                <div style={{ fontSize: 12, color: THEME.muted }}>
+                  Total Hours
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 700 }}>
+                  {analystTotals.hours.toFixed(1)}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
 
       {/* FILTER */}
       <div style={{ marginBottom: 16 }}>
@@ -224,12 +308,13 @@ const overall = useMemo(() => {
           style={{
             padding: "8px 10px",
             borderRadius: 8,
-            border: "1px solid #ddd",
+            border: `1px solid ${THEME.border}`,
             fontSize: 13,
+            background: THEME.panelSoft,
+            color: THEME.text,
           }}
         >
           <option value="all">All Analysts</option>
-
           {analysts.map((a) => (
             <option key={a.key} value={a.label}>
               {a.label}
@@ -242,24 +327,35 @@ const overall = useMemo(() => {
       <div style={{ height: 350 }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-            <XAxis dataKey="week" />
-            <YAxis />
-<Tooltip content={<CustomTooltip />} />
-<ReferenceLine
-  y={overall}
-  stroke="#ef4444"
-  strokeDasharray="4 4"
-  label="Avg"
-/>
-<Bar dataKey="avg" radius={[6, 6, 0, 0]}>
-  {chartData.map((entry, index) => {
-    const color =
-      entry.avg <= overall ? "#22c55e" : "#ef4444";
+            <CartesianGrid
+              strokeDasharray="3 3"
+              stroke={THEME.border}
+            />
 
-    return <Cell key={`cell-${index}`} fill={color} />;
-  })}
-</Bar>
+            <XAxis dataKey="week" stroke={THEME.muted} />
+            <YAxis stroke={THEME.muted} />
+
+            <Tooltip content={<CustomTooltip />} />
+
+            <ReferenceLine
+              y={SLA}
+              stroke={THEME.danger}
+              strokeDasharray="4 4"
+              label={{ value: "SLA", fill: THEME.muted }}
+            />
+
+            <Bar dataKey="avg" radius={[6, 6, 0, 0]}>
+              {chartData.map((entry, index) => (
+                <Cell
+                  key={index}
+                  fill={
+                    entry.avg <= SLA
+                      ? THEME.success
+                      : THEME.danger
+                  }
+                />
+              ))}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>

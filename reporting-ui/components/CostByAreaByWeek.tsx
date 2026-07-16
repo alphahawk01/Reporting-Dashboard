@@ -179,13 +179,32 @@ export default function CostByAreaByWeek({
 
     const grouped = Object.values(groupedMap);
 
-    const labels = Array.from(
-      new Set(grouped.map((g: any) => g.label))
-    );
+const labels =
+  view === "week"
+    ? Array.from(
+        new Set(
+          grouped
+            .map((g: any) => ({
+              label: g.label,
+              week: Number(
+                g.label.match(/^W(-?\d+)/)?.[1] ?? 0
+              ),
+            }))
+            .sort((a, b) => a.week - b.week)
+            .map((x) => x.label)
+        )
+      )
+    : Array.from(
+        new Set(grouped.map((g: any) => g.label))
+      ).sort(
+        (a, b) =>
+          new Date(`1 ${a}`).getTime() -
+          new Date(`1 ${b}`).getTime()
+      );
 
-    const areas = Array.from(
-      new Set(grouped.map((g: any) => g.area))
-    );
+const areas = Array.from(
+  new Set(grouped.map((g: any) => g.area))
+).sort();
 
     const chartData = labels.map((label) => {
       const row: any = {

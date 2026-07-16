@@ -12,7 +12,21 @@ import {
   CartesianGrid,
 } from "recharts";
 
-import { getTTAllocations } from "@/lib/ttCalculations";
+// -------------------------
+// THEME
+// -------------------------
+const THEME = {
+  bg: "#0b1220",
+  panel: "#0f1b2d",
+  panelSoft: "#111f35",
+  border: "rgba(148,163,184,0.15)",
+  text: "#e5e7eb",
+  muted: "#94a3b8",
+  accent: "#38bdf8",
+  success: "#22c55e",
+  warn: "#f59e0b",
+  danger: "#ef4444",
+};
 
 // -------------------------
 // HELPERS
@@ -27,10 +41,35 @@ const title = (v: string) =>
     .toLowerCase()
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
+// -------------------------
+// GLOW BAR SHAPE
+// -------------------------
+const GlowBar = (props: any) => {
+  const { x, y, width, height, fill, isActive } = props;
+
+  return (
+    <g>
+      {/* base bar */}
+      <rect x={x} y={y} width={width} height={height} fill={fill} rx={6} />
+
+      {/* glow overlay */}
+      {isActive && (
+        <rect
+          x={x}
+          y={y}
+          width={width}
+          height={height}
+          fill={fill}
+          rx={6}
+          filter="url(#glow)"
+          opacity={0.9}
+        />
+      )}
+    </g>
+  );
+};
+
 export default function TTGames({ data }: { data: any[] }) {
-  // -------------------------
-  // LOCAL FILTER STATE
-  // -------------------------
   const [week, setWeek] = useState("all");
   const [month, setMonth] = useState("all");
   const [analyst, setAnalyst] = useState("all");
@@ -49,153 +88,188 @@ export default function TTGames({ data }: { data: any[] }) {
   }, [data]);
 
   // -------------------------
-  // UNIQUE FILTER OPTIONS (FIXED + SORTED)
+  // FILTER OPTIONS
   // -------------------------
-  const analysts = useMemo(() => {
-    const set = new Set<string>();
-
-    rows.forEach((r) => {
-      if (r.home) set.add(r.home);
-      if (r.away) set.add(r.away);
-    });
-
-    return Array.from(set)
-      .sort()
-      .map((v) => ({
-        key: v,
-        label: title(v),
-      }));
-  }, [rows]);
-
   const weeks = useMemo(() => {
     const set = new Set(rows.map((r) => r.week).filter(Boolean));
     return Array.from(set).sort((a, b) => Number(a) - Number(b));
   }, [rows]);
 
+  const MONTH_ORDER = [
+    "january","february","march","april","may","june",
+    "july","august","september","october","november","december",
+  ];
+
   const months = useMemo(() => {
-    const set = new Set(rows.map((r) => r.month).filter(Boolean));
-    return Array.from(set).sort();
+    const set = new Set(rows.map((r) => r.month));
+    return Array.from(set).sort(
+      (a, b) => MONTH_ORDER.indexOf(a) - MONTH_ORDER.indexOf(b)
+    );
   }, [rows]);
 
   // -------------------------
-  // FILTERED DATA (FIXED LOGIC)
+  // FILTERED DATA
   // -------------------------
   const filtered = useMemo(() => {
     return rows.filter((r) => {
       const matchWeek = week === "all" || r.week === week;
       const matchMonth = month === "all" || r.month === norm(month);
-
       const matchAnalyst =
-        analyst === "all" ||
-        r.home === analyst ||
-        r.away === analyst;
+        analyst === "all" || r.home === analyst || r.away === analyst;
 
       return matchWeek && matchMonth && matchAnalyst;
     });
   }, [rows, week, month, analyst]);
 
   // -------------------------
-  // GROUP BY WEEK
+  // CHART DATA
   // -------------------------
   const chartData = useMemo(() => {
-  const map = new Map<any, any>();
+    const map = new Map<string, any>();
 
-  const seenGames = new Set<string>();
+    filtered.forEach((r) => {
+      const weekKey = r.week || "Unknown";
+      const gameKey = `${r.home}-${r.away}-${r.location}`;
 
-  filtered.forEach((r) => {
-    const key = r.week || "Unknown";
+      const existing =
+        map.get(weekKey) ?? {
+          week: weekKey,
+          AUS: 0,
+          PHL: 0,
+          Mixed: 0,
+          gamesSet: new Set<string>(),
+        };
 
-    // 🔥 DEFINE A UNIQUE GAME KEY
-    const gameKey = `${r.week}-${r.home}-${r.away}-${r.location}`;
+      existing.gamesSet.add(gameKey);
 
-    const existing =
-      map.get(key) ?? { week: key, AUS: 0, PHL: 0, Mixed: 0, games: 0 };
+      const isAus = r.location.includes("aus");
+      const isPhl = r.location.includes("phl");
 
-    // Only count game once
-    if (!seenGames.has(gameKey)) {
-      existing.games += 1;
-      seenGames.add(gameKey);
-    }
+      if (isAus && isPhl) existing.Mixed++;
+      else if (isAus) existing.AUS++;
+      else if (isPhl) existing.PHL++;
 
-    const isAus = r.location.includes("aus");
-    const isPhl = r.location.includes("phl");
+      map.set(weekKey, existing);
+    });
 
-    if (isAus && isPhl) existing.Mixed++;
-    else if (isAus) existing.AUS++;
-    else if (isPhl) existing.PHL++;
+    return Array.from(map.values())
+      .map((w) => ({
+        week: w.week,
+        AUS: w.AUS,
+        PHL: w.PHL,
+        Mixed: w.Mixed,
+        games: w.gamesSet.size,
+      }))
+      .sort((a, b) => Number(a.week) - Number(b.week));
+  }, [filtered]);
 
-    map.set(key, existing);
-  });
-
-  return Array.from(map.values()).sort(
-    (a, b) => Number(a.week) - Number(b.week)
-  );
-}, [filtered]);
   // -------------------------
   // SUMMARY
   // -------------------------
- const summary = useMemo(() => {
-  return chartData.reduce(
-    (acc, w) => {
-      acc.AUS += w.AUS;
-      acc.PHL += w.PHL;
-      acc.Mixed += w.Mixed;
-      acc.games += w.games || 0;
-      return acc;
-    },
-    { AUS: 0, PHL: 0, Mixed: 0, games: 0 }
-  );
-}, [chartData]);
+  const summary = useMemo(() => {
+    return chartData.reduce(
+      (acc, w) => {
+        acc.AUS += w.AUS;
+        acc.PHL += w.PHL;
+        acc.Mixed += w.Mixed;
+        acc.games += w.AUS + w.PHL + w.Mixed;
+        return acc;
+      },
+      { AUS: 0, PHL: 0, Mixed: 0, games: 0 }
+    );
+  }, [chartData]);
 
-const total = chartData.reduce((acc, w) => acc + (w.games || 0), 0);
   // -------------------------
-  // UI COMPONENTS
+  // TOOLTIP
   // -------------------------
-  const Kpi = ({ label, value, color }: any) => (
-    <div className="p-4 bg-white border rounded-xl shadow-sm flex-1">
-      <div className="text-xs text-gray-500">{label}</div>
-      <div className="text-xl font-semibold" style={{ color }}>
-        {value}
-      </div>
-    </div>
-  );
-
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (!active) return null;
 
     return (
-      <div className="bg-white border rounded-lg p-3 text-sm shadow">
+      <div
+        style={{
+          background: THEME.panel,
+          border: `1px solid ${THEME.border}`,
+          color: THEME.text,
+        }}
+        className="p-3 rounded-lg text-sm"
+      >
         <div className="font-semibold mb-1">Week {label}</div>
         {payload?.map((p: any) => (
-          <div key={p.name}>
-            {p.name}: <b>{p.value}</b>
+          <div key={p.name} style={{ color: THEME.muted }}>
+            {p.name}: <b style={{ color: THEME.text }}>{p.value}</b>
           </div>
         ))}
       </div>
     );
   };
 
-  // -------------------------
-  // UI
-  // -------------------------
   return (
-    <div className="bg-gray-50 p-4 rounded-2xl border space-y-4">
+    <div style={{ background: THEME.bg, color: THEME.text }} className="p-6 rounded-2xl space-y-5">
+
+      {/* -------------------------
+          GLOW FILTER + GRADIENTS
+      ------------------------- */}
+      <svg width="0" height="0">
+        <defs>
+          <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="6" result="blur" />
+            <feMerge>
+              <feMergeNode />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+
+          <linearGradient id="gradAUS" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#4ade80" stopOpacity={0.95} />
+            <stop offset="100%" stopColor="#16a34a" stopOpacity={0.85} />
+          </linearGradient>
+
+          <linearGradient id="gradPHL" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#fbbf24" stopOpacity={0.95} />
+            <stop offset="100%" stopColor="#d97706" stopOpacity={0.85} />
+          </linearGradient>
+
+          <linearGradient id="gradMixed" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#a78bfa" stopOpacity={0.95} />
+            <stop offset="100%" stopColor="#38bdf8" stopOpacity={0.85} />
+          </linearGradient>
+        </defs>
+      </svg>
 
       {/* HEADER */}
-      <div>
-        <h2 className="text-lg font-bold">TT Games</h2>
-        <p className="text-xs text-gray-500">
-          Allocation breakdown by week
-        </p>
+      <div className="flex justify-between items-start">
+        <div>
+          <h2 className="text-xl font-semibold">TT Games</h2>
+          <p style={{ color: THEME.muted }} className="text-sm">
+            Weekly allocation breakdown by region
+          </p>
+        </div>
+
+        <div
+          style={{
+            background: THEME.panel,
+            border: `1px solid ${THEME.border}`,
+          }}
+          className="text-xs px-3 py-1 rounded-full"
+        >
+          Total: {summary.games}
+        </div>
       </div>
 
-      {/* FILTER BAR */}
-      <div className="flex flex-wrap gap-2">
-
+      {/* FILTERS */}
+      <div
+        style={{
+          background: THEME.panel,
+          border: `1px solid ${THEME.border}`,
+        }}
+        className="flex gap-2 p-3 rounded-xl"
+      >
         <select
-          className="border rounded-lg px-3 py-1 text-sm"
           value={week}
           onChange={(e) => setWeek(e.target.value)}
+          style={{ background: THEME.panelSoft, color: THEME.text }}
+          className="border px-3 py-2 text-sm rounded-lg"
         >
           <option value="all">All Weeks</option>
           {weeks.map((w) => (
@@ -206,9 +280,10 @@ const total = chartData.reduce((acc, w) => acc + (w.games || 0), 0);
         </select>
 
         <select
-          className="border rounded-lg px-3 py-1 text-sm"
           value={month}
           onChange={(e) => setMonth(e.target.value)}
+          style={{ background: THEME.panelSoft, color: THEME.text }}
+          className="border px-3 py-2 text-sm rounded-lg"
         >
           <option value="all">All Months</option>
           {months.map((m) => (
@@ -217,44 +292,49 @@ const total = chartData.reduce((acc, w) => acc + (w.games || 0), 0);
             </option>
           ))}
         </select>
-
-        <select
-          className="border rounded-lg px-3 py-1 text-sm"
-          value={analyst}
-          onChange={(e) => setAnalyst(e.target.value)}
-        >
-          <option value="all">All Analysts</option>
-          {analysts.map((a) => (
-            <option key={a.key} value={a.key}>
-              {a.label}
-            </option>
-          ))}
-        </select>
       </div>
 
-      {/* KPI ROW */}
-      <div className="flex gap-3">
-<Kpi label="Total Games" value={summary.games} />
-        <Kpi label="AUS" value={summary.AUS} color="#22c55e" />
-        <Kpi label="PHL" value={summary.PHL} color="#f59e0b" />
-        <Kpi label="Mixed" value={summary.Mixed} color="#8b5cf6" />
+      {/* KPI */}
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <div style={{ background: THEME.panel, border: `1px solid ${THEME.border}` }} className="p-4 rounded-xl">
+          Total: {summary.games}
+        </div>
+        <div style={{ background: THEME.panel, border: `1px solid ${THEME.border}`, color: THEME.success }} className="p-4 rounded-xl">
+          AUS: {summary.AUS}
+        </div>
+        <div style={{ background: THEME.panel, border: `1px solid ${THEME.border}`, color: THEME.warn }} className="p-4 rounded-xl">
+          PHL: {summary.PHL}
+        </div>
+        <div style={{ background: THEME.panel, border: `1px solid ${THEME.border}`, color: THEME.accent }} className="p-4 rounded-xl">
+          Mixed: {summary.Mixed}
+        </div>
       </div>
 
       {/* CHART */}
-      <div className="bg-white border rounded-xl p-3 h-[360px]">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
-            <XAxis dataKey="week" />
-            <YAxis />
-            <Tooltip content={<CustomTooltip />} />
-            <Legend />
+      <div style={{ background: THEME.panel, border: `1px solid ${THEME.border}` }} className="p-4 rounded-2xl">
 
-            <Bar dataKey="AUS" stackId="a" fill="#22c55e" />
-            <Bar dataKey="PHL" stackId="a" fill="#f59e0b" />
-            <Bar dataKey="Mixed" stackId="a" fill="#8b5cf6" />
-          </BarChart>
-        </ResponsiveContainer>
+        <div className="mb-3">
+          <h3 className="text-sm font-semibold">Weekly Allocation Trend</h3>
+          <p style={{ color: THEME.muted }} className="text-xs">
+            Stacked view with hover glow interaction
+          </p>
+        </div>
+
+        <div className="h-[380px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} barCategoryGap={20}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.1} />
+              <XAxis dataKey="week" tick={{ fill: THEME.muted, fontSize:17 }} />
+              <YAxis tick={{ fill: THEME.muted, fontSize: 17 }} />
+              <Tooltip content={<CustomTooltip />} />
+              <Legend />
+
+              <Bar dataKey="AUS" stackId="a" fill="url(#gradAUS)" shape={<GlowBar />} />
+              <Bar dataKey="PHL" stackId="a" fill="url(#gradPHL)" shape={<GlowBar />} />
+              <Bar dataKey="Mixed" stackId="a" fill="url(#gradMixed)" shape={<GlowBar />} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       </div>
     </div>
   );
