@@ -116,11 +116,11 @@ export const ratingBands = {
 };
 
 export const overallGrades = [
-  { min: 95, label: "Legend" },
-  { min: 90, label: "Elite" },
-  { min: 85, label: "Outstanding" },
-  { min: 80, label: "Professional" },
+  { min: 95, label: "G.O.A.T" },
+  { min: 90, label: "Champion" },
+  { min: 85, label: "Elite" },
+  { min: 80, label: "Strong" },
   { min: 75, label: "Reliable" },
-  { min: 70, label: "Developing" },
-  { min: 0, label: "Learning" },
+  { min: 60, label: "Developing" },
+  { min: 0, label: "Rookie" },
 ];

@@ -83,7 +83,7 @@ export default function AnalystHero({ data }: Props) {
 
               <div className="text-slate-500">
                 Top {data.percentile}%
-                
+
               </div>
 
             </div>

@@ -6,11 +6,11 @@ export type AnalystMetrics = {
   key: string;
   name: string;
   team: "AUS" | "PHL";
-totalAnalysts: number;
+  totalAnalysts: number;
   totalHours: number;
   totalCost: number;
   totalGames: number;
-avgGamesPerWeek: number;
+  avgGamesPerWeek: number;
   avgHoursPerGame: number;
   avgCostPerGame: number;
   avgHoursPerWeek: number;
@@ -27,16 +27,16 @@ avgGamesPerWeek: number;
     }
   >;
 
-ratings: {
-  speed: number;
-  efficiency: number;
-  experience: number;
-  workRate: number;
-  consistency: number;
-  versatility: number;
-  knowledge: number;
-  overall: number;
-};
+  ratings: {
+    speed: number;
+    efficiency: number;
+    experience: number;
+    workRate: number;
+    consistency: number;
+    versatility: number;
+    knowledge: number;
+    overall: number;
+  };
 
   grade: string;
 
@@ -77,17 +77,17 @@ export function buildAnalystMetrics(
   const getOrCreate = (name: string): AnalystMetrics => {
     const key = normKey(name);
     if (!workedWeeks.has(key)) {
-  workedWeeks.set(key, new Set<string>());
-}
-if (!gameWeeks.has(key)) {
-  gameWeeks.set(key, new Set<string>());
-}
+      workedWeeks.set(key, new Set<string>());
+    }
+    if (!gameWeeks.has(key)) {
+      gameWeeks.set(key, new Set<string>());
+    }
 
     if (!map.has(key)) {
       map.set(key, {
         key,
         name: name?.trim() || "Unknown",
-team: "AUS",
+        team: "AUS",
         totalHours: 0,
         totalCost: 0,
         totalGames: 0,
@@ -101,16 +101,16 @@ team: "AUS",
         competitions: {},
         teams: {},
 
-ratings: {
-  speed: 0,
-  efficiency: 0,
-  experience: 0,
-  workRate: 0,
-  consistency: 0,
-  versatility: 0,
-  knowledge: 0,
-  overall: 0,
-},
+        ratings: {
+          speed: 0,
+          efficiency: 0,
+          experience: 0,
+          workRate: 0,
+          consistency: 0,
+          versatility: 0,
+          knowledge: 0,
+          overall: 0,
+        },
 
         grade: "",
 
@@ -120,8 +120,8 @@ ratings: {
         badges: [],
         strengths: [],
         weaknesses: [],
-              });
-            }
+      });
+    }
 
     return map.get(key)!;
   };
@@ -140,14 +140,14 @@ ratings: {
     const cost = Number(shift.total_cost || 0);
 
     const week =
-  shift.week ??
-  shift.week_name ??
-  shift.week_start ??
-  shift.pay_week;
+      shift.week ??
+      shift.week_name ??
+      shift.week_start ??
+      shift.pay_week;
 
-if (week) {
-  workedWeeks.get(analyst.key)?.add(String(week));
-}
+    if (week) {
+      workedWeeks.get(analyst.key)?.add(String(week));
+    }
 
     // Store hours by area
     analyst.areas[area] =
@@ -176,9 +176,9 @@ if (week) {
     if (game.home_allocated) {
       const analyst =
         getOrCreate(game.home_allocated);
-if (game.Week) {
-  gameWeeks.get(analyst.key)?.add(String(game.Week));
-}
+      if (game.Week) {
+        gameWeeks.get(analyst.key)?.add(String(game.Week));
+      }
       // One side of a game = 0.5 game
       analyst.totalGames += 0.5;
 
@@ -208,9 +208,9 @@ if (game.Week) {
     if (game.away_allocated) {
       const analyst =
         getOrCreate(game.away_allocated);
-if (game.Week) {
-  gameWeeks.get(analyst.key)?.add(String(game.Week));
-}
+      if (game.Week) {
+        gameWeeks.get(analyst.key)?.add(String(game.Week));
+      }
       // One side of a game = 0.5 game
       analyst.totalGames += 0.5;
 
@@ -238,92 +238,92 @@ if (game.Week) {
   // =====================================================
   // FINAL CALCULATIONS
   // =====================================================
- map.forEach((analyst) => {
+  map.forEach((analyst) => {
 
-const weeksWorked =
-  workedWeeks.get(analyst.key)?.size ?? 0;
+    const weeksWorked =
+      workedWeeks.get(analyst.key)?.size ?? 0;
 
-analyst.avgHoursPerWeek =
-  weeksWorked > 0
-    ? analyst.totalHours / weeksWorked
-    : 0;
+    analyst.avgHoursPerWeek =
+      weeksWorked > 0
+        ? analyst.totalHours / weeksWorked
+        : 0;
 
-const gameWeeksWorked =
-  gameWeeks.get(analyst.key)?.size ?? 0;
+    const gameWeeksWorked =
+      gameWeeks.get(analyst.key)?.size ?? 0;
 
-analyst.avgGamesPerWeek =
-  gameWeeksWorked > 0
-    ? analyst.totalGames / gameWeeksWorked
-    : 0;
+    analyst.avgGamesPerWeek =
+      gameWeeksWorked > 0
+        ? analyst.totalGames / gameWeeksWorked
+        : 0;
 
-analyst.avgHoursPerWeek = Number(
-  analyst.avgHoursPerWeek.toFixed(2)
-);
+    analyst.avgHoursPerWeek = Number(
+      analyst.avgHoursPerWeek.toFixed(2)
+    );
 
-analyst.avgGamesPerWeek = Number(
-  analyst.avgGamesPerWeek.toFixed(2)
-);
+    analyst.avgGamesPerWeek = Number(
+      analyst.avgGamesPerWeek.toFixed(2)
+    );
 
-  analyst.costPerHour =
-    analyst.totalHours > 0
-      ? analyst.totalCost / analyst.totalHours
-      : 0;
+    analyst.costPerHour =
+      analyst.totalHours > 0
+        ? analyst.totalCost / analyst.totalHours
+        : 0;
 
-  analyst.avgHoursPerGame =
-    analyst.totalGames > 0
-      ? analyst.totalHours / analyst.totalGames
-      : 0;
+    analyst.avgHoursPerGame =
+      analyst.totalGames > 0
+        ? analyst.totalHours / analyst.totalGames
+        : 0;
 
-  analyst.avgCostPerGame =
-    analyst.totalGames > 0
-      ? analyst.totalCost / analyst.totalGames
-      : 0;
+    analyst.avgCostPerGame =
+      analyst.totalGames > 0
+        ? analyst.totalCost / analyst.totalGames
+        : 0;
 
-      if (
-  analyst.totalHours === 0 &&
-  analyst.totalCost === 0
-) {
-  analyst.team = "PHL";
-} else {
-  analyst.team = "AUS";
-}
-      
-  // Round values
-  analyst.totalHours = Number(
-    analyst.totalHours.toFixed(2)
-  );
+    if (
+      analyst.totalHours === 0 &&
+      analyst.totalCost === 0
+    ) {
+      analyst.team = "PHL";
+    } else {
+      analyst.team = "AUS";
+    }
 
-  analyst.totalCost = Number(
-    analyst.totalCost.toFixed(2)
-  );
+    // Round values
+    analyst.totalHours = Number(
+      analyst.totalHours.toFixed(2)
+    );
 
-  analyst.totalGames = Number(
-    analyst.totalGames.toFixed(1)
-  );
+    analyst.totalCost = Number(
+      analyst.totalCost.toFixed(2)
+    );
 
-  analyst.avgHoursPerWeek = Number(
-    analyst.avgHoursPerWeek.toFixed(2)
-  );
+    analyst.totalGames = Number(
+      analyst.totalGames.toFixed(1)
+    );
 
-  console.log(
-  analyst.name,
-  "Games/Week:",
-  analyst.avgGamesPerWeek
-);
-  // NOW calculate ratings
-  const ratings = buildRatings(analyst);
-const overall = buildOverall(
-  ratings,
-  analyst.team
-);
+    analyst.avgHoursPerWeek = Number(
+      analyst.avgHoursPerWeek.toFixed(2)
+    );
 
-  analyst.ratings = {
-    ...ratings,
-    overall: overall.overall,
-  };
+    console.log(
+      analyst.name,
+      "Games/Week:",
+      analyst.avgGamesPerWeek
+    );
+    // NOW calculate ratings
+    const ratings = buildRatings(analyst);
+    const overall = buildOverall(
+      ratings,
+      analyst.team
+    );
 
-  analyst.grade = overall.grade;
-});
+    analyst.ratings = {
+      ...ratings,
+      overall: overall.overall,
+    };
+
+    analyst.grade = overall.grade;
+  });
 
   // -------------------------
   // DEBUG
@@ -337,15 +337,15 @@ const overall = buildOverall(
   // -------------------------
   // RETURN
   // -------------------------
-const analysts = Array.from(map.values())
-  // Only include analysts that have actually coded games
-  .filter((a) => a.totalGames > 0)
-  .sort((a, b) => a.name.localeCompare(b.name));
+  const analysts = Array.from(map.values())
+    // Only include analysts that have actually coded games
+    .filter((a) => a.totalGames > 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
 
-// Total analysts after filtering
-analysts.forEach((a) => {
-  a.totalAnalysts = analysts.length;
-});
+  // Total analysts after filtering
+  analysts.forEach((a) => {
+    a.totalAnalysts = analysts.length;
+  });
 
-return analysts;
+  return analysts;
 }

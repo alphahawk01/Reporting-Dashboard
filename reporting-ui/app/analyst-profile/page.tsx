@@ -69,14 +69,14 @@ export default function AnalystProfilePage() {
       setShifts(shiftsData);
       setGames(gamesData);
 
-const analystData =
-  buildAnalystBenchmark(
-    buildAnalystMetrics(
-      shiftsData,
-      gamesData
-    )
-  );
-        setAnalysts(analystData);
+      const analystData =
+        buildAnalystBenchmark(
+          buildAnalystMetrics(
+            shiftsData,
+            gamesData
+          )
+        );
+      setAnalysts(analystData);
 
       setLoading(false);
     }
@@ -87,20 +87,20 @@ const analystData =
   // -------------------------
   // DROPDOWN LIST
   // -------------------------
-const analystList = useMemo(() => {
-  return [
-    "All",
-    ...analysts
-      .map((a) => a.name)
-      .sort((a, b) => a.localeCompare(b)),
-  ];
-}, [analysts]);
+  const analystList = useMemo(() => {
+    return [
+      "All",
+      ...analysts
+        .map((a) => a.name)
+        .sort((a, b) => a.localeCompare(b)),
+    ];
+  }, [analysts]);
 
   // -------------------------
   // ACTIVE ANALYST
   // -------------------------
   const activeData = useMemo(() => {
-    
+
     if (!analysts.length) return null;
 
     if (selectedAnalyst === "All") return analysts[0];
@@ -110,8 +110,8 @@ const analystList = useMemo(() => {
       analysts[0]
     );
   }, [selectedAnalyst, analysts]);
-  
-console.log("ACTIVE ANALYST", activeData);
+
+  console.log("ACTIVE ANALYST", activeData);
 
   // -------------------------
   // FILTERING (CRITICAL FIX)
@@ -156,11 +156,11 @@ console.log("ACTIVE ANALYST", activeData);
     <div className="min-h-screen bg-[#0b1220] p-6 text-slate-200">
 
       {/* TOP FILTER */}
-   <div className="max-w-7xl mx-auto mb-6 flex items-center justify-between">
-  {/* BACK TO DASHBOARD */}
-  <Link
-    href="/"
-    className="
+      <div className="max-w-7xl mx-auto mb-6 flex items-center justify-between">
+        {/* BACK TO DASHBOARD */}
+        <Link
+          href="/"
+          className="
       inline-flex
       items-center
       gap-2
@@ -178,16 +178,16 @@ console.log("ACTIVE ANALYST", activeData);
       hover:bg-slate-800
       hover:text-white
     "
-  >
-    <span aria-hidden="true">←</span>
-    Back to Dashboard
-  </Link>
+        >
+          <span aria-hidden="true">←</span>
+          Back to Dashboard
+        </Link>
 
-  {/* ANALYST FILTER */}
-  <select
-    value={selectedAnalyst}
-    onChange={(e) => setSelectedAnalyst(e.target.value)}
-    className="
+        {/* ANALYST FILTER */}
+        <select
+          value={selectedAnalyst}
+          onChange={(e) => setSelectedAnalyst(e.target.value)}
+          className="
       rounded-lg
       border
       border-slate-700
@@ -200,14 +200,14 @@ console.log("ACTIVE ANALYST", activeData);
       focus:ring-1
       focus:ring-sky-400
     "
-  >
-    {analystList.map((name) => (
-      <option key={name} value={name}>
-        {name}
-      </option>
-    ))}
-  </select>
-</div>
+        >
+          {analystList.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {/* CONTENT */}
       <div className="max-w-7xl mx-auto space-y-6">
@@ -216,29 +216,29 @@ console.log("ACTIVE ANALYST", activeData);
           <>
             <AnalystHero data={activeData} />
             <AttributeRatings ratings={activeData.ratings}
-/>
+            />
 
             {/* TOP METRICS ROW (ALL IN ONE LINE) */}
             <div className="grid grid-cols-3 gap-6 items-stretch">
 
-<DashboardChartCard title="Ave Weekly Coding Speed">
-  <div className="h-[260px]">
-    <AverageCodingTimeTrend
-      deputyData={shifts}
-      ttData={games}
-      analystName={selectedAnalyst}
-    />
-  </div>
-</DashboardChartCard>
+              <DashboardChartCard title="Ave Weekly Coding Speed">
+                <div className="h-[260px]">
+                  <AverageCodingTimeTrend
+                    deputyData={shifts}
+                    ttData={games}
+                    analystName={selectedAnalyst}
+                  />
+                </div>
+              </DashboardChartCard>
 
-<DashboardChartCard title="Games Completed Per Week">
-  <div className="h-[260px]">
-    <GamesCompletedTrend
-      data={games}
-      analystName={selectedAnalyst}
-    />
-  </div>
-</DashboardChartCard>
+              <DashboardChartCard title="Games Completed Per Week">
+                <div className="h-[260px]">
+                  <GamesCompletedTrend
+                    data={games}
+                    analystName={selectedAnalyst}
+                  />
+                </div>
+              </DashboardChartCard>
 
               <DashboardChartCard title="Hours Per Week">
                 <HoursPerWeekTrend
