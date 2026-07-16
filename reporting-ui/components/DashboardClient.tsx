@@ -18,10 +18,6 @@ import {
   buildAnalystMetrics,
 } from "@/lib/analytics/buildAnalystMetrics";
 
-import {
-  rankAnalystMetrics,
-} from "@/lib/analytics/rankAnalystMetrics";
-
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/UI/tabs";
 import DashboardLayout from "./DashboardLayout";
 import Header from "./Header";
@@ -118,11 +114,9 @@ export default function DashboardClient({
   // -------------------------
   // ANALYST METRICS
   // -------------------------
-  const analystMetrics = useMemo(() => {
-    const base = buildAnalystMetrics(filtered, filteredTT);
-    return rankAnalystMetrics(base);
-  }, [filtered, filteredTT]);
-
+const analystMetrics = useMemo(() => {
+  return buildAnalystMetrics(filtered, filteredTT);
+}, [filtered, filteredTT]);
   
   // -------------------------
   // SELECTED ANALYST
