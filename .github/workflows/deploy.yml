@@ -32,7 +32,21 @@ jobs:
       - name: Install dependencies
         working-directory: reporting-ui
         run: npm ci
+      - name: Check Supabase secrets
+        working-directory: reporting-ui
+        run: |
+          if [ -n "${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}" ]; then
+            echo "URL secret is present"
+          else
+            echo "URL secret is MISSING"
+          fi
 
+          if [ -n "${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}" ]; then
+            echo "KEY secret is present"
+          else
+            echo "KEY secret is MISSING"
+          fi
+    
       - name: Build
         working-directory: reporting-ui
         env:
