@@ -214,9 +214,13 @@ export default function AnalystProfilePage() {
 
         {activeData ? (
           <>
-            <AnalystHero data={activeData} />
-            <AttributeRatings ratings={activeData.ratings}
-            />
+            <div className="relative z-20">
+              <AnalystHero data={activeData} />
+            </div>
+
+            <div className="relative z-10">
+              <AttributeRatings ratings={activeData.ratings} />
+            </div>
 
             {/* TOP METRICS ROW (ALL IN ONE LINE) */}
             <div className="grid grid-cols-3 gap-6 items-stretch">

@@ -116,11 +116,46 @@ export const ratingBands = {
 };
 
 export const overallGrades = [
-  { min: 95, label: "G.O.A.T" },
-  { min: 90, label: "Champion" },
-  { min: 85, label: "Elite" },
-  { min: 80, label: "Strong" },
-  { min: 75, label: "Reliable" },
-  { min: 60, label: "Developing" },
-  { min: 0, label: "Rookie" },
+  {
+    min: 95,
+    label: "G.O.A.T",
+    description:
+      "An exceptional analyst who consistently excels across every performance attribute. Sets the benchmark for quality, speed, efficiency and reliability.",
+  },
+  {
+    min: 90,
+    label: "Champion",
+    description:
+      "An outstanding all-round performer delivering consistently high standards with very few weaknesses.",
+  },
+  {
+    min: 85,
+    label: "Elite",
+    description:
+      "A highly capable analyst demonstrating excellent performance, strong productivity and dependable results.",
+  },
+  {
+    min: 80,
+    label: "Strong",
+    description:
+      "A reliable contributor who performs above expectations across most performance areas.",
+  },
+  {
+    min: 75,
+    label: "Reliable",
+    description:
+      "Consistently meets expectations and delivers dependable results while continuing to develop.",
+  },
+  {
+    min: 60,
+    label: "Developing",
+    description:
+      "Building experience and consistency. Continued improvement across key performance areas will increase overall performance.",
+  },
+  {
+    min: 0,
+    label: "Rookie",
+    description:
+      "Early in development with significant opportunity to build skills, knowledge and experience.",
+  },
 ];

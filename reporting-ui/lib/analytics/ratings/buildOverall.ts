@@ -36,11 +36,12 @@ export function buildOverall(
   }
 
   const grade =
-    overallGrades.find((g) => overall >= g.min)?.label ??
-    "Learning";
+    overallGrades.find((g) => overall >= g.min) ??
+    overallGrades[overallGrades.length - 1];
 
   return {
     overall,
-    grade,
+    grade: grade.label,
+    gradeDescription: grade.description,
   };
 }
