@@ -1,21 +1,14 @@
 "use client";
 
 import Card from "@/components/UI/Card";
+import type { AnalystRatings } from "@/types/analyst";
 
 type Props = {
-  ratings: {
-    speed: number;
-    efficiency: number;
-    workRate: number;
-    experience: number;
-    consistency: number;
-    versatility: number;
-    knowledge: number;
-  };
+  ratings: AnalystRatings;
 };
 
 type Attribute = {
-  key: keyof Props["ratings"];
+  key: keyof AnalystRatings;
   label: string;
   description: string;
   bands: string[];
@@ -34,7 +27,7 @@ const attributes: Attribute[] = [
       "70|≤ 7.50 hrs/game",
       "60|≤ 8.50 hrs/game",
       "40|> 9.00 hrs/game",
-    ]
+    ],
   },
   {
     key: "efficiency",
@@ -48,7 +41,7 @@ const attributes: Attribute[] = [
       "70|≤ $220/game",
       "60|≤ $240/game",
       "30|> $280/game",
-    ]
+    ],
   },
   {
     key: "workRate",
@@ -62,7 +55,7 @@ const attributes: Attribute[] = [
       "70|20+ hrs/week",
       "60|15+ hrs/week",
       "40|< 10 hrs/week",
-    ]
+    ],
   },
   {
     key: "experience",
@@ -76,7 +69,7 @@ const attributes: Attribute[] = [
       "70|30+ games",
       "60|20+ games",
       "40|< 20 games",
-    ]
+    ],
   },
   {
     key: "consistency",
@@ -90,7 +83,7 @@ const attributes: Attribute[] = [
       "70|2.5+ games/week",
       "60|2.0+ games/week",
       "30|< 1.5 games/week",
-    ]
+    ],
   },
   {
     key: "versatility",
@@ -104,7 +97,7 @@ const attributes: Attribute[] = [
       "60|20+ competitions",
       "40|10+ competitions",
       "20|< 10 competitions",
-    ]
+    ],
   },
   {
     key: "knowledge",
@@ -118,13 +111,11 @@ const attributes: Attribute[] = [
       "60|60+ teams",
       "40|40+ teams",
       "20|< 40 teams",
-    ]
+    ],
   },
 ];
 
-export default function AttributeRatings({
-  ratings,
-}: Props) {
+export default function AttributeRatings({ ratings }: Props) {
   return (
     <Card>
       <div className="p-6">
@@ -134,107 +125,103 @@ export default function AttributeRatings({
 
         <div className="grid grid-cols-2 gap-x-10 gap-y-5">
           {attributes.map((attr) => {
-            const value =
-              ratings[
-              attr.key as keyof typeof ratings
-              ];
+            const value = ratings[attr.key];
 
             return (
               <div key={attr.key}>
- <div className="mb-2 flex items-center justify-between">
-  <div className="flex items-center gap-2">
-    <span className="font-medium text-slate-300">
-      {attr.label}
-    </span>
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-slate-300">
+                      {attr.label}
+                    </span>
 
-    <div className="group relative inline-block">
-      <span className="cursor-help text-slate-400 transition-colors hover:text-sky-400">
-        ⓘ
-      </span>
+                    <div className="group relative inline-block">
+                      <span className="cursor-help text-slate-400 transition-colors hover:text-sky-400">
+                        ⓘ
+                      </span>
 
-      <div
-        className="
-          absolute
-          left-full
-          top-24
-          ml-3
-          -translate-y-1/2
-          z-[9999]
-          w-80
-          rounded-xl
-          border
-          border-slate-700
-          bg-[#0b1220]
-          p-4
-          text-sm
-          shadow-2xl
-          ring-1
-          ring-slate-800
-          opacity-0
-          invisible
-          pointer-events-none
-          transition-all
-          duration-200
-          group-hover:visible
-          group-hover:opacity-100
-          group-hover:pointer-events-auto
-        "
-      >
-        <h4 className="mb-2 font-semibold text-white">
-          {attr.label.replace(/^[^\s]+\s/, "")}
-        </h4>
+                      <div
+                        className="
+                          absolute
+                          left-full
+                          top-24
+                          ml-3
+                          -translate-y-1/2
+                          z-[9999]
+                          w-80
+                          rounded-xl
+                          border
+                          border-slate-700
+                          bg-[#0b1220]
+                          p-4
+                          text-sm
+                          shadow-2xl
+                          ring-1
+                          ring-slate-800
+                          opacity-0
+                          invisible
+                          pointer-events-none
+                          transition-all
+                          duration-200
+                          group-hover:visible
+                          group-hover:opacity-100
+                          group-hover:pointer-events-auto
+                        "
+                      >
+                        <h4 className="mb-2 font-semibold text-white">
+                          {attr.label.replace(/^[^\s]+\s/, "")}
+                        </h4>
 
-        <p className="mb-4 text-slate-300">
-          {attr.description}
-        </p>
+                        <p className="mb-4 text-slate-300">
+                          {attr.description}
+                        </p>
 
-        <div className="border-t border-slate-700 pt-3">
-          <h5 className="mb-3 font-semibold text-white">
-            Scoring Criteria
-          </h5>
+                        <div className="border-t border-slate-700 pt-3">
+                          <h5 className="mb-3 font-semibold text-white">
+                            Scoring Criteria
+                          </h5>
 
-          <div className="space-y-1.5">
-            {attr.bands.map((band) => {
-              const [score, benchmark] = band.split("|");
+                          <div className="space-y-1.5">
+                            {attr.bands.map((band) => {
+                              const [score, benchmark] = band.split("|");
 
-              return (
-                <div
-                  key={band}
-                  className="flex items-center justify-between rounded-md px-2 py-1 transition-colors hover:bg-slate-800"
-                >
-                  <span
-                    className={`min-w-[42px] rounded-md px-2 py-0.5 text-center text-xs font-bold shadow-sm ${
-                      Number(score) >= 95
-                        ? "bg-emerald-600 text-white"
-                        : Number(score) >= 90
-                        ? "bg-green-600 text-white"
-                        : Number(score) >= 80
-                        ? "bg-sky-600 text-white"
-                        : Number(score) >= 70
-                        ? "bg-amber-500 text-black"
-                        : Number(score) >= 60
-                        ? "bg-orange-500 text-white"
-                        : "bg-rose-600 text-white"
-                    }`}
-                  >
-                    {score}
-                  </span>
+                              const badgeClass =
+                                Number(score) >= 95
+                                  ? "bg-emerald-600 text-white"
+                                  : Number(score) >= 90
+                                  ? "bg-green-600 text-white"
+                                  : Number(score) >= 80
+                                  ? "bg-sky-600 text-white"
+                                  : Number(score) >= 70
+                                  ? "bg-amber-500 text-black"
+                                  : Number(score) >= 60
+                                  ? "bg-orange-500 text-white"
+                                  : "bg-rose-600 text-white";
 
-                  <span className="ml-4 flex-1 text-right text-slate-300">
-                    {benchmark}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
+                              return (
+                                <div
+                                  key={band}
+                                  className="flex items-center justify-between rounded-md px-2 py-1 transition-colors hover:bg-slate-800"
+                                >
+                                  <span
+                                    className={`min-w-[42px] rounded-md px-2 py-0.5 text-center text-xs font-bold shadow-sm ${badgeClass}`}
+                                  >
+                                    {score}
+                                  </span>
 
-                  <span className="font-bold text-white">
-                    {value}
-                  </span>
+                                  <span className="ml-4 flex-1 text-right text-slate-300">
+                                    {benchmark}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <span className="font-bold text-white">{value}</span>
                 </div>
 
                 <div className="h-3 overflow-hidden rounded-full bg-slate-700">

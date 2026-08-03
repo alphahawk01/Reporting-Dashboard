@@ -36,11 +36,14 @@ const norm = (v: any) =>
     .trim()
     .toLowerCase();
 
+import type { DeputyShift } from "@/types/deputy";
+import type { TTGame } from "@/types/ttgame";
+
 type Props = {
-  deputyData: any[];
-  ttData: any[];
-  analystName: string;
-};
+    deputyData: DeputyShift[];
+    ttData: TTGame[];
+    analystName: string;
+}
 
 export default function AverageCodingTimeTrend({
   deputyData,

@@ -1,17 +1,10 @@
-// components/analysis/TeamBreakdown.tsx
 "use client";
 
 import Card from "@/components/UI/Card";
-
-console.log("🔥 TeamBreakdown RENDERED");
-
-type TeamValue = {
-  count: number;
-  league: string;
-};
+import type { TeamMetric } from "@/types/analyst";
 
 type Props = {
-  data?: Record<string, TeamValue>;
+  data?: Record<string, TeamMetric>;
 };
 
 export default function TeamBreakdown({ data = {} }: Props) {
@@ -29,19 +22,18 @@ export default function TeamBreakdown({ data = {} }: Props) {
 
       <div className="max-h-[320px] overflow-y-auto rounded-lg border border-gray-200 bg-white">
         <table className="w-full text-sm bg-white">
-
           {/* HEADER */}
           <thead className="sticky top-0 bg-gray-100 z-10">
             <tr>
-              <th className="text-left px-4 py-2 text-gray-600 font-bold">
+              <th className="px-4 py-2 text-left font-bold text-gray-600">
                 Team
               </th>
 
-              <th className="text-center px-4 py-2 text-gray-600 w-24 font-bold">
+              <th className="w-24 px-4 py-2 text-center font-bold text-gray-600">
                 Games
               </th>
 
-              <th className="text-left px-4 py-2 text-gray-600 font-bold">
+              <th className="px-4 py-2 text-left font-bold text-gray-600">
                 Activity
               </th>
             </tr>
@@ -49,10 +41,12 @@ export default function TeamBreakdown({ data = {} }: Props) {
 
           {/* BODY */}
           <tbody className="bg-white">
-
             {teams.length === 0 ? (
               <tr>
-                <td colSpan={3} className="text-center p-6 text-gray-500">
+                <td
+                  colSpan={3}
+                  className="p-6 text-center text-gray-500"
+                >
                   No data available
                 </td>
               </tr>
@@ -63,14 +57,15 @@ export default function TeamBreakdown({ data = {} }: Props) {
                 return (
                   <tr
                     key={team}
-                    className="border-t border-gray-200 hover:bg-gray-50 transition-colors"
+                    className="border-t border-gray-200 transition-colors hover:bg-gray-50"
                   >
-                    {/* TEAM + LEAGUE */}
+                    {/* TEAM */}
                     <td className="px-4 py-3">
                       <div className="flex flex-col">
-                        <span className="text-gray-800 font-bold">
+                        <span className="font-bold text-gray-800">
                           {team}
                         </span>
+
                         <span className="text-[11px] leading-4 text-slate-500">
                           {value.league}
                         </span>
@@ -78,15 +73,15 @@ export default function TeamBreakdown({ data = {} }: Props) {
                     </td>
 
                     {/* GAMES */}
-                    <td className="text-center font-semibold text-blue-600">
+                    <td className="text-center font-semibold text-sky-600">
                       {value.count}
                     </td>
 
-                    {/* ACTIVITY BAR */}
+                    {/* ACTIVITY */}
                     <td className="px-4 py-3">
-                      <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden">
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
                         <div
-                          className="h-full rounded-full bg-gradient-to-r from-sky-500 to-cyan-400"
+                          className="h-full rounded-full bg-gradient-to-r from-sky-500 to-cyan-400 transition-all duration-500"
                           style={{ width: `${percent}%` }}
                         />
                       </div>
@@ -95,7 +90,6 @@ export default function TeamBreakdown({ data = {} }: Props) {
                 );
               })
             )}
-
           </tbody>
         </table>
       </div>

@@ -1,8 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AnalystMetrics } from "@/lib/analytics/buildAnalystMetrics";
-
+import type { AnalystMetrics } from "@/types/analyst";
 // -------------------------
 // TABLE THEME
 // -------------------------

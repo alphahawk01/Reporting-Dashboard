@@ -37,10 +37,12 @@ const norm = (v: any) =>
 // -------------------------
 // TYPES
 // -------------------------
+import type { TTGame } from "@/types/ttgame";
+
 type Props = {
-  data: any[];
-  analystName?: string;
-};
+    data: TTGame[];
+    analystName: string;
+}
 
 // -------------------------
 // COMPONENT

@@ -1,12 +1,15 @@
 import Card from "@/components/UI/Card";
 import { leagueLogos } from "./leagueLogos";
+import type { AnalystMetrics } from "@/types/analyst";
 
 type Props = {
-  data?: Record<string, number>;
+  data: AnalystMetrics["competitions"];
 };
 
-export default function LeagueBreakdown({ data = {} }: Props) {
-  const leagues = Object.entries(data).sort(([, a], [, b]) => b - a);
+export default function LeagueBreakdown({ data }: Props) {
+  const leagues = Object.entries(data ?? {}).sort(
+    ([, a], [, b]) => b - a
+  );
 
   const max = Math.max(...leagues.map(([, value]) => value), 1);
 
@@ -18,7 +21,6 @@ export default function LeagueBreakdown({ data = {} }: Props) {
 
       <div className="max-h-[320px] overflow-y-auto rounded-lg border border-gray-200 bg-white">
         <table className="w-full text-sm bg-white">
-
           {/* HEADER */}
           <thead className="sticky top-0 bg-gray-100 z-10">
             <tr>
@@ -38,10 +40,12 @@ export default function LeagueBreakdown({ data = {} }: Props) {
 
           {/* BODY */}
           <tbody className="bg-white">
-
             {leagues.length === 0 ? (
               <tr>
-                <td colSpan={3} className="text-center p-6 text-gray-500">
+                <td
+                  colSpan={3}
+                  className="text-center p-6 text-gray-500"
+                >
                   No data available
                 </td>
               </tr>
@@ -92,7 +96,6 @@ export default function LeagueBreakdown({ data = {} }: Props) {
                 );
               })
             )}
-
           </tbody>
         </table>
       </div>

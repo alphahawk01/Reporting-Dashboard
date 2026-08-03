@@ -1,4 +1,4 @@
-import { AnalystMetrics } from "../buildAnalystMetrics";
+import type { AnalystMetrics } from "@/types/analyst";
 import { ratingBands } from "./ratingBands";
 
 function getLowerScore(

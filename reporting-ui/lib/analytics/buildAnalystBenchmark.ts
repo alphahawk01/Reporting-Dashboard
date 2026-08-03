@@ -1,50 +1,32 @@
-import { AnalystMetrics } from "./buildAnalystMetrics";
+import type { AnalystMetrics } from "@/types/analyst";
 
 export function buildAnalystBenchmark(
   analysts: AnalystMetrics[]
-) {
+): AnalystMetrics[] {
   // -------------------------
-  // SORT BY OVERALL RATING
+  // APPLY RANKINGS TO A TEAM
   // -------------------------
-const ausAnalysts = analysts
-  .filter(a => a.team === "AUS")
-  .sort((a, b) => b.ratings.overall - a.ratings.overall);
+  function applyRanking(team: "AUS" | "PHL") {
+    const group = analysts
+      .filter((a) => a.team === team)
+      .sort((a, b) => b.ratings.overall - a.ratings.overall);
 
-const phlAnalysts = analysts
-  .filter(a => a.team === "PHL")
-  .sort((a, b) => b.ratings.overall - a.ratings.overall);
+    const total = group.length;
 
-function applyRanking(list: typeof analysts) {
-  list.forEach((a, index) => {
-    a.rank = index + 1;
+    group.forEach((analyst, index) => {
+      analyst.rank = index + 1;
+      analyst.totalAnalysts = total;
 
-    a.totalAnalysts = list.length;
+      // Higher score = better percentile
+      analyst.percentile =
+        total <= 1
+          ? 100
+          : Math.round(((total - index) / total) * 100);
+    });
+  }
 
-    a.percentile = Math.round(
-      ((index + 1) / list.length) * 100
-    );
-  });
-}
+  applyRanking("AUS");
+  applyRanking("PHL");
 
-applyRanking(ausAnalysts);
-applyRanking(phlAnalysts);
-
-return analysts;
-  // -------------------------
-  // ASSIGN RANK & PERCENTILE
-  // -------------------------
-analysts.forEach((a, index) => {
-  a.rank = index + 1;
-
-  // Best analyst = Top 1%
-  a.percentile = Math.max(
-    1,
-    Math.round(
-      ((index + 1) / analysts.length) * 100
-    )
-  );
-
-  a.totalAnalysts = analysts.length;
-});
   return analysts;
 }

@@ -1,57 +1,14 @@
 import { buildRatings } from "./ratings/buildRatings";
 import { buildOverall } from "./ratings/buildOverall";
 
-
-export type AnalystMetrics = {
-  key: string;
-  name: string;
-  team: "AUS" | "PHL";
-  totalAnalysts: number;
-  totalHours: number;
-  totalCost: number;
-  totalGames: number;
-  avgGamesPerWeek: number;
-  avgHoursPerGame: number;
-  avgCostPerGame: number;
-  avgHoursPerWeek: number;
-  costPerHour: number;
-
-  areas: Record<string, number>;
-  competitions: Record<string, number>;
-
-  teams: Record<
-    string,
-    {
-      count: number;
-      league: string;
-    }
-  >;
-
-  ratings: {
-    speed: number;
-    efficiency: number;
-    experience: number;
-    workRate: number;
-    consistency: number;
-    versatility: number;
-    knowledge: number;
-    overall: number;
-  };
-
-  grade: string;
-
-  rank: number;
-  percentile: number;
-
-  badges: string[];
-  strengths: string[];
-  weaknesses: string[];
-};
+import type { AnalystMetrics } from "@/types/analyst";
+import type { DeputyShift } from "@/types/deputy";
+import type { TTGame } from "@/types/ttgame";
 
 // -------------------------
 // NORMALISER
 // -------------------------
-const normKey = (value: any): string =>
+const normKey = (value: unknown): string =>
   String(value ?? "")
     .replace(/\u00A0/g, " ")
     .replace(/[\u200B-\u200D\uFEFF]/g, "")
@@ -64,8 +21,8 @@ const normKey = (value: any): string =>
 // MAIN
 // -------------------------
 export function buildAnalystMetrics(
-  shifts: any[] = [],
-  games: any[] = []
+  shifts: DeputyShift[] = [],
+  games: TTGame[] = []
 ): AnalystMetrics[] {
   const map = new Map<string, AnalystMetrics>();
   const workedWeeks = new Map<string, Set<string>>();
@@ -76,9 +33,11 @@ export function buildAnalystMetrics(
   // -------------------------
   const getOrCreate = (name: string): AnalystMetrics => {
     const key = normKey(name);
+
     if (!workedWeeks.has(key)) {
       workedWeeks.set(key, new Set<string>());
     }
+
     if (!gameWeeks.has(key)) {
       gameWeeks.set(key, new Set<string>());
     }
@@ -86,17 +45,21 @@ export function buildAnalystMetrics(
     if (!map.has(key)) {
       map.set(key, {
         key,
-        name: name?.trim() || "Unknown",
+        name: name.trim() || "Unknown",
+
         team: "AUS",
+
         totalHours: 0,
         totalCost: 0,
         totalGames: 0,
-        totalAnalysts: 0,
+
+        avgHoursPerWeek: 0,
+        avgGamesPerWeek: 0,
+
         avgHoursPerGame: 0,
         avgCostPerGame: 0,
         costPerHour: 0,
-        avgHoursPerWeek: 0,
-        avgGamesPerWeek: 0,
+
         areas: {},
         competitions: {},
         teams: {},
@@ -104,8 +67,8 @@ export function buildAnalystMetrics(
         ratings: {
           speed: 0,
           efficiency: 0,
-          experience: 0,
           workRate: 0,
+          experience: 0,
           consistency: 0,
           versatility: 0,
           knowledge: 0,
@@ -116,8 +79,8 @@ export function buildAnalystMetrics(
 
         rank: 0,
         percentile: 0,
+        totalAnalysts: 0,
 
-        badges: [],
         strengths: [],
         weaknesses: [],
       });

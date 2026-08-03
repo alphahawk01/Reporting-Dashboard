@@ -56,10 +56,11 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   );
 };
 
-type Props = {
-  deputyData: any[];
-};
+import type { DeputyShift } from "@/types/deputy";
 
+type Props = {
+    deputyData: DeputyShift[];
+}
 export default function HoursPerWeekTrend({
   deputyData,
 }: Props) {
@@ -71,10 +72,11 @@ export default function HoursPerWeekTrend({
     const weeks: Record<string, number> = {};
 
     deputyData.forEach((shift) => {
-      const week =
-        shift.week ||
-        shift.weekEnding ||
-        shift.week_ending;
+const week =
+    shift.week ||
+    shift.week_name ||
+    shift.week_start ||
+    shift.pay_week;
 
       if (!week) return;
 
@@ -83,7 +85,7 @@ export default function HoursPerWeekTrend({
       }
 
       weeks[week] += Number(
-        shift.hours ||
+        shift.total_hours ||
           shift.total_hours ||
           shift.shift_hours ||
           0

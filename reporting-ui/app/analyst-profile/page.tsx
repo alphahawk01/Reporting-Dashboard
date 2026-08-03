@@ -13,15 +13,16 @@ import HoursPerWeekTrend from "./HoursPerWeekTrend";
 import DashboardChartCard from "./DashboardChartCard";
 import { buildAnalystBenchmark } from "@/lib/analytics/buildAnalystBenchmark";
 import AttributeRatings from "./AttributeRatings";
-
+import type { DeputyShift } from "@/types/deputy";
+import type { TTGame } from "@/types/ttgame";
 import { supabase } from "@/lib/supabase";
 import { buildAnalystMetrics } from "@/lib/analytics/buildAnalystMetrics";
-
+import type { AnalystMetrics } from "@/types/analyst";
 export default function AnalystProfilePage() {
   const [selectedAnalyst, setSelectedAnalyst] = useState("All");
-  const [analysts, setAnalysts] = useState<any[]>([]);
-  const [shifts, setShifts] = useState<any[]>([]);
-  const [games, setGames] = useState<any[]>([]);
+  const [analysts, setAnalysts] = useState<AnalystMetrics[]>([]);
+  const [shifts, setShifts] = useState<DeputyShift[]>([]);
+  const [games, setGames] = useState<TTGame[]>([]);
   const [loading, setLoading] = useState(true);
 
   const PAGE_SIZE = 1000;
@@ -29,32 +30,32 @@ export default function AnalystProfilePage() {
   // -------------------------
   // FETCH ALL ROWS
   // -------------------------
-  async function fetchAll(table: string) {
-    let from = 0;
-    let all: any[] = [];
+async function fetchAll<T>(table: string): Promise<T[]> {
+  let from = 0;
+  let all: T[] = [];
 
-    while (true) {
-      const { data, error } = await supabase
-        .from(table)
-        .select("*")
-        .range(from, from + PAGE_SIZE - 1);
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select("*")
+      .range(from, from + PAGE_SIZE - 1);
 
-      if (error) {
-        console.error(`Error fetching ${table}:`, error);
-        break;
-      }
-
-      if (!data || data.length === 0) break;
-
-      all = all.concat(data);
-
-      if (data.length < PAGE_SIZE) break;
-
-      from += PAGE_SIZE;
+    if (error) {
+      console.error(`Error fetching ${table}:`, error);
+      break;
     }
 
-    return all;
+    if (!data || data.length === 0) break;
+
+    all = all.concat(data as T[]);
+
+    if (data.length < PAGE_SIZE) break;
+
+    from += PAGE_SIZE;
   }
+
+  return all;
+}
 
   // -------------------------
   // LOAD DATA
@@ -63,8 +64,8 @@ export default function AnalystProfilePage() {
     async function load() {
       setLoading(true);
 
-      const shiftsData = await fetchAll("deputy_shifts");
-      const gamesData = await fetchAll("TT_Games");
+const shiftsData = await fetchAll<DeputyShift>("deputy_shifts");
+const gamesData = await fetchAll<TTGame>("TT_Games");
 
       setShifts(shiftsData);
       setGames(gamesData);
@@ -116,27 +117,23 @@ export default function AnalystProfilePage() {
   // -------------------------
   // FILTERING (CRITICAL FIX)
   // -------------------------
-  const filteredShifts = useMemo(() => {
-    if (selectedAnalyst === "All") return shifts;
+const filteredShifts = useMemo(() => {
+  if (selectedAnalyst === "All") return shifts;
 
-    return shifts.filter((s) => {
-      const name =
-        s.analyst || s.name || s.Analyst || s.employee_name;
+  return shifts.filter(
+    (shift) => shift.employee_name === selectedAnalyst
+  );
+}, [shifts, selectedAnalyst]);
 
-      return name === selectedAnalyst;
-    });
-  }, [shifts, selectedAnalyst]);
+const filteredGames = useMemo(() => {
+  if (selectedAnalyst === "All") return games;
 
-  const filteredGames = useMemo(() => {
-    if (selectedAnalyst === "All") return games;
-
-    return games.filter((g) => {
-      const name =
-        g.analyst || g.name || g.Analyst || g.employee_name;
-
-      return name === selectedAnalyst;
-    });
-  }, [games, selectedAnalyst]);
+  return games.filter(
+    (game) =>
+      game.home_allocated === selectedAnalyst ||
+      game.away_allocated === selectedAnalyst
+  );
+}, [games, selectedAnalyst]);
 
   // -------------------------
   // LOADING STATE
@@ -183,23 +180,48 @@ export default function AnalystProfilePage() {
           Back to Dashboard
         </Link>
 
+        <Link
+          href="/analyst-compare"
+          className="
+        inline-flex
+        items-center
+        gap-2
+        rounded-lg
+        border
+        border-slate-700
+        bg-[#0f1b2d]
+        px-4
+        py-2
+        text-sm
+        font-medium
+        text-slate-200
+        transition
+        hover:border-sky-500/50
+        hover:bg-slate-800
+    "
+        >
+          Compare Analysts
+        </Link>
+
         {/* ANALYST FILTER */}
         <select
           value={selectedAnalyst}
           onChange={(e) => setSelectedAnalyst(e.target.value)}
           className="
-      rounded-lg
-      border
-      border-slate-700
-      bg-[#0f1b2d]
-      px-3
-      py-2
-      text-sm
-      text-slate-200
-      focus:outline-none
-      focus:ring-1
-      focus:ring-sky-400
-    "
+    relative
+    z-[9999]
+    rounded-lg
+    border
+    border-slate-700
+    bg-[#0f1b2d]
+    px-3
+    py-2
+    text-sm
+    text-slate-200
+    focus:outline-none
+    focus:ring-1
+    focus:ring-sky-400
+  "
         >
           {analystList.map((name) => (
             <option key={name} value={name}>
