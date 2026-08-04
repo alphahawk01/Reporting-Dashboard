@@ -1,35 +1,130 @@
-import type { AnalystMetrics } from "@/types/analyst";
-import type { TTGame } from "@/types/ttgame";
+import { RecommendationContext } from "./types";
+
+// ------------------------------------------------
+// LEAGUE EXPERIENCE
+// ------------------------------------------------
 
 export function scoreLeagueExperience(
-    analyst: AnalystMetrics,
-    fixture: TTGame
+    context: RecommendationContext
 ): number {
 
     const league =
-        fixture.Competition ??
-        fixture.competition ??
-        "";
+        context.fixture.Competition ?? "";
 
-    return analyst.competitions[league] ?? 0;
+    return (
+        context.analyst.competitions[league] ?? 0
+    );
 
 }
 
-export function scoreTeamExperience(
-    analyst: AnalystMetrics,
-    fixture: TTGame
+// ------------------------------------------------
+// HOME TEAM EXPERIENCE
+// ------------------------------------------------
+
+export function scoreHomeTeamExperience(
+    context: RecommendationContext
 ): number {
 
-    const home =
-        analyst.teams[
-            fixture.home_team ?? ""
-        ]?.count ?? 0;
+    const team =
+        context.fixture.home_team ?? "";
 
-    const away =
-        analyst.teams[
-            fixture.away_team ?? ""
-        ]?.count ?? 0;
+    return (
+        context.analyst.teams[team]?.count ??
+        0
+    );
 
-    return home + away;
+}
+
+// ------------------------------------------------
+// AWAY TEAM EXPERIENCE
+// ------------------------------------------------
+
+export function scoreAwayTeamExperience(
+    context: RecommendationContext
+): number {
+
+    const team =
+        context.fixture.away_team ?? "";
+
+    return (
+        context.analyst.teams[team]?.count ??
+        0
+    );
+
+}
+
+// ------------------------------------------------
+// QUALITY
+// ------------------------------------------------
+
+export function scoreQuality(
+    context: RecommendationContext
+): number {
+
+    return context.analyst.ratings.overall;
+
+}
+
+// ------------------------------------------------
+// SPEED
+// ------------------------------------------------
+
+export function scoreSpeed(
+    context: RecommendationContext
+): number {
+
+    // Lower hours/game = better
+
+    if (
+        context.analyst.avgHoursPerGame === 0
+    ) return 0;
+
+    return (
+        1 /
+        context.analyst.avgHoursPerGame
+    );
+
+}
+
+// ------------------------------------------------
+// RECENT EXPERIENCE
+// ------------------------------------------------
+
+export function scoreRecentExperience(
+    context: RecommendationContext
+): number {
+
+    const currentWeek = Number(context.fixture.Week);
+
+    return context.historicalGames.filter((game) => {
+
+        const gameWeek = Number(game.Week);
+
+        return (
+            game.Competition === context.fixture.Competition &&
+            gameWeek >= currentWeek - 5 &&
+            gameWeek < currentWeek &&
+            (
+                game.home_allocated === context.analyst.name ||
+                game.away_allocated === context.analyst.name
+            )
+        );
+
+    }).length;
+
+}
+// ------------------------------------------------
+// NORMALISE
+// ------------------------------------------------
+
+export function normaliseScore(
+    value: number,
+    max: number,
+    weight: number
+): number {
+
+    if (max <= 0) return 0;
+
+    return (value / max) * weight;
 
 }

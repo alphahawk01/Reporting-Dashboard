@@ -40,9 +40,9 @@ import type { DeputyShift } from "@/types/deputy";
 import type { TTGame } from "@/types/ttgame";
 
 type Props = {
-    deputyData: DeputyShift[];
-    ttData: TTGame[];
-    analystName: string;
+  deputyData: DeputyShift[];
+  ttData: TTGame[];
+  analystName: string;
 }
 
 export default function AverageCodingTimeTrend({
@@ -50,9 +50,9 @@ export default function AverageCodingTimeTrend({
   ttData,
   analystName,
 }: Props) {
-    console.log("DEPUTY SAMPLE:", deputyData?.[0]); // 👈 ADD HERE
-    console.log("ANALYST NAME PROP:", analystName);
-    console.log("FULL SHIFT SAMPLE:", deputyData[0]);
+  console.log("DEPUTY SAMPLE:", deputyData?.[0]); // 👈 ADD HERE
+  console.log("ANALYST NAME PROP:", analystName);
+  console.log("FULL SHIFT SAMPLE:", deputyData[0]);
 
   const selected = norm(analystName);
   const SLA = 7;
@@ -70,15 +70,15 @@ export default function AverageCodingTimeTrend({
     // HOURS (ONLY SHIFT DATA)
     // -------------------------
     for (const r of deputyData ?? []) {
-const area = norm(r.area ?? r.area_name);
+      const area = norm(r.area ?? r.area_name);
       const employee = norm(r.employee_name);
 
-const isValidArea =
-  area.includes("home analyst") ||
-  area.includes("office analyst");
+      const isValidArea =
+        area.includes("home analyst") ||
+        area.includes("office analyst");
 
       if (!isValidArea) continue;
-if (selected !== "all" && employee !== selected) continue;
+      if (selected !== "all" && employee !== selected) continue;
 
       const week = String(r.week ?? "").trim();
       if (!week) continue;
@@ -88,10 +88,10 @@ if (selected !== "all" && employee !== selected) continue;
         hours: 0,
         games: 0,
       };
-console.log("FILTERED ROWS:", deputyData?.filter(r => {
-  const area = String(r.area ?? "").toLowerCase();
-  return area.includes("home") || area.includes("office");
-}));
+      console.log("FILTERED ROWS:", deputyData?.filter(r => {
+        const area = String(r.area ?? "").toLowerCase();
+        return area.includes("home") || area.includes("office");
+      }));
       existing.hours += Number(r.total_hours ?? 0);
       weeks.set(week, existing);
     }
@@ -100,7 +100,7 @@ console.log("FILTERED ROWS:", deputyData?.filter(r => {
     // GAMES (ONLY TT DATA)
     // -------------------------
     for (const r of ttData ?? []) {
-      const week = String(r.week ?? r.Week ?? "").trim();
+      const week = String(r.Week ?? "").trim();
       if (!week) continue;
 
       const home = norm(r.home_allocated);
@@ -144,11 +144,11 @@ console.log("FILTERED ROWS:", deputyData?.filter(r => {
   // -------------------------
   // TOOLTIP (USES WEEK ONLY)
   // -------------------------
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload?.length) return null;
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
 
-  console.log("👉 TOOLTIP LABEL:", label);
-  console.log("👉 SAMPLE SHIFT ROW:", deputyData?.[0]);
+    console.log("👉 TOOLTIP LABEL:", label);
+    console.log("👉 SAMPLE SHIFT ROW:", deputyData?.[0]);
 
     const d = payload[0].payload;
 
@@ -222,8 +222,8 @@ const CustomTooltip = ({ active, payload, label }: any) => {
       </div>
 
       {/* CHART */}
-<div className="flex-1 h-full min-h-0 w-full">
-  <ResponsiveContainer width="100%" height="100%">
+      <div className="flex-1 h-full min-h-0 w-full">
+        <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData}>
             <CartesianGrid stroke={THEME.border} />
             <XAxis dataKey="week" stroke={THEME.muted} />

@@ -1,51 +1,42 @@
 import type { AnalystMetrics } from "@/types/analyst";
+import type { TTGame } from "@/types/ttgame";
 
-export interface RecommendationProfile {
+export interface RecommendationContext {
+    fixture: TTGame;
+
     analyst: AnalystMetrics;
 
-    leagues: Record<
-        string,
-        {
-            games: number;
-            lastGame?: Date;
-        }
-    >;
+    historicalGames: TTGame[];
 
-    teams: Record<
-        string,
-        {
-            games: number;
-            lastGame?: Date;
-        }
-    >;
+    analysts: AnalystMetrics[];
+}
 
-    recentGames30: number;
-    recentGames90: number;
+export interface RecommendationScores {
 
-    currentWeekGames: number;
+    leagueExperience: number;
+
+    homeTeamExperience: number;
+
+    awayTeamExperience: number;
+
+    recentExperience: number;
+
+    quality: number;
+
+    speed: number;
+
+    workload: number;
+
 }
 
 export interface RecommendationResult {
 
     analyst: AnalystMetrics;
 
-    score: number;
+    scores: RecommendationScores;
 
-    breakdown: {
-
-        leagueExperience: number;
-
-        homeTeamExperience: number;
-
-        awayTeamExperience: number;
-
-        workload: number;
-
-        quality: number;
-
-        speed: number;
-
-    };
+    totalScore: number;
 
     reasons: string[];
+
 }

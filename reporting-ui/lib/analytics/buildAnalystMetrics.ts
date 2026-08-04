@@ -129,28 +129,38 @@ export function buildAnalystMetrics(
   // =====================================================
   // TT GAMES
   // =====================================================
+
+  let homeCount = 0;
+  let awayCount = 0;
+
   for (const game of games) {
+
     const competition =
       game?.Competition ?? "Unknown";
 
     // ===================================================
     // HOME ANALYST
     // ===================================================
+
     if (game.home_allocated) {
-      const analyst =
-        getOrCreate(game.home_allocated);
+
+      homeCount++;
+
+      const analyst = getOrCreate(game.home_allocated);
+
       if (game.Week) {
         gameWeeks.get(analyst.key)?.add(String(game.Week));
       }
+
       // One side of a game = 0.5 game
       analyst.totalGames += 0.5;
 
-      // League breakdown remains based on game weighting
+      // League breakdown
       analyst.competitions[competition] =
         (analyst.competitions[competition] || 0) + 0.5;
 
-      // Home analyst only receives the HOME TEAM
       if (game.home_team) {
+
         const team = game.home_team;
 
         if (!analyst.teams[team]) {
@@ -160,7 +170,6 @@ export function buildAnalystMetrics(
           };
         }
 
-        // Each team allocation counts as one
         analyst.teams[team].count += 1;
       }
     }
@@ -168,21 +177,26 @@ export function buildAnalystMetrics(
     // ===================================================
     // AWAY ANALYST
     // ===================================================
+
     if (game.away_allocated) {
-      const analyst =
-        getOrCreate(game.away_allocated);
+
+      awayCount++;
+
+      const analyst = getOrCreate(game.away_allocated);
+
       if (game.Week) {
         gameWeeks.get(analyst.key)?.add(String(game.Week));
       }
+
       // One side of a game = 0.5 game
       analyst.totalGames += 0.5;
 
-      // League breakdown remains based on game weighting
+      // League breakdown
       analyst.competitions[competition] =
         (analyst.competitions[competition] || 0) + 0.5;
 
-      // Away analyst only receives the AWAY TEAM
       if (game.away_team) {
+
         const team = game.away_team;
 
         if (!analyst.teams[team]) {
@@ -192,11 +206,16 @@ export function buildAnalystMetrics(
           };
         }
 
-        // Each team allocation counts as one
         analyst.teams[team].count += 1;
       }
     }
   }
+
+  console.log({
+    totalRows: games.length,
+    homeCount,
+    awayCount,
+  });
 
   // =====================================================
   // FINAL CALCULATIONS

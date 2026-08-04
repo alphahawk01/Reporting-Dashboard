@@ -70,8 +70,7 @@ export default function ComparisonTrendCharts({
     >();
 
     games.forEach((game) => {
-      const week = game.Week ?? game.week ?? "Unknown";
-
+const week = game.Week ?? "Unknown";
       if (!map.has(week)) {
         map.set(week, {
           week,

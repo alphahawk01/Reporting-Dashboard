@@ -40,8 +40,8 @@ const norm = (v: any) =>
 import type { TTGame } from "@/types/ttgame";
 
 type Props = {
-    data: TTGame[];
-    analystName: string;
+  data: TTGame[];
+  analystName: string;
 }
 
 // -------------------------
@@ -61,13 +61,13 @@ export default function GamesCompletedTrend({
     const weeks = new Map<string, { week: string; Games: number }>();
 
     (data ?? []).forEach((r) => {
-      const week = String(r.week ?? r.Week ?? "").trim();
+      const week = String(r.Week ?? "").trim();
       if (!week) return;
 
       const match = isAll
         ? true
         : norm(r.home_allocated) === selected ||
-          norm(r.away_allocated) === selected;
+        norm(r.away_allocated) === selected;
 
       if (!match) return;
 
@@ -106,34 +106,34 @@ export default function GamesCompletedTrend({
   }, [chartData]);
 
   const CustomTooltip = ({ active, payload, label }: any) => {
-  if (!active || !payload?.length) return null;
+    if (!active || !payload?.length) return null;
 
-  return (
-    <div
-      style={{
-        background: "#0f1b2d",
-        border: "1px solid rgba(148,163,184,0.2)",
-        borderRadius: 12,
-        padding: "10px 12px",
-        boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
-      }}
-    >
-      <div style={{ color: "#94a3b8", fontSize: 12, marginBottom: 4 }}>
-        Week {label}
-      </div>
-
+    return (
       <div
         style={{
-          color: "#e5e7eb",
-          fontSize: 14,
-          fontWeight: 600,
+          background: "#0f1b2d",
+          border: "1px solid rgba(148,163,184,0.2)",
+          borderRadius: 12,
+          padding: "10px 12px",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
         }}
       >
-        {payload[0].value} Games
+        <div style={{ color: "#94a3b8", fontSize: 12, marginBottom: 4 }}>
+          Week {label}
+        </div>
+
+        <div
+          style={{
+            color: "#e5e7eb",
+            fontSize: 14,
+            fontWeight: 600,
+          }}
+        >
+          {payload[0].value} Games
+        </div>
       </div>
-    </div>
-  );
-};
+    );
+  };
   // -------------------------
   // UI
   // -------------------------
@@ -176,7 +176,7 @@ export default function GamesCompletedTrend({
             <XAxis dataKey="week" stroke={THEME.muted} />
             <YAxis stroke={THEME.muted} />
 
-<Tooltip content={<CustomTooltip />} />
+            <Tooltip content={<CustomTooltip />} />
 
             <Bar dataKey="Games" radius={[6, 6, 0, 0]}>
               {chartData.map((entry, i) => (

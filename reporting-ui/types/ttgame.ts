@@ -1,13 +1,10 @@
 export interface TTGame {
-  Week?: string;
-  week?: string;
-
-  Competition?: string;
-  competition?: string;
-
-  home_team?: string;
-  away_team?: string;
-
-  home_allocated?: string;
-  away_allocated?: string;
+  Week: string;
+  Date: string;
+  Competition: string;
+  Round: string;
+  home_team: string;
+  away_team: string;
+  home_allocated: string | null;
+  away_allocated: string | null;
 }
