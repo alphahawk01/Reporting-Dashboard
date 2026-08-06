@@ -41,7 +41,8 @@ export interface AnalystMetrics {
   percentile: number;
   totalAnalysts: number;
 
-  strengths: string[];
-  weaknesses: string[];
+strengths: string[];
+weaknesses: string[];
 
+availabilityDays: string[];
 }

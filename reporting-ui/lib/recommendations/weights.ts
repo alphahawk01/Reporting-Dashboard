@@ -1,16 +1,16 @@
 export const RecommendationWeights = {
 
-    leagueExperience: 30,
+    leagueExperience: 20,
 
-    homeTeamExperience: 25,
+    homeTeamExperience: 30,
 
-    awayTeamExperience: 25,
+    awayTeamExperience: 30,
 
-    recentExperience: 10,
+    recentExperience: 15,
 
-    quality: 5,
+    quality: 2.5,
 
-    speed: 5,
+    speed: 2.5,
 
 
 };

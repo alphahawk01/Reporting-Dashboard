@@ -119,7 +119,6 @@ async function getToken() {
 
   return res.data.access_token;
 }
-
 // ----------------------
 // DOWNLOAD EXCEL
 // ----------------------
@@ -129,15 +128,17 @@ async function getExcelBuffer() {
   const metaUrl =
     `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}` +
     `/drives/${process.env.DRIVE_ID}` +
-    `/items/${process.env.FILE_ID}`;
+    `/root:/DeputyRoster.csv.xlsx`;
 
   const meta = await axios.get(metaUrl, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
   });
 
   const downloadUrl = meta.data["@microsoft.graph.downloadUrl"];
 
-  console.log("📥 Downloading Excel file...");
+  console.log("📥 Downloading Deputy Roster...");
 
   const file = await axios.get(downloadUrl, {
     responseType: "arraybuffer",
@@ -149,96 +150,41 @@ async function getExcelBuffer() {
 // ----------------------
 // PARSE DEPUTY
 // ----------------------
-function parseDeputyData(buffer) {
+function parseDeputyRoster(buffer) {
   const workbook = XLSX.read(buffer, { type: "buffer" });
-  const sheet = getSheet(workbook, ["DeputyRawData"]);
 
-const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-
-console.log("Raw rows:", rows.length);
-
-let skipped = 0;
-
-const filtered = rows.slice(1).filter((r, i) => {
-  if (!r || !r[0]) {
-    skipped++;
-
-    console.log(
-      "Skipped row",
-      i + 2,
-      JSON.stringify(r)
-    );
-
-    return false;
-  }
-
-  return true;
-});
-
-console.log("Skipped rows:", skipped);
-console.log("Rows after filter:", filtered.length);
-
-return filtered.map(r => ({
-  shift_key: `${r[0]}_${r[2]}_${r[3]}_${r[4]}`,
-
-  employee_name: r[0],
-  level: String(r[1] || ""),
-
-  shift_date: excelDateToJS(r[2]),
-  start_time: excelTimeToString(r[3]),
-  end_time: excelTimeToString(r[4]),
-  meal_break: excelTimeToString(r[5]),
-
-  total_hours: Number(r[6]) || 0,
-  total_cost: Number(r[7]) || 0,
-
-  employee_comment: r[8] || null,
-  hourly_rate: Number(r[9]) || 0,
-
-  area_name: String(r[10] || "").trim(),
-
-  comment: r[11] || null,
-  day_name: r[12] || null,
-  month_name: r[13] || null,
-  week: r[14] == null || r[14] === "" ? 0 : Number(r[14]),
-  source_file: "DeputyRawData",
-}));
-}
-
-// ----------------------
-// PARSE TT (FIXED)
-// ----------------------
-function parseTTData(buffer) {
-  const workbook = XLSX.read(buffer, { type: "buffer" });
-  const sheet = getSheet(workbook, ["TTRawData"]);
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
 
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
   return rows
-    .slice(1)
-    .filter(r => r && r.length)
-    .map(r => ({
-      game_key: `${r[0]}_${r[3]}_${r[4]}`,
+  .slice(1)
+  .filter(r => r && r.length)
+  .map(r => ({
+    roster_key: `${r[13]}_${excelDateToJS(r[3])}_${excelTimeToString(r[4])}`,
 
-      // 🔥 FIX HERE
-      Date: excelDateToJS(r[0]),
+    employee_name: r[2] || null,
+    email: r[13] || null,
 
-      Competition: r[1] || null,
-      Round: r[2] || null,
+    location: r[0] || null,
+    area_name: r[1] || null,
 
-      home_team: r[3] || null,
-      away_team: r[4] || null,
+    shift_date: excelDateToJS(r[3]),
+    start_time: excelTimeToString(r[4]),
 
-      home_allocated: r[5] || null,
-      away_allocated: r[6] || null,
+    end_date: excelDateToJS(r[5]),
+    end_time: excelTimeToString(r[6]),
 
-      Location: r[7] || null,
-      Additional: r[8] || null,
-      Week: r[9] == null || r[9] === "" ? 0 : Number(r[9]),
-      Column11: r[10] || null,
-      expected_day: r[11] || null,
-    }));
+    total_hours: Number(r[9]) || 0,
+
+    status: r[10] || null,
+    note: r[11] || null,
+    cost: Number(r[12]) || 0,
+
+    week: Number(r[14]) || null,
+  }));
 }
+
 // ----------------------
 // DEDUPE
 // ----------------------
@@ -263,32 +209,18 @@ function dedupe(records, key) {
 // ----------------------
 // UPLOAD DEPUTY
 // ----------------------
-async function uploadToSupabase(records) {
+async function uploadRoster(records) {
   for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+
     const chunk = records.slice(i, i + CHUNK_SIZE);
 
-    console.log("Uploading Deputy chunk:", chunk.length);
+    console.log("Uploading roster chunk:", chunk.length);
 
     const { error } = await supabase
-      .from("deputy_shifts")
-      .upsert(chunk, { onConflict: "shift_key" });
-
-    if (error) throw new Error(JSON.stringify(error));
-  }
-}
-
-// ----------------------
-// UPLOAD TT
-// ----------------------
-async function uploadTT(records) {
-  for (let i = 0; i < records.length; i += CHUNK_SIZE) {
-    const chunk = records.slice(i, i + CHUNK_SIZE);
-
-    console.log("Uploading TT chunk:", chunk.length);
-
-    const { error } = await supabase
-      .from("TT_Games")
-      .upsert(chunk, { onConflict: "game_key" });
+      .from("deputy_roster")
+      .upsert(chunk, {
+        onConflict: "roster_key",
+      });
 
     if (error) throw new Error(JSON.stringify(error));
   }
@@ -301,35 +233,22 @@ async function sync() {
   try {
     console.log("📥 Starting sync...");
 
-    await logStart("excel-sync");
+    await logStart("deputy-roster-sync");
 
     const buffer = await getExcelBuffer();
 
-    // ----------------------
-    // DEPUTY
-    // ----------------------
-    let deputy = parseDeputyData(buffer);
-    deputy = dedupe(deputy, "shift_key");
+    let roster = parseDeputyRoster(buffer);
 
-    console.log("DEPUTY ROWS:", deputy.length);
+    roster = dedupe(roster, "roster_key");
 
-    // ----------------------
-    // TT (FIXED)
-    // ----------------------
-    let tt = parseTTData(buffer);
-    tt = dedupe(tt, "game_key");
+    console.log("ROSTER ROWS:", roster.length);
 
-    console.log("TT ROWS:", tt.length);
+    await uploadRoster(roster);
 
-    // ----------------------
-    // UPLOAD
-    // ----------------------
-    await uploadToSupabase(deputy);
-    await uploadTT(tt);
+    await logSuccess(roster.length);
 
-    await logSuccess(deputy.length + tt.length);
+    console.log("🎉 Roster sync complete!");
 
-    console.log("🎉 Sync complete!");
   } catch (err) {
     console.error("💥 Sync failed:", err);
     await logFailure(err);

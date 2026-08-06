@@ -6,12 +6,9 @@ import {
     scoreHomeTeamExperience,
     scoreAwayTeamExperience,
     scoreQuality,
-    scoreSpeed,
     scoreRecentExperience,
-    normaliseScore,
 } from "./scoring";
 
-import { RecommendationWeights } from "./weights";
 import type { RecommendationContext } from "./types";
 
 // ------------------------------------------------
@@ -35,15 +32,12 @@ export interface RecommendationEvidence {
     homeTeamGames: number;
 
     awayTeamGames: number;
-    leagueExperience: number;
 
     recentGames: number;
 
     overallRating: number;
 
     totalGames: number;
-
-    averageHoursPerGame?: number;
 
     homeTeamName?: string;
 
@@ -71,233 +65,177 @@ export interface Recommendation {
 
     evidence: RecommendationEvidence;
 
-}
+    availability: string;
 
-export interface FixtureRecommendation {
-    fixture: TTGame;
-    recommendations: Recommendation[];
+    availabilityDays: string[];
+    availabilityMatchesFixture: boolean;
+
 }
 
 export function buildRecommendations(
     fixture: TTGame,
     analysts: AnalystMetrics[],
-    historicalGames: TTGame[]
+    historicalGames: TTGame[],
+    analystAvailability: Map<string, string[]>
 ): Recommendation[] {
 
-        const recommendations = analysts
-            .map((analyst) => {
-                const context: RecommendationContext = {
-                    fixture,
-                    analyst,
-                    analysts,
-                    historicalGames,
-                };
+    return analysts
 
-                const leagueGames = scoreLeagueExperience(context);
+        .map((analyst) => {
 
-                const homeGames = scoreHomeTeamExperience(context);
+            const context: RecommendationContext = {
+                fixture,
+                analyst,
+                analysts,
+                historicalGames,
+            };
 
-                const awayGames = scoreAwayTeamExperience(context);
+            const availabilityDays =
+                analystAvailability.get(analyst.key) ?? [];
 
-                const recentGames = scoreRecentExperience(context);
+            const expectedDay =
+                fixture.expected_day ?? "";
 
-                const qualityRating = scoreQuality(context);
+            const availabilityMatchesFixture =
+                availabilityDays.includes(expectedDay);
 
-                const speedRating = scoreSpeed(context);
+            const availability =
+                availabilityDays.length > 0
+                    ? availabilityDays.join(", ")
+                    : "No upcoming shifts";
 
-                const maxLeague = Math.max(
-                    ...analysts.map((a) =>
-                        scoreLeagueExperience({
-                            fixture,
-                            analyst: a,
-                            analysts,
-                            historicalGames,
-                        })
-                    ),
-                    1
-                );
+            // ----------------------------
+            // KPI SCORES
+            // ----------------------------
 
-                const league = normaliseScore(
-                    leagueGames,
-                    maxLeague,
-                    RecommendationWeights.leagueExperience
-                );
+            const league =
+                scoreLeagueExperience(context);
 
-                const maxHome = Math.max(
-                    ...analysts.map(a =>
-                        scoreHomeTeamExperience({
-                            fixture,
-                            analyst: a,
-                            analysts,
-                            historicalGames,
-                        })
-                    ),
-                    1
-                );
+            const home =
+                scoreHomeTeamExperience(context);
 
-                const maxAway = Math.max(
-                    ...analysts.map(a =>
-                        scoreAwayTeamExperience({
-                            fixture,
-                            analyst: a,
-                            analysts,
-                            historicalGames
-                        })
-                    ),
-                    1
-                );
+            const away =
+                scoreAwayTeamExperience(context);
 
-                const maxRecent = Math.max(
-                    ...analysts.map(a =>
-                        scoreRecentExperience({
-                            fixture,
-                            analyst: a,
-                            analysts,
-                            historicalGames
-                        })
-                    ),
-                    1
-                );
+            const recent =
+                scoreRecentExperience(context);
 
-                const maxQuality = Math.max(
-                    ...analysts.map(a =>
-                        scoreQuality({
-                            fixture,
-                            analyst: a,
-                            analysts,
-                            historicalGames
-                        })
-                    ),
-                    1
-                );
+            const quality =
+                scoreQuality(context);
 
-                const maxSpeed = Math.max(
-                    ...analysts.map(a =>
-                        scoreSpeed({
-                            fixture,
-                            analyst: a,
-                            analysts,
-                            historicalGames
-                        })
-                    ),
-                    1
-                );
+            // ----------------------------
+            // FINAL SCORE
+            // ----------------------------
 
+            const score =
+                league +
+                home +
+                away +
+                recent +
+                quality;
+            // ----------------------------
+            // CONFIDENCE
+            // ----------------------------
 
-                const home = normaliseScore(
-                    homeGames,
-                    maxHome,
-                    RecommendationWeights.homeTeamExperience
-                );
+            let confidence:
+                | "Excellent"
+                | "High"
+                | "Medium"
+                | "Low";
 
-                const away = normaliseScore(
-                    awayGames,
-                    maxAway,
-                    RecommendationWeights.awayTeamExperience
-                );
+            if (score >= 90)
+                confidence = "Excellent";
+            else if (score >= 75)
+                confidence = "High";
+            else if (score >= 60)
+                confidence = "Medium";
+            else
+                confidence = "Low";
 
-                const recent = normaliseScore(
-                    recentGames,
-                    maxRecent,
-                    RecommendationWeights.recentExperience
-                );
+            // ----------------------------
+            // SUMMARY
+            // ----------------------------
 
-                const quality = normaliseScore(
-                    qualityRating,
-                    maxQuality,
-                    RecommendationWeights.quality
-                );
+            let summary = "Suitable recommendation based on available experience.";
 
-                const speed = normaliseScore(
-                    speedRating,
-                    maxSpeed,
-                    RecommendationWeights.speed
-                );
+            if (home >= 20 || away >= 20) {
+                summary = "Extensive experience with one or both teams.";
+            }
+            else if (league >= 16) {
+                summary = "Highly experienced in this competition.";
+            }
+            else if (recent >= 9) {
+                summary = "Strong recent experience in this league.";
+            }
+            else if (quality >= 2) {
+                summary = "High-performing analyst.";
+            }
 
-                // ----------------------------
-                // FINAL SCORE
-                // ----------------------------
+            // ----------------------------
+            // EVIDENCE
+            // ----------------------------
 
-                const score =
-                    league +
-                    home +
-                    away +
-                    recent +
-                    quality +
-                    speed;
+            const evidence: RecommendationEvidence = {
 
-                // ----------------------------
-                // CONFIDENCE
-                // ----------------------------
+                leagueGames:
+                    context.analyst.competitions[
+                    fixture.Competition ?? ""
+                    ] ?? 0,
 
-                let confidence:
-                    | "Excellent"
-                    | "High"
-                    | "Medium"
-                    | "Low";
+                homeTeamGames:
+                    context.analyst.teams[
+                        fixture.home_team ?? ""
+                    ]?.count ?? 0,
 
-                if (score >= 90)
-                    confidence = "Excellent";
-                else if (score >= 75)
-                    confidence = "High";
-                else if (score >= 60)
-                    confidence = "Medium";
-                else
-                    confidence = "Low";
+                awayTeamGames:
+                    context.analyst.teams[
+                        fixture.away_team ?? ""
+                    ]?.count ?? 0,
 
-                // ----------------------------
-                // SUMMARY
-                // ----------------------------
+                recentGames:
+                    historicalGames.filter(game => {
 
-                let summary: string;
+                        const gameWeek =
+                            Number(game.Week);
 
-                if (leagueGames >= 10) {
-                    summary = "Highly experienced in this league.";
-                }
-                else if ((homeGames + awayGames) >= 10) {
-                    summary = "Extensive experience with these teams.";
-                }
-                else if (analyst.ratings.overall >= 85) {
-                    summary = "High-performing analyst with strong quality rating.";
-                }
-                else {
-                    summary = "Suitable recommendation based on available experience.";
-                }
+                        return (
+                            game.Competition === fixture.Competition &&
+                            gameWeek >= Number(fixture.Week) - 5 &&
+                            gameWeek < Number(fixture.Week) &&
+                            (
+                                game.home_allocated === analyst.name ||
+                                game.away_allocated === analyst.name
+                            )
+                        );
 
-                // ----------------------------
-                // EVIDENCE
-                // ----------------------------
+                    }).length,
 
-                const evidence: RecommendationEvidence = {
-                    leagueGames,
-                    homeTeamGames: homeGames,
-                    awayTeamGames: awayGames,
-                    recentGames,
-                    overallRating: analyst.ratings.overall,
-                    totalGames: analyst.totalGames,
-                    leagueExperience: leagueGames,
-                    homeTeamName: fixture.home_team ?? "",
-                    awayTeamName: fixture.away_team ?? "",
-                };
+                overallRating:
+                    analyst.ratings.overall,
 
-                return {
+                totalGames:
+                    analyst.totalGames,
 
-                    analyst,
+                homeTeamName:
+                    fixture.home_team ?? "",
 
-                    score,
+                awayTeamName:
+                    fixture.away_team ?? "",
 
-                    confidence,
+            };
 
-                    summary,
+            return {
+                analyst,
+                score,
+                confidence,
+                summary,
+                evidence,
+                availability,
+                availabilityDays,
+                availabilityMatchesFixture,
+            };
 
-                    evidence,
+        })
+        .sort((a, b) => b.score - a.score);
 
-                };
-
-            })
-            .sort((a, b) => b.score - a.score);
-
-return recommendations.sort(
-    (a, b) => b.score - a.score
-);
 }

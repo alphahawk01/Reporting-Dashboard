@@ -9,6 +9,8 @@ export interface DeputyShift {
   week_start?: string;
   pay_week?: string;
 
+  start_date?: string;
+
   total_hours: number;
   total_cost: number;
 

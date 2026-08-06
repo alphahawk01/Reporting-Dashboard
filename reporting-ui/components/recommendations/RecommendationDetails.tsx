@@ -1,11 +1,9 @@
-import type {
-    Recommendation,
-    FixtureRecommendation,
-} from "@/lib/recommendations/recommendationEngine";
+import type { Recommendation } from "@/lib/recommendations/recommendationEngine";
+import type { TTGame } from "@/types/ttgame";
 
 interface Props {
     recommendation: Recommendation;
-    fixture: FixtureRecommendation["fixture"];
+    fixture: TTGame;
 }
 
 export default function RecommendationDetails({
@@ -76,7 +74,7 @@ export default function RecommendationDetails({
                         </td>
 
                         <td className="py-3 text-right">
-                            {recommendation.evidence.leagueExperience}
+                            {recommendation.evidence.leagueGames}
                         </td>
 
                     </tr>
@@ -84,7 +82,7 @@ export default function RecommendationDetails({
                     <tr className="border-b border-slate-800">
 
                         <td className="py-3">
-                            Recent Games
+                            {fixture.Competition} matches coded in the last 5 weeks
                         </td>
 
                         <td className="py-3 text-right">
@@ -101,6 +99,20 @@ export default function RecommendationDetails({
 
                         <td className="py-3 text-right">
                             {recommendation.evidence.overallRating}
+                        </td>
+
+                    </tr>
+
+                    <tr className="border-b border-slate-800">
+
+                        <td className="py-3">
+                            Availability (Week {fixture.Week})
+                        </td>
+
+                        <td className="py-3 text-right">
+                            {recommendation.availabilityDays.length > 0
+                                ? recommendation.availabilityDays.join(", ")
+                                : "No shifts"}
                         </td>
 
                     </tr>

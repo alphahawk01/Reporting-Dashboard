@@ -1,16 +1,24 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
-import type { TTGame } from "@/types/ttgame";
-import { buildAnalystMetrics } from "@/lib/analytics/buildAnalystMetrics";
-import { buildRecommendations } from "@/lib/recommendations/recommendationEngine";
-import type { DeputyShift } from "@/types/deputy";
-import type { AnalystMetrics } from "@/types/analyst";
-import ScoreBreakdown from "@/components/recommendations/ScoreBreakdown";
-import RecommendationTable from "@/components/recommendations/RecommendationTable";
 import { format } from "date-fns";
 
+import { supabase } from "@/lib/supabase";
+
+import { buildAnalystMetrics } from "@/lib/analytics/buildAnalystMetrics";
+import {
+  buildRecommendations,
+  type Recommendation,
+} from "@/lib/recommendations/recommendationEngine";
+
+import RecommendationTable from "@/components/recommendations/RecommendationTable";
+import ScoreBreakdown from "@/components/recommendations/ScoreBreakdown";
+
+import type { TTGame } from "@/types/ttgame";
+import type { DeputyShift } from "@/types/deputy";
+import type { AnalystMetrics } from "@/types/analyst";
+import type { DeputyRoster } from "@/types/deputyRoster";
+import { buildAnalystAvailability } from "@/lib/recommendations/buildAnalystAvailability";
 
 export default function RecommendationPage() {
   const [historicalGames, setHistoricalGames] = useState<TTGame[]>([]);
@@ -22,9 +30,14 @@ export default function RecommendationPage() {
   const [loading, setLoading] = useState(true);
 
   const [analysts, setAnalysts] = useState<AnalystMetrics[]>([]);
-
+  const [roster, setRoster] = useState<DeputyRoster[]>([]);
   const [sortField, setSortField] = useState<
-    "Week" | "Round" | "Competition" | "home_team" | "away_team"
+    | "Week"
+    | "Round"
+    | "Competition"
+    | "home_team"
+    | "away_team"
+    | "expected_day"
   >("Week");
 
   const [sortDirection, setSortDirection] =
@@ -42,6 +55,16 @@ export default function RecommendationPage() {
         await supabase
           .from("deputy_shifts")
           .select("*");
+
+      const { data: rosterData, error: rosterError } =
+        await supabase
+          .from("deputy_roster")
+          .select("*");
+
+      if (rosterError || !rosterData)
+        throw rosterError;
+
+      setRoster(rosterData as DeputyRoster[]);
 
       const allGames: TTGame[] = [];
 
@@ -160,6 +183,13 @@ export default function RecommendationPage() {
             ) * direction
           );
 
+        case "expected_day":
+          return (
+            (a.expected_day ?? "").localeCompare(
+              b.expected_day ?? ""
+            ) * direction
+          );
+
         default:
           return 0;
       }
@@ -173,6 +203,32 @@ export default function RecommendationPage() {
   // --------------------------------------------------
   console.log("sortedFixtures:", sortedFixtures.length);
 
+  const analystAvailability = useMemo(() => {
+    const availabilityByAnalyst =
+      buildAnalystAvailability(roster);
+
+    console.log(availabilityByAnalyst);
+
+    const currentWeek = selectedFixture
+      ? Number(selectedFixture.Week)
+      : selectedWeek;
+
+    const availabilityForWeek =
+      new Map<string, string[]>();
+
+    availabilityByAnalyst.forEach((weekMap, analyst) => {
+      availabilityForWeek.set(
+        analyst,
+        weekMap.get(currentWeek) ?? []
+      );
+    });
+
+    console.log(availabilityForWeek);
+
+    return availabilityForWeek;
+
+  }, [roster, selectedFixture, selectedWeek]);
+
   const selectedRecommendation = useMemo(() => {
 
     if (
@@ -185,13 +241,15 @@ export default function RecommendationPage() {
     return buildRecommendations(
       selectedFixture,
       analysts,
-      historicalGames
+      historicalGames,
+      analystAvailability
     );
 
   }, [
     selectedFixture,
     analysts,
-    historicalGames
+    historicalGames,
+    analystAvailability,
   ]);
   // --------------------------------------------------
   // KEEP SELECTION VALID
@@ -203,8 +261,6 @@ export default function RecommendationPage() {
     )].sort((a, b) => a - b);
   }, [historicalGames]);
 
-
-
   function handleSort(
     field:
       | "Week"
@@ -212,6 +268,7 @@ export default function RecommendationPage() {
       | "Competition"
       | "home_team"
       | "away_team"
+      | "expected_day"
   ) {
     if (sortField === field) {
       setSortDirection(
@@ -227,13 +284,12 @@ export default function RecommendationPage() {
 
   return (
     <div className="min-h-screen bg-[#0b1220] text-slate-200">
-      <div className="mx-auto max-w-[1700px] p-8">
-
+      <div className="mx-auto w-full max-w-[2200px] px-6 py-8">
         <h1 className="mb-8 text-4xl font-bold">
           Fixture Allocation Engine
         </h1>
 
-        <div className="grid grid-cols-[1100px_1fr] gap-6">
+        <div className="grid grid-cols-[42%_58%] gap-6">
           <div className="rounded-xl border border-slate-700 bg-[#0f1b2d] p-6">
 
             <h2 className="mb-5 text-xl font-bold">
@@ -261,7 +317,7 @@ export default function RecommendationPage() {
 
                 {/* HEADER */}
 
-                <div className="grid grid-cols-[60px_60px_280px_280px_360px] bg-slate-900 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                <div className="grid grid-cols-[6%_6%_24%_24%_24%_16%] bg-slate-900 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
 
                   <button
                     onClick={() =>
@@ -332,6 +388,19 @@ export default function RecommendationPage() {
                         ? "▲"
                         : "▼")}
                   </button>
+
+                  <button
+                    onClick={() =>
+                      handleSort("expected_day")
+                    }
+                    className="text-left hover:text-white"
+                  >
+                    Day{" "}
+                    {sortField === "expected_day" &&
+                      (sortDirection === "asc"
+                        ? "▲"
+                        : "▼")}
+                  </button>
                 </div>
 
                 {/* ROWS */}
@@ -347,7 +416,7 @@ export default function RecommendationPage() {
                             fixture
                           )
                         }
-                        className={`grid w-full grid-cols-[60px_60px_280px_280px_360px] items-center gap-3 border-t border-slate-700 px-3 py-2 text-left text-sm transition ${selectedFixture ===
+                        className={`grid w-full grid-cols-[6%_6%_24%_24%_24%_16%] items-center gap-3 border-t border-slate-700 px-3 py-2 text-left text-sm transition ${selectedFixture ===
                           fixture
                           ? "bg-sky-500/15"
                           : "hover:bg-slate-800"
@@ -361,11 +430,11 @@ export default function RecommendationPage() {
                           {fixture.Round}
                         </div>
 
-                        <div className="font-medium whitespace-normal">
+                        <div className="truncate">
                           {fixture.home_team}
                         </div>
 
-                        <div className="font-medium whitespace-normal">
+                        <div className="truncate">
                           {fixture.away_team}
                         </div>
 
@@ -376,6 +445,10 @@ export default function RecommendationPage() {
                           }
                         >
                           {fixture.Competition}
+                        </div>
+
+                        <div className="text-slate-300">
+                          {fixture.expected_day ?? "-"}
                         </div>
                       </button>
                     )
@@ -418,7 +491,7 @@ export default function RecommendationPage() {
 
                     </div>
 
-                    <div className="ml-8 text-right">
+                    <div className="ml-8 text-right space-y-2">
 
                       <div className="text-slate-400">
                         Week {selectedFixture.Week}
@@ -426,6 +499,16 @@ export default function RecommendationPage() {
 
                       <div className="text-slate-400">
                         Round {selectedFixture.Round}
+                      </div>
+
+                      <div className="rounded-md bg-sky-500/15 px-3 py-2 text-center">
+                        <div className="text-[10px] uppercase tracking-wider text-sky-300">
+                          Expected Day
+                        </div>
+
+                        <div className="font-semibold text-sky-200">
+                          {selectedFixture.expected_day}
+                        </div>
                       </div>
 
                     </div>
@@ -439,10 +522,8 @@ export default function RecommendationPage() {
                 </div>
 
                 <RecommendationTable
-                  recommendation={{
-                    fixture: selectedFixture,
-                    recommendations: selectedRecommendation
-                  }}
+                  fixture={selectedFixture}
+                  recommendations={selectedRecommendation}
                 />
 
               </>

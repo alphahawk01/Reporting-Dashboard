@@ -103,11 +103,6 @@ export default function RecommendationCard({
                     value={result.scores.quality}
                 />
 
-                <Metric
-                    label="Speed"
-                    value={result.scores.speed}
-                />
-
             </div>
 
         </div>

@@ -83,6 +83,8 @@ export function buildAnalystMetrics(
 
         strengths: [],
         weaknesses: [],
+
+        availabilityDays: [],
       });
     }
 
