@@ -84,6 +84,11 @@ const sections = [
       icon: Users,
     },
     {
+      title: "Analyst Profiles",
+      href: "/analyst-profile",
+      icon: Users,
+    },
+    {
       title: "Teams",
       href: "/teams",
       icon: Shield,
