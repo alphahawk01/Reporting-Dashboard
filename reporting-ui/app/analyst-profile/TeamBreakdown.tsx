@@ -2,12 +2,61 @@
 
 import Card from "@/components/UI/Card";
 import type { TeamMetric } from "@/types/analyst";
+import { clubLogos } from "./clubLogos";
 
 type Props = {
   data?: Record<string, TeamMetric>;
+  logoMap?: Record<string, string>;
 };
 
-export default function TeamBreakdown({ data = {} }: Props) {
+/**
+ * Resolves a club logo URL by trying:
+ * 1. Supabase logo_url (passed via logoMap prop, keyed by lowercase team name)
+ * 2. Static clubLogos mapping (case-insensitive)
+ * 3. Suffix match — "Strathmore U18s" matches "strathmore" but
+ *    "East Ringwood" won't match "ringwood" and "Doncaster East" won't match "doncaster"
+ * 4. Returns null if no logo found
+ */
+const teamSuffixes = [
+  " reserves",
+  " u18s",
+  " u18.5",
+  " u19s",
+  " u16s",
+  " u15s",
+  " u14s",
+  " thirds",
+  " seconds",
+  " womens",
+  " women",
+];
+
+function getClubLogo(
+  team: string,
+  logoMap: Record<string, string>
+): string | null {
+  const key = team.trim().toLowerCase();
+
+  // Supabase logo_url — exact match
+  if (logoMap[key]) return logoMap[key];
+
+  // Static mapping — exact match
+  if (clubLogos[key]) return clubLogos[key];
+
+  // Suffix-aware match: strip known suffixes and try again
+  // e.g. "strathmore u18s" → "strathmore", "aberfeldie reserves" → "aberfeldie"
+  for (const suffix of teamSuffixes) {
+    if (key.endsWith(suffix)) {
+      const base = key.slice(0, -suffix.length);
+      if (logoMap[base]) return logoMap[base];
+      if (clubLogos[base]) return clubLogos[base];
+    }
+  }
+
+  return null;
+}
+
+export default function TeamBreakdown({ data = {}, logoMap = {} }: Props) {
   const teams = Object.entries(data).sort(
     ([, a], [, b]) => b.count - a.count
   );
@@ -61,14 +110,30 @@ export default function TeamBreakdown({ data = {} }: Props) {
                   >
                     {/* TEAM */}
                     <td className="px-4 py-3">
-                      <div className="flex flex-col">
-                        <span className="font-bold text-gray-800">
-                          {team}
-                        </span>
+                      <div className="flex items-center gap-3">
+                        <div className="w-6 h-6 flex-shrink-0 flex items-center justify-center">
+                          {(() => {
+                            const logo = getClubLogo(team, logoMap);
+                            if (!logo) return null;
+                            return (
+                              <img
+                                src={logo}
+                                alt={team}
+                                className="w-6 h-6 rounded-full object-cover"
+                              />
+                            );
+                          })()}
+                        </div>
 
-                        <span className="text-[11px] leading-4 text-slate-500">
-                          {value.league}
-                        </span>
+                        <div className="flex flex-col">
+                          <span className="font-bold text-gray-800">
+                            {team}
+                          </span>
+
+                          <span className="text-[11px] leading-4 text-slate-500">
+                            {value.league}
+                          </span>
+                        </div>
                       </div>
                     </td>
 

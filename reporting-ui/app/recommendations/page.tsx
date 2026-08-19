@@ -32,11 +32,13 @@ import {
   getDownloadJobs,
   type DownloadJob,
 } from "@/lib/api/downloadJobs";
+import { assignFixture } from "@/lib/api/assignFixture";
 import type { TTGame } from "@/types/ttgame";
 import type { DeputyShift } from "@/types/deputy";
 import type { AnalystMetrics } from "@/types/analyst";
 import type { DeputyRoster } from "@/types/deputyRoster";
 import { buildAnalystAvailability } from "@/lib/recommendations/buildAnalystAvailability";
+import { Info } from "lucide-react";
 
 export default function RecommendationPage() {
   const [historicalGames, setHistoricalGames] = useState<TTGame[]>([]);
@@ -48,6 +50,9 @@ export default function RecommendationPage() {
     useState<Map<string, string[]>>(new Map());
   const [manualAssignOpen, setManualAssignOpen] =
     useState(false);
+
+  const [teamHistoryOpen, setTeamHistoryOpen] =
+    useState<string | null>(null);
 
   const [manualSearch, setManualSearch] =
     useState("");
@@ -519,6 +524,50 @@ export default function RecommendationPage() {
 
   }, [roster, selectedFixture, selectedWeek]);
 
+  // --------------------------------------------------
+  // ANALYST SCHEDULE DATES FOR TOOLTIP
+  // --------------------------------------------------
+  const analystScheduleDates = useMemo(() => {
+    const currentWeek = selectedFixture
+      ? Number(selectedFixture.Week)
+      : selectedWeek;
+
+    const scheduleMap = new Map<string, { day: string; date: string }[]>();
+
+    for (const shift of roster) {
+      if (
+        !shift.employee_name ||
+        !shift.shift_date ||
+        shift.week == null ||
+        shift.week !== currentWeek
+      ) {
+        continue;
+      }
+
+      const analyst = shift.employee_name.trim().toLowerCase();
+      const shiftDate = new Date(shift.shift_date);
+      const day = shiftDate.toLocaleDateString("en-AU", { weekday: "short" });
+      const dateStr = format(shiftDate, "dd MMM");
+
+      if (!scheduleMap.has(analyst)) {
+        scheduleMap.set(analyst, []);
+      }
+
+      const existing = scheduleMap.get(analyst)!;
+      // Avoid duplicates
+      if (!existing.some(e => e.date === dateStr)) {
+        existing.push({ day, date: dateStr });
+      }
+    }
+
+    // Sort each analyst's dates chronologically
+    scheduleMap.forEach((dates) => {
+      dates.sort((a, b) => a.date.localeCompare(b.date));
+    });
+
+    return scheduleMap;
+  }, [roster, selectedFixture, selectedWeek]);
+
   const selectedRecommendation = useMemo(() => {
 
     if (
@@ -548,22 +597,9 @@ export default function RecommendationPage() {
     recommendation: Recommendation
   ) {
 
-    alert("Assign clicked");
-
-    console.log("Assign clicked");
-    console.log(recommendation);
-
     if (!selectedFixture) return;
 
     try {
-
-      console.log("Recommendation name:", JSON.stringify(recommendation.analyst.name));
-
-      autoAnalysts.forEach(a => {
-        if (a.name.toLowerCase().includes("anthony")) {
-          console.log("AutoDownload:", JSON.stringify(a.name));
-        }
-      });
 
       const autoAnalyst = autoAnalysts.find(
         a =>
@@ -571,53 +607,63 @@ export default function RecommendationPage() {
           recommendation.analyst.name.trim().toLowerCase()
       );
 
-      console.log("Matched analyst:", autoAnalyst);
-
       if (!autoAnalyst) {
         alert("Analyst not found in AutoDownload.");
         return;
       }
 
+      const location: "Home" | "Office" =
+        autoAnalyst.officeComputer ? "Office" : "Home";
+
       const computer =
-        autoAnalyst.officeComputer ??
-        autoAnalyst.homeComputer;
+        location === "Office"
+          ? autoAnalyst.officeComputer
+          : autoAnalyst.homeComputer;
 
       if (!computer) {
         alert(`${autoAnalyst.name} does not have a computer assigned.`);
         return;
       }
 
+      // Find the API fixture ID for this game
       const autoFixture = autoFixtures.find(
         (a: any) => {
-          const key = `${(a.homeTeam ?? "").toLowerCase()}|${(a.awayTeam ?? "").toLowerCase()}|${(a.leagueName ?? "").toLowerCase()}|${(a.round ?? "").toLowerCase()}`;
-          const fixtureKey = `${(selectedFixture.home_team ?? "").toLowerCase()}|${(selectedFixture.away_team ?? "").toLowerCase()}|${(selectedFixture.Competition ?? "").toLowerCase()}|${(selectedFixture.Round ?? "").toLowerCase()}`;
-          return key === fixtureKey;
+          const afHome = (a.homeTeam ?? "").trim().toLowerCase();
+          const afAway = (a.awayTeam ?? "").trim().toLowerCase();
+          const fHome = (selectedFixture.home_team ?? "").trim().toLowerCase();
+          const fAway = (selectedFixture.away_team ?? "").trim().toLowerCase();
+          return afHome === fHome && afAway === fAway;
         }
       );
 
-      console.log("Selected fixture:", selectedFixture);
+      // 1. Assign the fixture (creates FixtureAssignment, syncs with all pages)
+      if (autoFixture && (autoFixture as any).id) {
+        await assignFixture(
+          (autoFixture as any).id,
+          autoAnalyst.id,
+          location
+        );
+      }
+
+      // 2. Create download job (triggers the autodownload on the desktop agent)
       await createDownloadJob({
         gameKey: selectedFixture.game_key,
         videoUrl: selectedFixture.videoURL ?? "",
         analystId: autoAnalyst.id,
         computerId: computer.id,
-        assignmentLocation:
-          autoAnalyst.officeComputer
-            ? "Office"
-            : "Home",
+        assignmentLocation: location,
         year: selectedFixture.Date.substring(0, 4),
         leagueName: selectedFixture.Competition,
         fileSizeBytes:
           autoFixture?.fileSizeBytes ?? null,
       });
 
-      alert("Download job created successfully.");
-
-      console.log("Created job for", autoAnalyst.name);
+      alert(`Assigned to ${autoAnalyst.name} and download queued.`);
 
     } catch (err) {
 
       console.error(err);
+      alert(err instanceof Error ? err.message : "Assignment failed.");
 
     }
   }
@@ -630,47 +676,45 @@ export default function RecommendationPage() {
 
     if (!selectedFixture) return;
 
+    const assignLocation: "Home" | "Office" =
+      location ?? (analyst.officeComputer ? "Office" : "Home");
+
     let computer;
 
-    if (location === "Home") {
+    if (assignLocation === "Home") {
       computer = analyst.homeComputer;
-    }
-    else if (location === "Office") {
+    } else {
       computer = analyst.officeComputer;
-    }
-    else {
-      computer =
-        analyst.officeComputer ??
-        analyst.homeComputer;
     }
 
     if (!computer) {
-      alert(`${analyst.name} does not have a computer assigned.`);
+      alert(`${analyst.name} does not have a ${assignLocation} computer assigned.`);
       return;
     }
 
     try {
 
-      console.log("Creating download job", {
-        gameKey: selectedFixture.game_key,
-        videoUrl: selectedFixture.videoURL ?? "",
-        year: selectedFixture.Date.substring(0, 4),
-        leagueName: selectedFixture.Competition,
-        analystId: analyst.id,
-        computerId: computer.id,
-        assignmentLocation:
-          location ??
-          (analyst.officeComputer ? "Office" : "Home"),
-      });
-
+      // Find the API fixture for this game
       const autoFixture = autoFixtures.find(
         (a: any) => {
-          const key = `${(a.homeTeam ?? "").toLowerCase()}|${(a.awayTeam ?? "").toLowerCase()}|${(a.leagueName ?? "").toLowerCase()}|${(a.round ?? "").toLowerCase()}`;
-          const fixtureKey = `${(selectedFixture.home_team ?? "").toLowerCase()}|${(selectedFixture.away_team ?? "").toLowerCase()}|${(selectedFixture.Competition ?? "").toLowerCase()}|${(selectedFixture.Round ?? "").toLowerCase()}`;
-          return key === fixtureKey;
+          const afHome = (a.homeTeam ?? "").trim().toLowerCase();
+          const afAway = (a.awayTeam ?? "").trim().toLowerCase();
+          const fHome = (selectedFixture.home_team ?? "").trim().toLowerCase();
+          const fAway = (selectedFixture.away_team ?? "").trim().toLowerCase();
+          return afHome === fHome && afAway === fAway;
         }
       );
 
+      // 1. Assign the fixture (syncs with all pages)
+      if (autoFixture && (autoFixture as any).id) {
+        await assignFixture(
+          (autoFixture as any).id,
+          analyst.id,
+          assignLocation
+        );
+      }
+
+      // 2. Create download job (triggers autodownload)
       await createDownloadJob({
         gameKey: selectedFixture.game_key,
         videoUrl: selectedFixture.videoURL ?? "",
@@ -678,22 +722,19 @@ export default function RecommendationPage() {
         leagueName: selectedFixture.Competition,
         analystId: analyst.id,
         computerId: computer.id,
-        assignmentLocation:
-          location ??
-          (analyst.officeComputer ? "Office" : "Home"),
+        assignmentLocation: assignLocation,
         fileSizeBytes:
           autoFixture?.fileSizeBytes ?? null,
       });
 
       setManualAssignOpen(false);
 
-      alert(`Created job for ${analyst.name}`);
+      alert(`Assigned to ${analyst.name} and download queued.`);
 
     } catch (err) {
 
       console.error(err);
-
-      alert("Failed creating download job");
+      alert(err instanceof Error ? err.message : "Assignment failed.");
 
     }
 
@@ -954,8 +995,7 @@ export default function RecommendationPage() {
                       <button
                         key={index}
                         onClick={() => setSelectedFixture(fixture)}
-                        className={`grid w-full grid-cols-[6%_5%_22%_22%_20%_14%_11%] items-center border-t border-slate-700 px-2 py-1.5 text-left text-xs transition ${
-                          selectedFixture?.game_key === fixture.game_key
+                        className={`grid w-full grid-cols-[6%_5%_22%_22%_20%_14%_11%] items-center border-t border-slate-700 px-2 py-1.5 text-left text-xs transition ${selectedFixture?.game_key === fixture.game_key
                             ? "bg-sky-500/15"
                             : autoFixture && autoFixture.analyst
                               ? "bg-emerald-500/50 hover:bg-emerald-500/75"
@@ -1024,8 +1064,20 @@ export default function RecommendationPage() {
 
                     <div className="flex-1 min-w-0">
 
-                      <div className="text-lg font-bold text-white truncate">
-                        {selectedFixture.home_team} vs {selectedFixture.away_team}
+                      <div className="text-lg font-bold truncate">
+                        <button
+                          onClick={() => setTeamHistoryOpen(selectedFixture.home_team)}
+                          className="text-white hover:text-sky-400 transition"
+                        >
+                          {selectedFixture.home_team}
+                        </button>
+                        <span className="text-slate-500 mx-2">vs</span>
+                        <button
+                          onClick={() => setTeamHistoryOpen(selectedFixture.away_team)}
+                          className="text-white hover:text-sky-400 transition"
+                        >
+                          {selectedFixture.away_team}
+                        </button>
                       </div>
 
                       <div className="mt-1 flex items-center gap-2 text-l text-slate-400">
@@ -1194,10 +1246,6 @@ export default function RecommendationPage() {
               Assign Another Analyst
             </h2>
 
-            <h2 className="mb-4 text-xl font-bold">
-              Assign Another Analyst
-            </h2>
-
             <input
               value={manualSearch}
               onChange={(e) =>
@@ -1234,8 +1282,37 @@ export default function RecommendationPage() {
                     className="border-b border-slate-700 p-4"
                   >
 
-                    <div className="mb-2 font-semibold">
+                    <div className="mb-2 flex items-center gap-2 font-semibold">
                       {a.name}
+                      <div className="group relative">
+                        <Info size={15} className="cursor-pointer text-slate-400 hover:text-sky-400" />
+                        <div className="pointer-events-none absolute left-6 top-0 z-50 hidden min-w-[200px] rounded-lg border border-slate-600 bg-slate-800 p-3 shadow-lg group-hover:block">
+                          <div className="mb-1.5 text-xs font-semibold text-slate-300">
+                            Week {selectedFixture ? selectedFixture.Week : selectedWeek} Availability
+                          </div>
+                          {(() => {
+                            const key = a.name.trim().toLowerCase();
+                            const dates = analystScheduleDates.get(key);
+                            if (!dates || dates.length === 0) {
+                              return (
+                                <div className="text-xs text-slate-500">
+                                  No shifts rostered
+                                </div>
+                              );
+                            }
+                            return (
+                              <div className="space-y-1">
+                                {dates.map((d) => (
+                                  <div key={d.date} className="flex items-center justify-between text-xs">
+                                    <span className="text-slate-400">{d.day}</span>
+                                    <span className="text-white">{d.date}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
                     </div>
 
                     <div className="space-y-2">
@@ -1310,5 +1387,181 @@ export default function RecommendationPage() {
         </div>
 
       )}
+
+      {/* TEAM HISTORY MODAL */}
+      {teamHistoryOpen && selectedFixture && (() => {
+        const teamName = teamHistoryOpen;
+
+        // Find last 10 games for this team from historicalGames
+        const teamGames = historicalGames
+          .filter(g =>
+            g.home_team?.trim().toLowerCase() === teamName.trim().toLowerCase() ||
+            g.away_team?.trim().toLowerCase() === teamName.trim().toLowerCase()
+          )
+          .sort((a, b) => Number(b.Week) - Number(a.Week))
+          .slice(0, 10);
+
+        // Get unique analysts who coded this team
+        const analystNames = new Set<string>();
+        teamGames.forEach(g => {
+          if (g.home_team?.trim().toLowerCase() === teamName.trim().toLowerCase()) {
+            if (g.home_allocated) analystNames.add(g.home_allocated);
+          }
+          if (g.away_team?.trim().toLowerCase() === teamName.trim().toLowerCase()) {
+            if (g.away_allocated) analystNames.add(g.away_allocated);
+          }
+        });
+
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+            onClick={() => setTeamHistoryOpen(null)}
+          >
+            <div
+              className="w-full max-w-3xl max-h-[80vh] overflow-hidden rounded-xl bg-slate-900 shadow-2xl flex flex-col"
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
+                <div>
+                  <h2 className="text-lg font-bold text-white">
+                    {teamName} — Last 10 Games
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Click an analyst to assign them to the current fixture
+                  </p>
+                </div>
+                <button
+                  onClick={() => setTeamHistoryOpen(null)}
+                  className="text-slate-400 hover:text-white text-lg px-2"
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* Games Table */}
+              <div className="flex-1 overflow-y-auto px-5 py-3">
+                <table className="w-full text-xs text-left">
+                  <thead className="text-slate-400 uppercase text-[10px]">
+                    <tr>
+                      <th className="pb-2">Wk</th>
+                      <th className="pb-2">Competition</th>
+                      <th className="pb-2">Rnd</th>
+                      <th className="pb-2">Home</th>
+                      <th className="pb-2">Away</th>
+                      <th className="pb-2">Coded By</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {teamGames.map((game, i) => {
+                      const isHome = game.home_team?.trim().toLowerCase() === teamName.trim().toLowerCase();
+                      const coder = isHome ? game.home_allocated : game.away_allocated;
+
+                      return (
+                        <tr key={`${game.game_key}-${i}`} className="border-t border-slate-700">
+                          <td className="py-2 text-sky-400 font-semibold">{game.Week}</td>
+                          <td className="py-2 text-slate-400 truncate">{game.Competition}</td>
+                          <td className="py-2 text-slate-400">{game.Round}</td>
+                          <td className="py-2 truncate">{game.home_team}</td>
+                          <td className="py-2 truncate">{game.away_team}</td>
+                          <td className="py-2 text-emerald-400 font-medium">{coder ?? "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Unique analysts with Assign buttons */}
+              {analystNames.size > 0 && (
+                <div className="border-t border-slate-700 px-5 py-3">
+                  <div className="text-[10px] uppercase tracking-wide text-slate-400 mb-2">
+                    Previous analysts for {teamName}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {[...analystNames].sort().map(name => {
+                      const matchedAnalyst = autoAnalysts.find(
+                        a => a.name.trim().toLowerCase() === name.trim().toLowerCase()
+                      );
+
+                      return (
+                        <button
+                          key={name}
+                          disabled={!matchedAnalyst}
+                          onClick={async () => {
+                            if (!matchedAnalyst) return;
+
+                            const location: "Home" | "Office" =
+                              matchedAnalyst.officeComputer ? "Office" : "Home";
+                            const computer = location === "Office"
+                              ? matchedAnalyst.officeComputer
+                              : matchedAnalyst.homeComputer;
+
+                            if (!computer) {
+                              alert(`${name} does not have a computer assigned.`);
+                              return;
+                            }
+
+                            try {
+                              const autoFixture = autoFixtures.find((a: any) => {
+                                const afHome = (a.homeTeam ?? "").trim().toLowerCase();
+                                const afAway = (a.awayTeam ?? "").trim().toLowerCase();
+                                const fHome = (selectedFixture.home_team ?? "").trim().toLowerCase();
+                                const fAway = (selectedFixture.away_team ?? "").trim().toLowerCase();
+                                return afHome === fHome && afAway === fAway;
+                              });
+
+                              if (autoFixture && (autoFixture as any).id) {
+                                await assignFixture(
+                                  (autoFixture as any).id,
+                                  matchedAnalyst.id,
+                                  location
+                                );
+                              }
+
+                              await createDownloadJob({
+                                gameKey: selectedFixture.game_key,
+                                videoUrl: selectedFixture.videoURL ?? "",
+                                analystId: matchedAnalyst.id,
+                                computerId: computer.id,
+                                assignmentLocation: location,
+                                year: selectedFixture.Date.substring(0, 4),
+                                leagueName: selectedFixture.Competition,
+                                fileSizeBytes: autoFixture?.fileSizeBytes ?? null,
+                              });
+
+                              alert(`Assigned to ${name} and download queued.`);
+                              setTeamHistoryOpen(null);
+                            } catch (err) {
+                              console.error(err);
+                              alert(err instanceof Error ? err.message : "Assignment failed.");
+                            }
+                          }}
+                          className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                            matchedAnalyst
+                              ? "bg-sky-600 text-white hover:bg-sky-500"
+                              : "bg-slate-800 text-slate-500 cursor-not-allowed"
+                          }`}
+                        >
+                          {name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="border-t border-slate-700 px-5 py-3">
+                <button
+                  onClick={() => setTeamHistoryOpen(null)}
+                  className="w-full rounded-lg border border-slate-700 py-2 text-sm hover:bg-slate-800"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>)
 }

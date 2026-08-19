@@ -6,6 +6,33 @@ type Props = {
   data: AnalystMetrics["competitions"];
 };
 
+/**
+ * Resolves a league logo path by trying:
+ * 1. Exact match in leagueLogos mapping
+ * 2. Case-insensitive match
+ * 3. Partial match (league name without year suffix)
+ * 4. Fallback to pd.png
+ */
+function getLeagueLogo(league: string): string {
+  // Exact match
+  if (leagueLogos[league]) return leagueLogos[league];
+
+  // Case-insensitive match
+  const lowerLeague = league.toLowerCase().trim();
+  for (const [key, path] of Object.entries(leagueLogos)) {
+    if (key.toLowerCase().trim() === lowerLeague) return path;
+  }
+
+  // Partial match — strip trailing year (e.g. "VAFA Premier A" matches "VAFA Premier A 2026")
+  const withoutYear = lowerLeague.replace(/\s+\d{4}$/, "");
+  for (const [key, path] of Object.entries(leagueLogos)) {
+    const keyWithoutYear = key.toLowerCase().trim().replace(/\s+\d{4}$/, "");
+    if (keyWithoutYear === withoutYear) return path;
+  }
+
+  return "/leagues/pd.png";
+}
+
 export default function LeagueBreakdown({ data }: Props) {
   const leagues = Object.entries(data ?? {}).sort(
     ([, a], [, b]) => b - a
@@ -63,10 +90,7 @@ export default function LeagueBreakdown({ data }: Props) {
                       <div className="flex items-center gap-3">
                         <div className="w-6 h-6 flex items-center justify-center">
                           <img
-                            src={
-                              leagueLogos[league] ??
-                              "/leagues/default.png"
-                            }
+                            src={getLeagueLogo(league)}
                             alt={league}
                             className="w-15 h-15 object-contain"
                           />

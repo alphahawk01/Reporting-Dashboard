@@ -32,8 +32,8 @@ const sections = [
   {
     title: "Analysis",
     links: [
-      { title: "Analysts", href: "/analysts", icon: Users, description: "Analyst profiles, ratings, and computer assignments" },
-      { title: "Teams", href: "/teams", icon: Shield, description: "Team performance and analyst affiliations" },
+      { title: "Analyst Management", href: "/analyst-management", icon: Users, description: "Analyst profiles, ratings, and computer assignments" },
+      { title: "Affiliated Teams", href: "/affiliated-teams", icon: Shield, description: "Team performance and analyst affiliations" },
       { title: "Reporting", href: "/reporting", icon: BarChart3, description: "Workforce hours, costs, and performance analytics" },
     ],
   },

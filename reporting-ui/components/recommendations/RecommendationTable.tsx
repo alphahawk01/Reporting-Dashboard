@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 
 import type { Recommendation } from "@/lib/recommendations/recommendationEngine";
 import type { TTGame } from "@/types/ttgame";
@@ -38,6 +38,23 @@ export default function RecommendationTable({
 }: Props) {
 
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [dayFilter, setDayFilter] = useState<string[]>([]);
+
+  const toggleDay = (day: string) => {
+    setDayFilter(prev =>
+      prev.includes(day)
+        ? prev.filter(d => d !== day)
+        : [...prev, day]
+    );
+  };
+
+  const filteredRecommendations = useMemo(() => {
+    if (dayFilter.length === 0) return recommendations;
+
+    return recommendations.filter(r =>
+      dayFilter.every(day => r.availabilityDays.includes(day))
+    );
+  }, [recommendations, dayFilter]);
 
   if (recommendations.length === 0) {
     return (
@@ -48,7 +65,47 @@ export default function RecommendationTable({
   }
 
   return (
-    <div className="mt-8 w-full overflow-hidden rounded-xl border border-slate-700">
+    <div className="mt-4 w-full overflow-hidden rounded-xl border border-slate-700">
+
+      {/* DAY FILTER */}
+      <div className="flex items-center gap-2 border-b border-slate-700 bg-slate-900/50 px-4 py-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 shrink-0">
+          Filter by day:
+        </span>
+        <div className="flex gap-1">
+          {weekDays.map(day => {
+            const active = dayFilter.includes(day.full);
+            return (
+              <button
+                key={day.full}
+                onClick={() => toggleDay(day.full)}
+                className={`flex h-7 w-7 items-center justify-center rounded text-[10px] font-bold transition ${
+                  active
+                    ? "bg-sky-500 text-white border border-sky-400"
+                    : "bg-slate-800 text-slate-400 border border-slate-700 hover:border-slate-500"
+                }`}
+                title={day.full}
+              >
+                {day.short}
+              </button>
+            );
+          })}
+        </div>
+        {dayFilter.length > 0 && (
+          <button
+            onClick={() => setDayFilter([])}
+            className="ml-2 text-[10px] text-slate-500 hover:text-white"
+          >
+            Clear
+          </button>
+        )}
+        {dayFilter.length > 0 && (
+          <span className="ml-auto text-[10px] text-slate-500">
+            {filteredRecommendations.length} of {recommendations.length} analysts
+          </span>
+        )}
+      </div>
+
       <table className="table-fixed w-full">
         <thead className="bg-slate-900">
           <tr>
@@ -80,7 +137,7 @@ export default function RecommendationTable({
         </thead>
 
         <tbody>
-          {recommendations.slice(0, 5).map((r, index) => {
+          {filteredRecommendations.slice(0, 5).map((r, index) => {
             const medal =
               index === 0
                 ? "🥇"

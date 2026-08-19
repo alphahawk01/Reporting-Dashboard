@@ -76,11 +76,11 @@ const sections = [
 },
 
 {
-  heading: "ANALYSTS",
+  heading: "ANALYST MANAGEMENT",
   items: [
     {
-      title: "Analysts",
-      href: "/analysts",
+      title: "Analyst Management",
+      href: "/analyst-management",
       icon: Users,
     },
     {
@@ -89,8 +89,8 @@ const sections = [
       icon: Users,
     },
     {
-      title: "Teams",
-      href: "/teams",
+      title: "Affiliated Teams",
+      href: "/affiliated-teams",
       icon: Shield,
     },
   ],

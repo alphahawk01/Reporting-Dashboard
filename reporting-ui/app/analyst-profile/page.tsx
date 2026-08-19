@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import AnalystHero from "./AnalystHero";
 import StrengthPanel from "./StrengthPanel";
@@ -18,12 +19,26 @@ import type { TTGame } from "@/types/ttgame";
 import { supabase } from "@/lib/supabase";
 import { buildAnalystMetrics } from "@/lib/analytics/buildAnalystMetrics";
 import type { AnalystMetrics } from "@/types/analyst";
+
 export default function AnalystProfilePage() {
-  const [selectedAnalyst, setSelectedAnalyst] = useState("All");
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#0b1220] text-white p-10">Loading...</div>}>
+      <AnalystProfileContent />
+    </Suspense>
+  );
+}
+
+function AnalystProfileContent() {
+  const searchParams = useSearchParams();
+  const analystParam = searchParams.get("analyst");
+  const [selectedAnalyst, setSelectedAnalyst] = useState(analystParam ?? "All");
   const [analysts, setAnalysts] = useState<AnalystMetrics[]>([]);
   const [shifts, setShifts] = useState<DeputyShift[]>([]);
   const [games, setGames] = useState<TTGame[]>([]);
+  const [teamLogoMap, setTeamLogoMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [gameSortField, setGameSortField] = useState("Week");
+  const [gameSortDir, setGameSortDir] = useState<"asc" | "desc">("desc");
 
   const PAGE_SIZE = 1000;
 
@@ -66,6 +81,25 @@ async function fetchAll<T>(table: string): Promise<T[]> {
 
 const shiftsData = await fetchAll<DeputyShift>("deputy_shifts");
 const gamesData = await fetchAll<TTGame>("TT_Games");
+
+      // Fetch team logos from Supabase
+      try {
+        const { data: teamsData, error: teamsError } = await supabase
+          .from("teams")
+          .select("team_name, logo_url");
+
+        if (!teamsError && teamsData) {
+          const logoMap: Record<string, string> = {};
+          for (const row of teamsData) {
+            if (row.team_name && row.logo_url) {
+              logoMap[row.team_name.trim().toLowerCase()] = row.logo_url;
+            }
+          }
+          setTeamLogoMap(logoMap);
+        }
+      } catch {
+        // Fall back to static clubLogos mapping
+      }
 
       setShifts(shiftsData);
       setGames(gamesData);
@@ -281,7 +315,7 @@ const filteredGames = useMemo(() => {
               </div>
 
               <div className="h-full">
-                <TeamBreakdown data={activeData.teams} />
+                <TeamBreakdown data={activeData.teams} logoMap={teamLogoMap} />
               </div>
             </div>
 
@@ -295,6 +329,131 @@ const filteredGames = useMemo(() => {
                 <StrengthPanel data={activeData} />
               </div>
             </div>
+
+            {/* CODED GAMES */}
+            {filteredGames.length > 0 && (() => {
+              const [gameSort, setGameSort] = [gameSortField, setGameSortField];
+              const [gameDir, setGameDir] = [gameSortDir, setGameSortDir];
+
+              const sortedGames = [...filteredGames].sort((a, b) => {
+                const dir = gameDir === "asc" ? 1 : -1;
+                switch (gameSort) {
+                  case "Week": return (Number(a.Week) - Number(b.Week)) * dir;
+                  case "Competition": return (a.Competition ?? "").localeCompare(b.Competition ?? "") * dir;
+                  case "Round": return (Number(a.Round) - Number(b.Round)) * dir;
+                  case "home_team": return (a.home_team ?? "").localeCompare(b.home_team ?? "") * dir;
+                  case "away_team": return (a.away_team ?? "").localeCompare(b.away_team ?? "") * dir;
+                  case "role": {
+                    const name = activeData?.name ?? selectedAnalyst;
+                    const roleA = a.home_allocated === name && a.away_allocated === name ? "Both" : a.home_allocated === name ? "Home" : "Away";
+                    const roleB = b.home_allocated === name && b.away_allocated === name ? "Both" : b.home_allocated === name ? "Home" : "Away";
+                    return roleA.localeCompare(roleB) * dir;
+                  }
+                  default: return 0;
+                }
+              });
+
+              const handleGameSort = (field: string) => {
+                if (gameSort === field) {
+                  setGameDir(gameDir === "asc" ? "desc" : "asc");
+                } else {
+                  setGameSortField(field);
+                  setGameDir("asc");
+                }
+              };
+
+              const SortIcon = ({ field }: { field: string }) => {
+                if (gameSort !== field) return null;
+                return <span>{gameDir === "asc" ? " ▲" : " ▼"}</span>;
+              };
+
+              return (
+                <div className="rounded-xl border border-slate-700 bg-[#0f1b2d] p-5">
+                  <h3 className="mb-4 text-lg font-bold text-white">
+                    Games Coded ({filteredGames.length})
+                  </h3>
+
+                  <div className="overflow-hidden rounded-lg border border-slate-700">
+                    <table className="w-full table-fixed text-left text-xs">
+                      <colgroup>
+                        <col className="w-[8%]" />
+                        <col className="w-[25%]" />
+                        <col className="w-[8%]" />
+                        <col className="w-[22%]" />
+                        <col className="w-[22%]" />
+                        <col className="w-[15%]" />
+                      </colgroup>
+                      <thead className="bg-slate-800 text-slate-400 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 cursor-pointer hover:text-white" onClick={() => handleGameSort("Week")}>
+                            Wk<SortIcon field="Week" />
+                          </th>
+                          <th className="px-3 py-2 cursor-pointer hover:text-white" onClick={() => handleGameSort("Competition")}>
+                            Competition<SortIcon field="Competition" />
+                          </th>
+                          <th className="px-3 py-2 cursor-pointer hover:text-white" onClick={() => handleGameSort("Round")}>
+                            Rnd<SortIcon field="Round" />
+                          </th>
+                          <th className="px-3 py-2 cursor-pointer hover:text-white" onClick={() => handleGameSort("home_team")}>
+                            Home<SortIcon field="home_team" />
+                          </th>
+                          <th className="px-3 py-2 cursor-pointer hover:text-white" onClick={() => handleGameSort("away_team")}>
+                            Away<SortIcon field="away_team" />
+                          </th>
+                          <th className="px-3 py-2 cursor-pointer hover:text-white" onClick={() => handleGameSort("role")}>
+                            Role<SortIcon field="role" />
+                          </th>
+                        </tr>
+                      </thead>
+                    </table>
+                    <div className="max-h-[400px] overflow-y-auto">
+                      <table className="w-full table-fixed text-left text-xs">
+                        <colgroup>
+                          <col className="w-[8%]" />
+                          <col className="w-[25%]" />
+                          <col className="w-[8%]" />
+                          <col className="w-[22%]" />
+                          <col className="w-[22%]" />
+                          <col className="w-[15%]" />
+                        </colgroup>
+                        <tbody>
+                          {sortedGames.map((game, i) => {
+                            const name = activeData?.name ?? selectedAnalyst;
+                            const isHome = game.home_allocated === name;
+                            const isAway = game.away_allocated === name;
+                            const role = isHome && isAway ? "Both" : isHome ? "Home" : "Away";
+
+                            return (
+                              <tr
+                                key={`${game.game_key}-${i}`}
+                                className="border-t border-slate-700 hover:bg-slate-800"
+                              >
+                                <td className="px-3 py-2 text-sky-400 font-semibold">{game.Week}</td>
+                                <td className="px-3 py-2 truncate text-slate-400">{game.Competition}</td>
+                                <td className="px-3 py-2 text-slate-400">{game.Round}</td>
+                                <td className="px-3 py-2 truncate">{game.home_team}</td>
+                                <td className="px-3 py-2 truncate">{game.away_team}</td>
+                                <td className="px-3 py-2">
+                                  <span className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
+                                    role === "Both"
+                                      ? "bg-emerald-500/20 text-emerald-300"
+                                      : role === "Home"
+                                        ? "bg-sky-500/20 text-sky-300"
+                                        : "bg-amber-500/20 text-amber-300"
+                                  }`}>
+                                    {role}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
           </>
         ) : (

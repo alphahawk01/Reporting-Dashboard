@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { Computer } from "@/lib/api/computers";
 
 interface AssignedComputer {
@@ -211,8 +212,13 @@ export default function AnalystTable({
                                                 <div className="
                                                     truncate
                                                     font-medium
+                                                    text-blue-600
+                                                    hover:text-blue-800
+                                                    hover:underline
                                                 ">
-                                                    {analyst.name}
+                                                    <Link href={`/analyst-profile?analyst=${encodeURIComponent(analyst.name)}`}>
+                                                        {analyst.name}
+                                                    </Link>
                                                 </div>
 
                                                 <div className="
