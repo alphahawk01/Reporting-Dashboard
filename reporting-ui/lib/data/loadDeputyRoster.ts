@@ -1,10 +1,38 @@
+import { supabase } from "@/lib/supabase";
 import type { DeputyRoster } from "@/types/deputyRoster";
 
 export async function loadDeputyRoster(): Promise<DeputyRoster[]> {
-    const response = await fetch("/data/deputy-roster.csv");
 
-    const text = await response.text();
+    const {
+        data,
+        error,
+    } = await supabase
+        .from("deputy_roster")
+        .select("*")
+        .order(
+            "shift_date",
+            {
+                ascending: true,
+            }
+        );
 
-    // We'll parse this next
-    return [];
+
+    if (error) {
+
+        console.error(
+            "Failed loading Deputy roster:",
+            error
+        );
+
+        throw new Error(
+            "Failed loading Deputy roster"
+        );
+
+    }
+
+
+    return (
+        data ?? []
+    ) as DeputyRoster[];
+
 }

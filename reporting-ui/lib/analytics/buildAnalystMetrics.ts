@@ -212,13 +212,6 @@ export function buildAnalystMetrics(
       }
     }
   }
-
-  console.log({
-    totalRows: games.length,
-    homeCount,
-    awayCount,
-  });
-
   // =====================================================
   // FINAL CALCULATIONS
   // =====================================================
@@ -289,11 +282,7 @@ export function buildAnalystMetrics(
       analyst.avgHoursPerWeek.toFixed(2)
     );
 
-    console.log(
-      analyst.name,
-      "Games/Week:",
-      analyst.avgGamesPerWeek
-    );
+
     // NOW calculate ratings
     const ratings = buildRatings(analyst);
     const overall = buildOverall(

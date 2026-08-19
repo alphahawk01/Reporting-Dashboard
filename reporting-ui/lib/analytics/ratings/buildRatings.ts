@@ -71,38 +71,5 @@ export function buildRatings(
     ),
   };
 
-  console.log("========== BUILD RATINGS ==========");
-  console.log("Analyst:", analyst.name);
-
-  console.log({
-    avgHoursPerGame: analyst.avgHoursPerGame,
-    avgCostPerGame: analyst.avgCostPerGame,
-    avgHoursPerWeek: analyst.avgHoursPerWeek,
-    avgGamesPerWeek: analyst.avgGamesPerWeek,
-
-    speedRating: ratings.speed,
-    efficiencyRating: ratings.efficiency,
-    experienceRating: ratings.experience,
-    workRateRating: ratings.workRate,
-    consistencyRating: ratings.consistency,
-    versatilityRating: ratings.versatility,
-    knowledgeRating: ratings.knowledge,
-  });
-
-  console.log("Consistency Value:", consistencyValue);
-  console.log("Consistency Bands:", ratingBands.consistency);
-
-  console.log(
-    "Is NaN?",
-    Number.isNaN(consistencyValue)
-  );
-
-  console.log(
-    "Is Finite?",
-    Number.isFinite(consistencyValue)
-  );
-
-  console.log("==============================");
-
   return ratings;
 }

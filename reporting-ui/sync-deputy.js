@@ -81,11 +81,22 @@ function excelTimeToString(value) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-function excelDateToJS(serial) {
-  if (!serial) return null;
-  return new Date((serial - 25569) * 86400 * 1000)
-    .toISOString()
-    .split("T")[0];
+function excelDateToJS(value) {
+  if (!value) return null;
+
+  // Already an ISO date string (CSV)
+  if (typeof value === "string") {
+    return value.split("T")[0];
+  }
+
+  // Excel serial number (XLSX)
+  const date = new Date((Number(value) - 25569) * 86400 * 1000);
+
+  if (isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toISOString().split("T")[0];
 }
 
 // ----------------------
@@ -153,74 +164,89 @@ function parseDeputyData(buffer) {
   const workbook = XLSX.read(buffer, { type: "buffer" });
   const sheet = getSheet(workbook, ["DeputyRawData"]);
 
-const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+  console.log("TT Header:", rows[0]);
+  console.log("First TT Row:", rows[1]);
+  console.log("Raw rows:", rows.length);
 
-console.log("Raw rows:", rows.length);
+  let skipped = 0;
 
-let skipped = 0;
+  const filtered = rows.slice(1).filter((r, i) => {
+    if (!r || !r[0]) {
+      skipped++;
 
-const filtered = rows.slice(1).filter((r, i) => {
-  if (!r || !r[0]) {
-    skipped++;
+      console.log(
+        "Skipped row",
+        i + 2,
+        JSON.stringify(r)
+      );
 
-    console.log(
-      "Skipped row",
-      i + 2,
-      JSON.stringify(r)
-    );
+      return false;
+    }
 
-    return false;
-  }
+    return true;
+  });
 
-  return true;
-});
+  console.log("Skipped rows:", skipped);
+  console.log("Rows after filter:", filtered.length);
 
-console.log("Skipped rows:", skipped);
-console.log("Rows after filter:", filtered.length);
+  return filtered.map(r => ({
+    shift_key: `${r[0]}_${r[2]}_${r[3]}_${r[4]}`,
 
-return filtered.map(r => ({
-  shift_key: `${r[0]}_${r[2]}_${r[3]}_${r[4]}`,
+    employee_name: r[0],
+    level: String(r[1] || ""),
 
-  employee_name: r[0],
-  level: String(r[1] || ""),
+    shift_date: excelDateToJS(r[2]),
+    start_time: excelTimeToString(r[3]),
+    end_time: excelTimeToString(r[4]),
+    meal_break: excelTimeToString(r[5]),
 
-  shift_date: excelDateToJS(r[2]),
-  start_time: excelTimeToString(r[3]),
-  end_time: excelTimeToString(r[4]),
-  meal_break: excelTimeToString(r[5]),
+    total_hours: Number(r[6]) || 0,
+    total_cost: Number(r[7]) || 0,
 
-  total_hours: Number(r[6]) || 0,
-  total_cost: Number(r[7]) || 0,
+    employee_comment: r[8] || null,
+    hourly_rate: Number(r[9]) || 0,
 
-  employee_comment: r[8] || null,
-  hourly_rate: Number(r[9]) || 0,
+    area_name: String(r[10] || "").trim(),
 
-  area_name: String(r[10] || "").trim(),
-
-  comment: r[11] || null,
-  day_name: r[12] || null,
-  month_name: r[13] || null,
-  week: r[14] == null || r[14] === "" ? 0 : Number(r[14]),
-  source_file: "DeputyRawData",
-}));
+    comment: r[11] || null,
+    day_name: r[12] || null,
+    month_name: r[13] || null,
+    week: r[14] == null || r[14] === "" ? 0 : Number(r[14]),
+    source_file: "DeputyRawData",
+  }));
 }
 
 // ----------------------
-// PARSE TT (FIXED)
+// PARSE TT
 // ----------------------
 function parseTTData(buffer) {
+
   const workbook = XLSX.read(buffer, { type: "buffer" });
   const sheet = getSheet(workbook, ["TTRawData"]);
 
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-  return rows
+  console.log("TT Header:", rows[0]);
+  console.dir(rows[1], { depth: null });
+  console.log("Row length:", rows[1].length);
+
+  rows[0].forEach((header, index) => {
+    console.log(index, "=", header);
+  });
+
+  rows[1].forEach((value, index) => {
+    console.log(index, "=", value);
+  });
+  console.log("Raw videoURL value:", rows[1][13]);
+
+  const parsed = rows
     .slice(1)
     .filter(r => r && r.length)
     .map(r => ({
-      game_key: `${r[0]}_${r[3]}_${r[4]}`,
 
-      // 🔥 FIX HERE
+      game_key: `${excelDateToJS(r[0])}_${r[3]}_${r[4]}`,
+
       Date: excelDateToJS(r[0]),
 
       Competition: r[1] || null,
@@ -234,11 +260,25 @@ function parseTTData(buffer) {
 
       Location: r[7] || null,
       Additional: r[8] || null,
-      Week: r[9] == null || r[9] === "" ? 0 : Number(r[9]),
-      Column11: r[10] || null,
-      expected_day: r[11] || null,
+
+      Week:
+        r[9] == null || r[9] === ""
+          ? 0
+          : Number(r[9]),
+
+      Column11: r[10] || null,      // Month
+
+      expected_day: r[11] || null,  // Completion day
+
+      videoURL: r[12] || null,
+
     }));
+
+  console.log("First Parsed TT Row:", parsed[0]);
+
+  return parsed;
 }
+
 // ----------------------
 // DEDUPE
 // ----------------------
@@ -266,6 +306,8 @@ function dedupe(records, key) {
 async function uploadToSupabase(records) {
   for (let i = 0; i < records.length; i += CHUNK_SIZE) {
     const chunk = records.slice(i, i + CHUNK_SIZE);
+    console.log(JSON.stringify(chunk[0], null, 2));
+    return;
 
     console.log("Uploading Deputy chunk:", chunk.length);
 

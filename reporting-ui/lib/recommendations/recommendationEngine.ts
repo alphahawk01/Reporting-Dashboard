@@ -16,17 +16,12 @@ import type { RecommendationContext } from "./types";
 // ------------------------------------------------
 
 export interface EvidenceItem {
-
     label: string;
-
     value: number | string;
-
     assessment: string;
-
 }
 
 export interface RecommendationEvidence {
-
     leagueGames: number;
 
     homeTeamGames: number;
@@ -43,6 +38,9 @@ export interface RecommendationEvidence {
 
     awayTeamName?: string;
 
+    affiliationScore: number;
+
+    affiliatedTeams: string[];
 }
 
 // ------------------------------------------------
@@ -50,16 +48,15 @@ export interface RecommendationEvidence {
 // ------------------------------------------------
 
 export interface Recommendation {
-
     analyst: AnalystMetrics;
 
     score: number;
 
     confidence:
-    | "Excellent"
-    | "High"
-    | "Medium"
-    | "Low";
+        | "Excellent"
+        | "High"
+        | "Medium"
+        | "Low";
 
     summary: string;
 
@@ -68,16 +65,43 @@ export interface Recommendation {
     availability: string;
 
     availabilityDays: string[];
-    availabilityMatchesFixture: boolean;
 
+    availabilityMatchesFixture: boolean;
 }
+
+// ------------------------------------------------
+// TEAM NAME NORMALISATION
+// ------------------------------------------------
+
+function normaliseTeamName(
+    name: string | null | undefined
+): string {
+    return (name ?? "")
+        .trim()
+        .toLowerCase();
+}
+
+// ------------------------------------------------
+// BUILD RECOMMENDATIONS
+// ------------------------------------------------
 
 export function buildRecommendations(
     fixture: TTGame,
     analysts: AnalystMetrics[],
     historicalGames: TTGame[],
-    analystAvailability: Map<string, string[]>
+    analystAvailability: Map<string, string[]>,
+    analystAffiliations: Map<string, string[]>
 ): Recommendation[] {
+
+    const homeTeam =
+        normaliseTeamName(
+            fixture.home_team
+        );
+
+    const awayTeam =
+        normaliseTeamName(
+            fixture.away_team
+        );
 
     return analysts
 
@@ -91,48 +115,122 @@ export function buildRecommendations(
             };
 
             const availabilityDays =
-                analystAvailability.get(analyst.key) ?? [];
+                analystAvailability.get(
+                    analyst.key
+                ) ?? [];
 
             const expectedDay =
                 fixture.expected_day ?? "";
 
             const availabilityMatchesFixture =
-                availabilityDays.includes(expectedDay);
+                availabilityDays.includes(
+                    expectedDay
+                );
 
             const availability =
                 availabilityDays.length > 0
                     ? availabilityDays.join(", ")
                     : "No upcoming shifts";
 
+            // ------------------------------------------------
+            // TEAM AFFILIATION
+            // ------------------------------------------------
+
+            const affiliations =
+                analystAffiliations.get(
+                    analyst.name
+                        .trim()
+                        .toLowerCase()
+                ) ?? [];
+
+            const normalisedAffiliations =
+                affiliations.map(
+                    normaliseTeamName
+                );
+
+            const affiliatedWithHome =
+                normalisedAffiliations.includes(
+                    homeTeam
+                );
+
+            const affiliatedWithAway =
+                normalisedAffiliations.includes(
+                    awayTeam
+                );
+
+            let affiliationScore = 0;
+
+            if (affiliatedWithHome) {
+                affiliationScore += 10;
+            }
+
+            if (affiliatedWithAway) {
+                affiliationScore += 10;
+            }
+
+            const affiliatedTeams =
+                affiliations.filter(
+                    (team) => {
+
+                        const normalisedTeam =
+                            normaliseTeamName(
+                                team
+                            );
+
+                        return (
+                            normalisedTeam ===
+                                homeTeam ||
+                            normalisedTeam ===
+                                awayTeam
+                        );
+
+                    }
+                );
+
             // ----------------------------
             // KPI SCORES
             // ----------------------------
 
             const league =
-                scoreLeagueExperience(context);
+                scoreLeagueExperience(
+                    context
+                );
 
             const home =
-                scoreHomeTeamExperience(context);
+                scoreHomeTeamExperience(
+                    context
+                );
 
             const away =
-                scoreAwayTeamExperience(context);
+                scoreAwayTeamExperience(
+                    context
+                );
 
             const recent =
-                scoreRecentExperience(context);
+                scoreRecentExperience(
+                    context
+                );
 
             const quality =
-                scoreQuality(context);
+                scoreQuality(
+                    context
+                );
 
             // ----------------------------
             // FINAL SCORE
             // ----------------------------
 
-            const score =
-                league +
-                home +
-                away +
-                recent +
-                quality;
+            const rawScore =
+    league +
+    home +
+    away +
+    recent +
+    quality +
+    affiliationScore;
+
+const score =
+    Math.min(rawScore, 100);
+
             // ----------------------------
             // CONFIDENCE
             // ----------------------------
@@ -156,19 +254,47 @@ export function buildRecommendations(
             // SUMMARY
             // ----------------------------
 
-            let summary = "Suitable recommendation based on available experience.";
+            let summary =
+                "Suitable recommendation based on available experience.";
 
-            if (home >= 20 || away >= 20) {
-                summary = "Extensive experience with one or both teams.";
+            if (affiliationScore === 20) {
+
+                summary =
+                    "Affiliated with both teams in this fixture.";
+
+            }
+            else if (affiliationScore === 10) {
+
+                summary =
+                    "Affiliated with one of the teams in this fixture.";
+
+            }
+            else if (
+                home >= 20 ||
+                away >= 20
+            ) {
+
+                summary =
+                    "Extensive experience with one or both teams.";
+
             }
             else if (league >= 16) {
-                summary = "Highly experienced in this competition.";
+
+                summary =
+                    "Highly experienced in this competition.";
+
             }
             else if (recent >= 9) {
-                summary = "Strong recent experience in this league.";
+
+                summary =
+                    "Strong recent experience in this league.";
+
             }
             else if (quality >= 2) {
-                summary = "High-performing analyst.";
+
+                summary =
+                    "High-performing analyst.";
+
             }
 
             // ----------------------------
@@ -179,7 +305,7 @@ export function buildRecommendations(
 
                 leagueGames:
                     context.analyst.competitions[
-                    fixture.Competition ?? ""
+                        fixture.Competition ?? ""
                     ] ?? 0,
 
                 homeTeamGames:
@@ -193,22 +319,39 @@ export function buildRecommendations(
                     ]?.count ?? 0,
 
                 recentGames:
-                    historicalGames.filter(game => {
+                    historicalGames.filter(
+                        (game) => {
 
-                        const gameWeek =
-                            Number(game.Week);
+                            const gameWeek =
+                                Number(
+                                    game.Week
+                                );
 
-                        return (
-                            game.Competition === fixture.Competition &&
-                            gameWeek >= Number(fixture.Week) - 5 &&
-                            gameWeek < Number(fixture.Week) &&
-                            (
-                                game.home_allocated === analyst.name ||
-                                game.away_allocated === analyst.name
-                            )
-                        );
+                            return (
+                                game.Competition ===
+                                    fixture.Competition &&
 
-                    }).length,
+                                gameWeek >=
+                                    Number(
+                                        fixture.Week
+                                    ) - 5 &&
+
+                                gameWeek <
+                                    Number(
+                                        fixture.Week
+                                    ) &&
+
+                                (
+                                    game.home_allocated ===
+                                        analyst.name ||
+
+                                    game.away_allocated ===
+                                        analyst.name
+                                )
+                            );
+
+                        }
+                    ).length,
 
                 overallRating:
                     analyst.ratings.overall,
@@ -222,20 +365,40 @@ export function buildRecommendations(
                 awayTeamName:
                     fixture.away_team ?? "",
 
+                affiliationScore,
+
+                affiliatedTeams,
+
             };
 
             return {
+
                 analyst,
+
+                computerId: null,
+
+                location: "Office",
+
                 score,
+
                 confidence,
+
                 summary,
+
                 evidence,
+
                 availability,
+
                 availabilityDays,
+
                 availabilityMatchesFixture,
+
             };
 
         })
-        .sort((a, b) => b.score - a.score);
 
+        .sort(
+            (a, b) =>
+                b.score - a.score
+        );
 }

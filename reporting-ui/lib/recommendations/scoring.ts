@@ -14,10 +14,10 @@ export function scoreLeagueExperience(
     const games =
         context.analyst.competitions[league] ?? 0;
 
-    if (games >= 10) return 50;
-    if (games >= 8) return 40;
-    if (games >= 6) return 30;
-    if (games >= 4) return 20;
+    if (games >= 10) return 40;
+    if (games >= 7) return 30;
+    if (games >= 5) return 25;
+    if (games >= 3) return 15;
     if (games >= 1) return 10;
 
     return 0;
@@ -37,11 +37,11 @@ export function scoreHomeTeamExperience(
     const games =
         context.analyst.teams[team]?.count ?? 0;
 
-    if (games >= 9) return 20;
-    if (games >= 7) return 16;
-    if (games >= 5) return 12;
-    if (games >= 3) return 8;
-    if (games >= 1) return 4;
+    if (games >= 7) return 25;
+    if (games >= 5) return 20;
+    if (games >= 3) return 16;
+    if (games >= 2) return 12;
+    if (games >= 1) return 6;
 
     return 0;
 }
@@ -60,11 +60,11 @@ export function scoreAwayTeamExperience(
     const games =
         context.analyst.teams[team]?.count ?? 0;
 
-    if (games >= 9) return 20;
-    if (games >= 7) return 16;
-    if (games >= 5) return 12;
-    if (games >= 3) return 8;
-    if (games >= 1) return 4;
+    if (games >= 7) return 25;
+    if (games >= 5) return 20;
+    if (games >= 3) return 16;
+    if (games >= 2) return 12;
+    if (games >= 1) return 6;
 
     return 0;
 }

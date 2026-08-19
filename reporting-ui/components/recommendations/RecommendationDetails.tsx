@@ -11,6 +11,16 @@ export default function RecommendationDetails({
     fixture,
 }: Props) {
 
+    const affiliatedTeams =
+        recommendation.evidence.affiliatedTeams ?? [];
+
+    const affiliationScore =
+        recommendation.evidence.affiliationScore ?? 0;
+
+    const hasAffiliation =
+        affiliatedTeams.length > 0 &&
+        affiliationScore > 0;
+
     return (
 
         <div className="bg-slate-900 p-5">
@@ -43,6 +53,48 @@ export default function RecommendationDetails({
 
                 <tbody>
 
+                    {/* AFFILIATION */}
+
+                    {hasAffiliation && (
+                        <tr className="border-b border-slate-800">
+
+                            <td className="py-3">
+
+                                <div className="flex items-center gap-2">
+
+                                    <span>
+                                        Team Affiliation
+                                    </span>
+
+                                    <span className="rounded bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+                                        Bonus
+                                    </span>
+
+                                </div>
+
+                            </td>
+
+                            <td className="py-3 text-right">
+
+                                <div className="flex flex-col items-end">
+
+                                    <span className="font-medium text-amber-300">
+                                        {affiliatedTeams.join(" · ")}
+                                    </span>
+
+                                    <span className="text-xs font-semibold text-amber-400">
+                                        +{affiliationScore} points
+                                    </span>
+
+                                </div>
+
+                            </td>
+
+                        </tr>
+                    )}
+
+                    {/* HOME TEAM EXPERIENCE */}
+
                     <tr className="border-b border-slate-800">
 
                         <td className="py-3">
@@ -54,6 +106,8 @@ export default function RecommendationDetails({
                         </td>
 
                     </tr>
+
+                    {/* AWAY TEAM EXPERIENCE */}
 
                     <tr className="border-b border-slate-800">
 
@@ -67,6 +121,8 @@ export default function RecommendationDetails({
 
                     </tr>
 
+                    {/* LEAGUE EXPERIENCE */}
+
                     <tr className="border-b border-slate-800">
 
                         <td className="py-3">
@@ -78,6 +134,8 @@ export default function RecommendationDetails({
                         </td>
 
                     </tr>
+
+                    {/* RECENT EXPERIENCE */}
 
                     <tr className="border-b border-slate-800">
 
@@ -91,6 +149,8 @@ export default function RecommendationDetails({
 
                     </tr>
 
+                    {/* OVERALL RATING */}
+
                     <tr className="border-b border-slate-800">
 
                         <td className="py-3">
@@ -102,6 +162,8 @@ export default function RecommendationDetails({
                         </td>
 
                     </tr>
+
+                    {/* AVAILABILITY */}
 
                     <tr className="border-b border-slate-800">
 
@@ -116,6 +178,8 @@ export default function RecommendationDetails({
                         </td>
 
                     </tr>
+
+                    {/* TOTAL GAMES */}
 
                     <tr className="border-b border-slate-800">
 
@@ -136,5 +200,4 @@ export default function RecommendationDetails({
         </div>
 
     );
-
 }

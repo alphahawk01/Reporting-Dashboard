@@ -114,10 +114,10 @@ export default function DashboardClient({
   // -------------------------
   // ANALYST METRICS
   // -------------------------
-const analystMetrics = useMemo(() => {
-  return buildAnalystMetrics(filtered, filteredTT);
-}, [filtered, filteredTT]);
-  
+  const analystMetrics = useMemo(() => {
+    return buildAnalystMetrics(filtered, filteredTT);
+  }, [filtered, filteredTT]);
+
   // -------------------------
   // SELECTED ANALYST
   // -------------------------
@@ -134,75 +134,101 @@ const analystMetrics = useMemo(() => {
   // -------------------------
   // DEBUG
   // -------------------------
-useEffect(() => {
-  console.log("🔥 DASHBOARD UPDATED");
+  useEffect(() => {
+    console.log("🔥 DASHBOARD UPDATED");
 
-  console.log("📊 RAW deputyData:", deputyData?.length);
-  console.log("📊 RAW ttData:", ttData?.length);
+    console.log("📊 RAW deputyData:", deputyData?.length);
+    console.log("📊 RAW ttData:", ttData?.length);
 
-  console.log("📊 FILTERED:", filtered?.length);
-  console.log("📊 FILTERED TT:", filteredTT?.length);
+    console.log("📊 FILTERED:", filtered?.length);
+    console.log("📊 FILTERED TT:", filteredTT?.length);
 
-  console.log("📊 METRICS:", analystMetrics?.length);
-  console.log("📊 FIRST ANALYST:", analystMetrics?.[0]);
-}, [
-  deputyData,
-  ttData,
-  filtered,
-  filteredTT,
-  analystMetrics
-]);
-if (!analystMetrics?.length) {
-  console.log("❌ No analyst metrics generated");
-  return null;
-}
-console.log("👤 SELECTED EMPLOYEE:", employee);
-console.log("👤 SELECTED ANALYST:", selectedAnalyst?.name);
+    console.log("📊 METRICS:", analystMetrics?.length);
+    console.log("📊 FIRST ANALYST:", analystMetrics?.[0]);
+  }, [
+    deputyData,
+    ttData,
+    filtered,
+    filteredTT,
+    analystMetrics
+  ]);
+  if (!analystMetrics?.length) {
+    console.log("❌ No analyst metrics generated");
+    return null;
+  }
+  console.log("👤 SELECTED EMPLOYEE:", employee);
+  console.log("👤 SELECTED ANALYST:", selectedAnalyst?.name);
   // -------------------------
   // RENDER
   // -------------------------
   return (
     <DashboardLayout>
       <main style={{ minHeight: "100vh", padding: 32, background: "#F4F7FB" }}>
-<Header />
+        <Header />
 
-<div
-  style={{
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 20,
-  }}
->
-  <h1
-    style={{
-      fontSize: 28,
-      fontWeight: 700,
-      margin: 0,
-    }}
-  >
-    📊 Reporting Dashboard
-  </h1>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 20,
+          }}
+        >
+          <h1
+            style={{
+              fontSize: 28,
+              fontWeight: 700,
+              margin: 0,
+            }}
+          >
+            📊 Reporting Dashboard
+          </h1>
 
-  <Link
-    href="/analyst-profile"
-    style={{
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: "10px 18px",
-      borderRadius: 10,
-      background: "#0F172A",
-      color: "#FFFFFF",
-      fontSize: 14,
-      fontWeight: 600,
-      textDecoration: "none",
-      cursor: "pointer",
-    }}
-  >
-    View Analyst Profiles →
-  </Link>
-</div>
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+            }}
+          >
+            <Link
+              href="/analyst-profile"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "10px 18px",
+                borderRadius: 10,
+                background: "#0F172A",
+                color: "#FFFFFF",
+                fontSize: 14,
+                fontWeight: 600,
+                textDecoration: "none",
+                cursor: "pointer",
+              }}
+            >
+              View Analyst Profiles →
+            </Link>
+
+            <Link
+              href="/computers"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "10px 18px",
+                borderRadius: 10,
+                background: "#0F172A",
+                color: "#FFFFFF",
+                fontSize: 14,
+                fontWeight: 600,
+                textDecoration: "none",
+                cursor: "pointer",
+              }}
+            >
+              Computers →
+            </Link>
+          </div>
+        </div>
 
         <Tabs defaultValue="overview">
           <TabsList>
@@ -211,48 +237,48 @@ console.log("👤 SELECTED ANALYST:", selectedAnalyst?.name);
             <TabsTrigger value="performance">Performance</TabsTrigger>
             <TabsTrigger value="bonus">Bonus</TabsTrigger>
           </TabsList>
-{/* OVERVIEW */}
-<TabsContent value="overview">
-  {/* KPI CARDS */}
-  <div
-    style={{
-      display: "grid",
-      gridTemplateColumns: "repeat(4, 1fr)",
-      gap: 15,
-    }}
-  >
-    <Card title="Total Hours" value={formatNumber(kpis.totalHours)} />
-    <Card title="Total Cost" value={formatCurrency(kpis.totalCost)} />
-    <Card title="Employees" value={kpis.employeeCount} />
-    <Card title="Shifts" value={kpis.shiftCount} />
-  </div>
+          {/* OVERVIEW */}
+          <TabsContent value="overview">
+            {/* KPI CARDS */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(4, 1fr)",
+                gap: 15,
+              }}
+            >
+              <Card title="Total Hours" value={formatNumber(kpis.totalHours)} />
+              <Card title="Total Cost" value={formatCurrency(kpis.totalCost)} />
+              <Card title="Employees" value={kpis.employeeCount} />
+              <Card title="Shifts" value={kpis.shiftCount} />
+            </div>
 
-  {/* MAIN CHARTS */}
-  <div
-    style={{
-      display: "grid",
-      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-      gap: 20,
-      marginTop: 20,
-    }}
-  >
-    <HoursByEmployee data={filtered} />
-    <CostByArea data={deputyData} />
-  </div>
+            {/* MAIN CHARTS */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: 20,
+                marginTop: 20,
+              }}
+            >
+              <HoursByEmployee data={filtered} />
+              <CostByArea data={deputyData} />
+            </div>
 
 
-  {/* WEEKLY COST TABLE */}
-  <div style={{ marginTop: 20 }}>
-    <CostByAreaByWeek data={filtered} />
-  </div>
-</TabsContent>
+            {/* WEEKLY COST TABLE */}
+            <div style={{ marginTop: 20 }}>
+              <CostByAreaByWeek data={filtered} />
+            </div>
+          </TabsContent>
 
-{/* TT GAMES */}
-<TabsContent value="tt">
-  <div style={{ marginTop: 20 }}>
-    <TTGames data={filteredTT} />
-  </div>
-</TabsContent>
+          {/* TT GAMES */}
+          <TabsContent value="tt">
+            <div style={{ marginTop: 20 }}>
+              <TTGames data={filteredTT} />
+            </div>
+          </TabsContent>
 
           {/* PERFORMANCE */}
           <TabsContent value="performance">

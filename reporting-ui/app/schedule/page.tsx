@@ -1,0 +1,2450 @@
+"use client";
+
+import {
+    useEffect,
+    useMemo,
+    useState,
+} from "react";
+
+import {
+    getAnalysts,
+    type Analyst as ApiAnalyst,
+} from "@/lib/api/analysts";
+
+import {
+    getFixtures,
+} from "@/lib/api/fixtures";
+
+import {
+    assignFixture,
+} from "@/lib/api/assignFixture";
+
+import {
+    loadDeputyRoster,
+} from "@/lib/data/loadDeputyRoster";
+
+import type {
+    DeputyRoster,
+} from "@/types/deputyRoster";
+
+import type { TTGame } from "@/types/ttgame";
+import { supabase } from "@/lib/supabase";
+
+import AllocationModal from "./AllocationModal";
+
+type ScheduleAssignment = {
+    id: number;
+    fixtureId: number;
+    analystId: number;
+    location: "Home" | "Office";
+    assignedAt?: string;
+    scheduledDate: string;
+
+    fixture: {
+        id: number;
+        date: string;
+        leagueName: string;
+        round: string;
+        homeTeam: string;
+        awayTeam: string;
+        status: string;
+    };
+};
+
+type AllocationSlot = {
+    analystId: number;
+    analystName: string;
+    date: string;
+};
+
+type ScheduleAnalyst = {
+    id: number;
+    name: string;
+    email: string | null;
+};
+
+
+type Day = {
+    date: Date;
+    key: string;
+    label: string;
+};
+
+
+type SortKey =
+    | "analyst"
+    | string;
+
+
+type FilterStatus =
+    | "All"
+    | "Available"
+    | "Assigned"
+    | "Not rostered";
+
+
+type FixtureFilter =
+    | "All"
+    | "Has Fixture"
+    | "No Fixture";
+
+
+function formatDateKey(
+    date: Date
+) {
+
+    const year =
+        date.getFullYear();
+
+    const month =
+        String(
+            date.getMonth() + 1
+        ).padStart(
+            2,
+            "0"
+        );
+
+    const day =
+        String(
+            date.getDate()
+        ).padStart(
+            2,
+            "0"
+        );
+
+    return `${year}-${month}-${day}`;
+
+}
+
+
+function getThursday(
+    offset = 0
+) {
+
+    const today =
+        new Date();
+
+    const date =
+        new Date(
+            today
+        );
+
+    const daysSinceThursday =
+        (
+            today.getDay() -
+            4 +
+            7
+        ) % 7;
+
+    date.setDate(
+        today.getDate() -
+        daysSinceThursday +
+        offset * 7
+    );
+
+    date.setHours(
+        0,
+        0,
+        0,
+        0
+    );
+
+    return date;
+
+}
+
+
+function buildDays(
+    weekOffset: number
+): Day[] {
+
+    const start =
+        getThursday(
+            weekOffset
+        );
+
+    return Array.from(
+        {
+            length: 7,
+        },
+        (
+            _,
+            index
+        ) => {
+
+            const date =
+                new Date(
+                    start
+                );
+
+            date.setDate(
+                start.getDate() +
+                index
+            );
+
+            return {
+
+                date,
+
+                key:
+                    formatDateKey(
+                        date
+                    ),
+
+                label:
+                    date.toLocaleDateString(
+                        "en-AU",
+                        {
+                            weekday:
+                                "short",
+                            day:
+                                "numeric",
+                            month:
+                                "short",
+                        }
+                    ),
+
+            };
+
+        }
+    );
+
+}
+
+
+function getSortRank(
+    status: FilterStatus
+) {
+
+    if (
+        status === "Assigned"
+    ) {
+
+        return 1;
+
+    }
+
+    if (
+        status === "Available"
+    ) {
+
+        return 2;
+
+    }
+
+    if (
+        status === "Not rostered"
+    ) {
+
+        return 3;
+
+    }
+
+    return 4;
+
+}
+
+
+export default function SchedulePage() {
+
+    const [
+        roster,
+        setRoster,
+    ] =
+        useState<
+            DeputyRoster[]
+        >([]);
+
+
+    const [
+        analysts,
+        setAnalysts,
+    ] =
+        useState<
+            ScheduleAnalyst[]
+        >([]);
+
+
+    const [
+        assignments,
+        setAssignments,
+    ] =
+        useState<
+            ScheduleAssignment[]
+        >([]);
+
+    const [
+        fixtures,
+        setFixtures,
+    ] =
+        useState<any[]>([]);
+
+    const [
+        allGames,
+        setAllGames,
+    ] =
+        useState<TTGame[]>([]);
+
+    const [
+        allocationSlot,
+        setAllocationSlot,
+    ] =
+        useState<AllocationSlot | null>(null);
+
+    const [
+        allocating,
+        setAllocating,
+    ] =
+        useState(false);
+
+    const [
+        weekOffset,
+        setWeekOffset,
+    ] =
+        useState(0);
+
+
+    const [
+        loading,
+        setLoading,
+    ] =
+        useState(true);
+
+
+    const [
+        error,
+        setError,
+    ] =
+        useState("");
+
+
+    const [
+        search,
+        setSearch,
+    ] =
+        useState("");
+
+
+    const [
+        statusFilter,
+        setStatusFilter,
+    ] =
+        useState<FilterStatus>(
+            "All"
+        );
+
+
+    const [
+        fixtureFilter,
+        setFixtureFilter,
+    ] =
+        useState<FixtureFilter>(
+            "All"
+        );
+
+
+    const [
+        locationFilter,
+        setLocationFilter,
+    ] =
+        useState("All");
+
+
+    const [
+        sortKey,
+        setSortKey,
+    ] =
+        useState<SortKey>(
+            "analyst"
+        );
+
+
+    const [
+        sortDirection,
+        setSortDirection,
+    ] =
+        useState<
+            "asc" | "desc"
+        >("asc");
+
+
+    const days =
+        useMemo(
+            () =>
+                buildDays(
+                    weekOffset
+                ),
+            [
+                weekOffset,
+            ]
+        );
+
+
+    async function loadSchedule() {
+
+        try {
+
+            setLoading(
+                true
+            );
+
+            setError("");
+
+
+            console.log(
+                "SCHEDULE: loading Deputy roster..."
+            );
+
+            const rosterData =
+                await loadDeputyRoster();
+
+            console.log(
+                "SCHEDULE: Deputy roster loaded:",
+                rosterData.length
+            );
+
+
+            console.log(
+                "SCHEDULE: loading analysts..."
+            );
+
+            const analystData =
+                await getAnalysts();
+
+            console.log(
+                "SCHEDULE: analysts loaded:",
+                analystData.length
+            );
+
+
+            console.log(
+                "SCHEDULE: loading fixtures..."
+            );
+
+            const fixtureData =
+                await getFixtures();
+
+            console.log(
+                "SCHEDULE: fixtures loaded:",
+                fixtureData.length
+            );
+
+
+            setRoster(
+                rosterData
+            );
+            setFixtures(
+                fixtureData
+            );
+
+            // Load all games from Supabase TT_Games
+            console.log(
+                "SCHEDULE: loading TT_Games..."
+            );
+
+            const gamesList: TTGame[] = [];
+            let from = 0;
+            const pageSize = 1000;
+
+            while (true) {
+                const { data, error: gamesError } =
+                    await supabase
+                        .from("TT_Games")
+                        .select("*")
+                        .order("Week")
+                        .order("Competition")
+                        .range(from, from + pageSize - 1);
+
+                if (gamesError) {
+                    console.error("Failed loading TT_Games:", gamesError);
+                    break;
+                }
+
+                if (!data?.length) break;
+
+                gamesList.push(...(data as TTGame[]));
+
+                if (data.length < pageSize) break;
+
+                from += pageSize;
+            }
+
+            setAllGames(gamesList);
+
+            console.log(
+                "SCHEDULE: TT_Games loaded:",
+                gamesList.length
+            );
+
+            setAnalysts(
+                analystData.map(
+                    (
+                        analyst: ApiAnalyst
+                    ) => ({
+
+                        id:
+                            analyst.id,
+
+                        name:
+                            analyst.name,
+
+                        email:
+                            analyst.email ??
+                            null,
+
+                    })
+                )
+            );
+
+
+            const scheduleAssignments:
+                ScheduleAssignment[] = [];
+
+
+            for (
+                const fixture
+                of fixtureData
+            ) {
+
+                if (
+                    !Array.isArray(
+                        fixture.assignments
+                    )
+                ) {
+
+                    continue;
+
+                }
+
+
+                for (
+                    const assignment
+                    of fixture.assignments
+                ) {
+
+                    const analystId =
+                        Number(
+                            assignment.analystId
+                        );
+
+
+                    if (
+                        !Number.isFinite(
+                            analystId
+                        )
+                    ) {
+
+                        continue;
+
+                    }
+
+
+                    scheduleAssignments.push({
+
+                        id:
+                            Number(
+                                assignment.id
+                            ),
+
+                        fixtureId:
+                            Number(
+                                fixture.id
+                            ),
+
+                        analystId,
+
+                        location:
+                            assignment.location ??
+                            "Unknown",
+
+                        scheduledDate:
+                            assignment.scheduledDate,
+
+                        assignedAt:
+                            assignment.assignedAt,
+
+                        fixture: {
+
+                            id:
+                                Number(
+                                    fixture.id
+                                ),
+
+                            date:
+                                fixture.Date,
+
+                            leagueName:
+                                fixture.Competition,
+
+                            round:
+                                fixture.Round,
+
+                            homeTeam:
+                                fixture.home_team,
+
+                            awayTeam:
+                                fixture.away_team,
+
+                            status:
+                                fixture.status,
+
+                        },
+
+                    });
+
+                }
+
+            }
+
+
+            setAssignments(
+                scheduleAssignments
+            );
+
+        }
+        catch (err) {
+
+            console.error(
+                "Failed loading schedule:",
+                err
+            );
+
+            setError(
+                "Failed to load schedule."
+            );
+
+        }
+        finally {
+
+            setLoading(
+                false
+            );
+
+        }
+
+    }
+
+    async function allocateFixture(
+        fixtureId: number,
+        location: "Home" | "Office"
+    ) {
+
+        if (!allocationSlot) {
+            return;
+        }
+
+        try {
+
+            setAllocating(
+                true
+            );
+
+            await assignFixture(
+                fixtureId,
+                allocationSlot.analystId,
+                location,
+                allocationSlot.date
+            );
+
+            await loadSchedule();
+
+            setAllocationSlot(
+                null
+            );
+
+        }
+        catch (err) {
+
+            console.error(
+                "Failed to allocate fixture:",
+                err
+            );
+
+            alert(
+                err instanceof Error
+                    ? err.message
+                    : "Failed to allocate fixture."
+            );
+
+        }
+        finally {
+
+            setAllocating(
+                false
+            );
+
+        }
+
+    }
+
+    useEffect(
+        () => {
+
+            loadSchedule();
+
+        },
+        []
+    );
+
+    /*
+* FIXTURES BY DAY
+*/
+
+    const fixturesByDay =
+        useMemo(
+            () => {
+
+                const map =
+                    new Map<
+                        string,
+                        any[]
+                    >();
+
+                for (
+                    const fixture
+                    of fixtures
+                ) {
+
+                    if (
+                        !fixture.Date
+                    ) {
+                        continue;
+                    }
+
+                    const date =
+                        new Date(
+                            fixture.Date
+                        );
+
+                    const key =
+                        formatDateKey(
+                            date
+                        );
+
+                    const existing =
+                        map.get(
+                            key
+                        ) ??
+                        [];
+
+                    existing.push(
+                        fixture
+                    );
+
+                    map.set(
+                        key,
+                        existing
+                    );
+
+                }
+
+                return map;
+
+            },
+            [
+                fixtures,
+            ]
+        );
+
+    /*
+* ROSTER LOOKUP
+*/
+
+    const rosterByAnalystAndDay =
+        useMemo(
+            () => {
+
+                const map =
+                    new Map<
+                        string,
+                        DeputyRoster[]
+                    >();
+
+                for (
+                    const shift
+                    of roster
+                ) {
+
+                    const key =
+                        `${shift.employee_name}|${shift.shift_date}`;
+
+                    const existing =
+                        map.get(
+                            key
+                        ) ??
+                        [];
+
+                    existing.push(
+                        shift
+                    );
+
+                    map.set(
+                        key,
+                        existing
+                    );
+
+                }
+
+                return map;
+
+            },
+            [
+                roster,
+            ]
+        );
+
+
+    /*
+     * ASSIGNMENT LOOKUP
+     */
+
+    const assignmentsByAnalystAndDay =
+        useMemo(
+            () => {
+
+                const map =
+                    new Map<
+                        string,
+                        ScheduleAssignment[]
+                    >();
+
+                for (
+                    const assignment
+                    of assignments
+                ) {
+
+                    if (
+                        !assignment.fixture
+                    ) {
+                        continue;
+                    }
+
+                    const date =
+                        new Date(
+                            assignment.scheduledDate
+                        );
+
+                    const key =
+                        `${assignment.analystId}|${formatDateKey(date)}`;
+
+                    const existing =
+                        map.get(
+                            key
+                        ) ??
+                        [];
+
+                    existing.push(
+                        assignment
+                    );
+
+                    map.set(
+                        key,
+                        existing
+                    );
+
+                }
+
+                return map;
+
+            },
+            [
+                assignments,
+            ]
+        );
+
+    /*
+     * AVAILABLE LOCATIONS
+     */
+
+    const availableLocations =
+        useMemo(
+            () => {
+
+                const locations =
+                    new Set<string>();
+
+
+                for (
+                    const shift
+                    of roster
+                ) {
+
+                    if (
+                        shift.location
+                    ) {
+
+                        locations.add(
+                            shift.location
+                        );
+
+                    }
+
+                }
+
+
+                for (
+                    const assignment
+                    of assignments
+                ) {
+
+                    if (
+                        assignment.location
+                    ) {
+
+                        locations.add(
+                            assignment.location
+                        );
+
+                    }
+
+                }
+
+
+                return Array.from(
+                    locations
+                ).sort();
+
+            },
+            [
+                roster,
+                assignments,
+            ]
+        );
+
+
+    /*
+     * ANALYST DAY STATUS
+     */
+
+    function getDayStatus(
+        analyst: ScheduleAnalyst,
+        dayKey: string
+    ): FilterStatus {
+
+        const shifts =
+            rosterByAnalystAndDay.get(
+                `${analyst.name}|${dayKey}`
+            ) ??
+            [];
+
+
+        const games =
+            assignmentsByAnalystAndDay.get(
+                `${analyst.id}|${dayKey}`
+            ) ??
+            [];
+
+
+        if (
+            games.length > 0
+        ) {
+
+            return "Assigned";
+
+        }
+
+
+        if (
+            shifts.length > 0
+        ) {
+
+            return "Available";
+
+        }
+
+
+        return "Not rostered";
+
+    }
+
+
+    /*
+     * ANALYST FILTERING + SORTING
+     */
+
+    const filteredAnalysts =
+        useMemo(
+            () => {
+
+                let result =
+                    [...analysts];
+
+
+                const searchValue =
+                    search
+                        .trim()
+                        .toLowerCase();
+
+
+                if (
+                    searchValue
+                ) {
+
+                    result =
+                        result.filter(
+                            analyst =>
+                                analyst.name
+                                    .toLowerCase()
+                                    .includes(
+                                        searchValue
+                                    ) ||
+                                (
+                                    analyst.email ??
+                                    ""
+                                )
+                                    .toLowerCase()
+                                    .includes(
+                                        searchValue
+                                    )
+                        );
+
+                }
+
+
+                if (
+                    statusFilter !==
+                    "All"
+                ) {
+
+                    result =
+                        result.filter(
+                            analyst => {
+
+                                return days.some(
+                                    day =>
+                                        getDayStatus(
+                                            analyst,
+                                            day.key
+                                        ) ===
+                                        statusFilter
+                                );
+
+                            }
+                        );
+
+                }
+
+
+                if (
+                    fixtureFilter !==
+                    "All"
+                ) {
+
+                    result =
+                        result.filter(
+                            analyst => {
+
+                                const hasFixture =
+                                    days.some(
+                                        day => {
+
+                                            const games =
+                                                assignmentsByAnalystAndDay.get(
+                                                    `${analyst.id}|${day.key}`
+                                                ) ??
+                                                [];
+
+                                            return (
+                                                games.length >
+                                                0
+                                            );
+
+                                        }
+                                    );
+
+
+                                return fixtureFilter ===
+                                    "Has Fixture"
+                                    ? hasFixture
+                                    : !hasFixture;
+
+                            }
+                        );
+
+                }
+
+
+                if (
+                    locationFilter !==
+                    "All"
+                ) {
+
+                    result =
+                        result.filter(
+                            analyst => {
+
+                                const hasRosterLocation =
+                                    roster.some(
+                                        shift =>
+                                            shift.employee_name ===
+                                            analyst.name &&
+                                            shift.location ===
+                                            locationFilter
+                                    );
+
+
+                                const hasAssignmentLocation =
+                                    assignments.some(
+                                        assignment =>
+                                            assignment.analystId ===
+                                            analyst.id &&
+                                            assignment.location ===
+                                            locationFilter
+                                    );
+
+
+                                return (
+                                    hasRosterLocation ||
+                                    hasAssignmentLocation
+                                );
+
+                            }
+                        );
+
+                }
+
+
+                result.sort(
+                    (
+                        a,
+                        b
+                    ) => {
+
+                        if (
+                            sortKey ===
+                            "analyst"
+                        ) {
+
+                            const comparison =
+                                a.name.localeCompare(
+                                    b.name
+                                );
+
+
+                            return sortDirection ===
+                                "asc"
+                                ? comparison
+                                : -comparison;
+
+                        }
+
+
+                        const dayKey =
+                            sortKey;
+
+
+                        const aStatus =
+                            getDayStatus(
+                                a,
+                                dayKey
+                            );
+
+
+                        const bStatus =
+                            getDayStatus(
+                                b,
+                                dayKey
+                            );
+
+
+                        const statusComparison =
+                            getSortRank(
+                                aStatus
+                            ) -
+                            getSortRank(
+                                bStatus
+                            );
+
+
+                        if (
+                            statusComparison !==
+                            0
+                        ) {
+
+                            return sortDirection ===
+                                "asc"
+                                ? statusComparison
+                                : -statusComparison;
+
+                        }
+
+
+                        const aGames =
+                            assignmentsByAnalystAndDay.get(
+                                `${a.id}|${dayKey}`
+                            ) ??
+                            [];
+
+
+                        const bGames =
+                            assignmentsByAnalystAndDay.get(
+                                `${b.id}|${dayKey}`
+                            ) ??
+                            [];
+
+
+                        const gameComparison =
+                            aGames.length -
+                            bGames.length;
+
+
+                        if (
+                            gameComparison !==
+                            0
+                        ) {
+
+                            return sortDirection ===
+                                "asc"
+                                ? gameComparison
+                                : -gameComparison;
+
+                        }
+
+
+                        return a.name.localeCompare(
+                            b.name
+                        );
+
+                    }
+                );
+
+
+                return result;
+
+            },
+            [
+                analysts,
+                search,
+                statusFilter,
+                fixtureFilter,
+                locationFilter,
+                sortKey,
+                sortDirection,
+                days,
+                rosterByAnalystAndDay,
+                assignmentsByAnalystAndDay,
+                roster,
+                assignments,
+            ]
+        );
+
+
+    /*
+     * SUMMARY
+     */
+
+    const summary =
+        useMemo(
+            () => {
+
+                let available = 0;
+                let assigned = 0;
+                let notRostered = 0;
+
+
+                for (
+                    const analyst
+                    of analysts
+                ) {
+
+                    const statuses =
+                        days.map(
+                            day =>
+                                getDayStatus(
+                                    analyst,
+                                    day.key
+                                )
+                        );
+
+
+                    if (
+                        statuses.includes(
+                            "Assigned"
+                        )
+                    ) {
+
+                        assigned++;
+
+                    }
+                    else if (
+                        statuses.includes(
+                            "Available"
+                        )
+                    ) {
+
+                        available++;
+
+                    }
+                    else {
+
+                        notRostered++;
+
+                    }
+
+                }
+
+
+                return {
+
+                    analysts:
+                        analysts.length,
+
+                    available,
+
+                    assigned,
+
+                    notRostered,
+
+                };
+
+            },
+            [
+                analysts,
+                days,
+                rosterByAnalystAndDay,
+                assignmentsByAnalystAndDay,
+            ]
+        );
+
+
+    /*
+     * SORT
+     */
+
+    function handleSort(
+        key: SortKey
+    ) {
+
+        if (
+            sortKey ===
+            key
+        ) {
+
+            setSortDirection(
+                current =>
+                    current ===
+                        "asc"
+                        ? "desc"
+                        : "asc"
+            );
+
+        }
+        else {
+
+            setSortKey(
+                key
+            );
+
+            setSortDirection(
+                "asc"
+            );
+
+        }
+
+    }
+
+
+    function sortArrow(
+        key: SortKey
+    ) {
+
+        if (
+            sortKey !==
+            key
+        ) {
+
+            return "↕";
+
+        }
+
+
+        return sortDirection ===
+            "asc"
+            ? "↑"
+            : "↓";
+
+    }
+
+
+    function clearFilters() {
+
+        setSearch("");
+
+        setStatusFilter(
+            "All"
+        );
+
+        setFixtureFilter(
+            "All"
+        );
+
+        setLocationFilter(
+            "All"
+        );
+
+    }
+
+
+    const hasFilters =
+        search !== "" ||
+        statusFilter !== "All" ||
+        fixtureFilter !== "All" ||
+        locationFilter !== "All";
+
+
+    if (loading) {
+
+        return (
+
+            <div className="
+                min-h-screen
+                bg-slate-50
+                p-8
+            ">
+
+                Loading schedule...
+
+            </div>
+
+        );
+
+    }
+
+
+    return (
+
+        <div className="
+            min-h-screen
+            bg-slate-50
+            p-5
+        ">
+
+            {/* HEADER */}
+
+            <div className="
+                mb-4
+                flex
+                items-center
+                justify-between
+            ">
+
+                <div>
+
+                    <h1 className="
+                        text-2xl
+                        font-bold
+                        text-slate-900
+                    ">
+                        Schedule
+                    </h1>
+
+                    <p className="
+                        mt-0.5
+                        text-xs
+                        text-slate-500
+                    ">
+                        Analyst roster and fixture allocation
+                    </p>
+
+                </div>
+
+
+                <div className="
+                    flex
+                    items-center
+                    gap-1.5
+                ">
+
+                    <button
+                        type="button"
+                        onClick={() =>
+                            setWeekOffset(
+                                current =>
+                                    current - 1
+                            )
+                        }
+                        className="
+                            rounded-md
+                            border
+                            border-slate-300
+                            bg-white
+                            px-3
+                            py-1.5
+                            text-xs
+                            font-medium
+                            text-slate-700
+                            hover:bg-slate-50
+                        "
+                    >
+                        ← Previous
+                    </button>
+
+
+                    <button
+                        type="button"
+                        onClick={() =>
+                            setWeekOffset(
+                                0
+                            )
+                        }
+                        className="
+                            rounded-md
+                            border
+                            border-slate-300
+                            bg-white
+                            px-3
+                            py-1.5
+                            text-xs
+                            font-medium
+                            text-slate-700
+                            hover:bg-slate-50
+                        "
+                    >
+                        Today
+                    </button>
+
+
+                    <button
+                        type="button"
+                        onClick={() =>
+                            setWeekOffset(
+                                current =>
+                                    current + 1
+                            )
+                        }
+                        className="
+                            rounded-md
+                            border
+                            border-slate-300
+                            bg-white
+                            px-3
+                            py-1.5
+                            text-xs
+                            font-medium
+                            text-slate-700
+                            hover:bg-slate-50
+                        "
+                    >
+                        Next →
+                    </button>
+
+                </div>
+
+            </div>
+
+
+            {/* FILTERS */}
+
+            <div className="
+                mb-4
+                rounded-lg
+                border
+                border-slate-200
+                bg-white
+                p-3
+            ">
+
+                <div className="
+                    flex
+                    flex-wrap
+                    items-center
+                    gap-2
+                ">
+
+                    <div className="
+                        min-w-[230px]
+                        flex-1
+                    ">
+
+                        <input
+                            value={
+                                search
+                            }
+                            onChange={e =>
+                                setSearch(
+                                    e.target.value
+                                )
+                            }
+                            placeholder="Search analyst..."
+                            className="
+                                w-full
+                                rounded-md
+                                border
+                                border-slate-300
+                                bg-white
+                                px-3
+                                py-2
+                                text-sm
+                                outline-none
+                                focus:border-blue-500
+                                focus:ring-1
+                                focus:ring-blue-500
+                            "
+                        />
+
+                    </div>
+
+
+                    <select
+                        value={
+                            statusFilter
+                        }
+                        onChange={e =>
+                            setStatusFilter(
+                                e.target.value as FilterStatus
+                            )
+                        }
+                        className="
+                            rounded-md
+                            border
+                            border-slate-300
+                            bg-white
+                            px-3
+                            py-2
+                            text-sm
+                            text-slate-700
+                        "
+                    >
+
+                        <option value="All">
+                            Status: All
+                        </option>
+
+                        <option value="Available">
+                            Available
+                        </option>
+
+                        <option value="Assigned">
+                            Assigned
+                        </option>
+
+                        <option value="Not rostered">
+                            Not rostered
+                        </option>
+
+                    </select>
+
+
+                    <select
+                        value={
+                            fixtureFilter
+                        }
+                        onChange={e =>
+                            setFixtureFilter(
+                                e.target.value as FixtureFilter
+                            )
+                        }
+                        className="
+                            rounded-md
+                            border
+                            border-slate-300
+                            bg-white
+                            px-3
+                            py-2
+                            text-sm
+                            text-slate-700
+                        "
+                    >
+
+                        <option value="All">
+                            Fixture: All
+                        </option>
+
+                        <option value="Has Fixture">
+                            Has Fixture
+                        </option>
+
+                        <option value="No Fixture">
+                            No Fixture
+                        </option>
+
+                    </select>
+
+
+                    <select
+                        value={
+                            locationFilter
+                        }
+                        onChange={e =>
+                            setLocationFilter(
+                                e.target.value
+                            )
+                        }
+                        className="
+                            rounded-md
+                            border
+                            border-slate-300
+                            bg-white
+                            px-3
+                            py-2
+                            text-sm
+                            text-slate-700
+                        "
+                    >
+
+                        <option value="All">
+                            Location: All
+                        </option>
+
+
+                        {availableLocations.map(
+                            location => (
+
+                                <option
+                                    key={
+                                        location
+                                    }
+                                    value={
+                                        location
+                                    }
+                                >
+                                    {
+                                        location
+                                    }
+                                </option>
+
+                            )
+                        )}
+
+                    </select>
+
+
+                    {hasFilters && (
+
+                        <button
+                            type="button"
+                            onClick={
+                                clearFilters
+                            }
+                            className="
+                                rounded-md
+                                px-3
+                                py-2
+                                text-sm
+                                font-medium
+                                text-blue-600
+                                hover:bg-blue-50
+                            "
+                        >
+                            Clear filters
+                        </button>
+
+                    )}
+
+                </div>
+
+            </div>
+
+
+            {/* SUMMARY */}
+
+            <div className="
+                mb-4
+                grid
+                grid-cols-4
+                gap-3
+            ">
+
+                <div className="
+                    rounded-lg
+                    border
+                    border-slate-200
+                    bg-white
+                    px-4
+                    py-3
+                ">
+
+                    <div className="
+                        text-[10px]
+                        font-semibold
+                        uppercase
+                        tracking-wide
+                        text-slate-400
+                    ">
+                        Analysts
+                    </div>
+
+                    <div className="
+                        mt-0.5
+                        text-xl
+                        font-bold
+                        text-slate-900
+                    ">
+                        {
+                            summary.analysts
+                        }
+                    </div>
+
+                </div>
+
+
+                <div className="
+                    rounded-lg
+                    border
+                    border-slate-200
+                    bg-white
+                    px-4
+                    py-3
+                ">
+
+                    <div className="
+                        text-[10px]
+                        font-semibold
+                        uppercase
+                        tracking-wide
+                        text-slate-400
+                    ">
+                        Available
+                    </div>
+
+                    <div className="
+                        mt-0.5
+                        text-xl
+                        font-bold
+                        text-emerald-600
+                    ">
+                        {
+                            summary.available
+                        }
+                    </div>
+
+                </div>
+
+
+                <div className="
+                    rounded-lg
+                    border
+                    border-slate-200
+                    bg-white
+                    px-4
+                    py-3
+                ">
+
+                    <div className="
+                        text-[10px]
+                        font-semibold
+                        uppercase
+                        tracking-wide
+                        text-slate-400
+                    ">
+                        Assigned
+                    </div>
+
+                    <div className="
+                        mt-0.5
+                        text-xl
+                        font-bold
+                        text-blue-600
+                    ">
+                        {
+                            summary.assigned
+                        }
+                    </div>
+
+                </div>
+
+
+                <div className="
+                    rounded-lg
+                    border
+                    border-slate-200
+                    bg-white
+                    px-4
+                    py-3
+                ">
+
+                    <div className="
+                        text-[10px]
+                        font-semibold
+                        uppercase
+                        tracking-wide
+                        text-slate-400
+                    ">
+                        Not Rostered
+                    </div>
+
+                    <div className="
+                        mt-0.5
+                        text-xl
+                        font-bold
+                        text-slate-400
+                    ">
+                        {
+                            summary.notRostered
+                        }
+                    </div>
+
+                </div>
+
+            </div>
+
+
+            {/* RESULTS COUNT */}
+
+            <div className="
+                mb-2
+                flex
+                items-center
+                justify-between
+                text-xs
+                text-slate-500
+            ">
+
+                <span>
+                    Showing{" "}
+                    <strong className="text-slate-700">
+                        {
+                            filteredAnalysts.length
+                        }
+                    </strong>{" "}
+                    of{" "}
+                    <strong className="text-slate-700">
+                        {
+                            analysts.length
+                        }
+                    </strong>{" "}
+                    analysts
+                </span>
+
+
+                <span>
+                    Click a column header to sort
+                </span>
+
+            </div>
+
+
+            {/* SCHEDULE */}
+
+            <div className="
+                overflow-auto
+                rounded-lg
+                border
+                border-slate-200
+                bg-white
+                shadow-sm
+            ">
+
+                <table className="
+                    w-full
+                    min-w-[1300px]
+                    border-collapse
+                ">
+
+                    <thead>
+
+                        <tr>
+
+                            {/* ANALYST HEADER */}
+
+                            <th className="
+                                sticky
+                                left-0
+                                z-30
+                                w-[210px]
+                                border-b
+                                border-r
+                                border-slate-700
+                                bg-slate-900
+                                p-2
+                                text-left
+                            ">
+
+                                <button
+                                    type="button"
+                                    onClick={() =>
+                                        handleSort(
+                                            "analyst"
+                                        )
+                                    }
+                                    className="
+                                        flex
+                                        w-full
+                                        items-center
+                                        justify-between
+                                        text-xs
+                                        font-semibold
+                                        text-white
+                                    "
+                                >
+
+                                    Analyst
+
+                                    <span className="
+                                        ml-2
+                                        text-slate-400
+                                    ">
+                                        {
+                                            sortArrow(
+                                                "analyst"
+                                            )
+                                        }
+                                    </span>
+
+                                </button>
+
+                            </th>
+
+
+                            {/* DAY HEADERS */}
+
+                            {days.map(
+                                day => (
+
+                                    <th
+                                        key={
+                                            day.key
+                                        }
+                                        className="
+                                            min-w-[155px]
+                                            border-b
+                                            border-slate-700
+                                            bg-slate-900
+                                            p-2
+                                            text-center
+                                        "
+                                    >
+
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                handleSort(
+                                                    day.key
+                                                )
+                                            }
+                                            className="
+                                                flex
+                                                w-full
+                                                items-center
+                                                justify-center
+                                                gap-1
+                                                text-xs
+                                                font-semibold
+                                                text-white
+                                            "
+                                        >
+
+                                            {
+                                                day.label
+                                            }
+
+                                            <span className="
+                                                text-slate-400
+                                            ">
+                                                {
+                                                    sortArrow(
+                                                        day.key
+                                                    )
+                                                }
+                                            </span>
+
+                                        </button>
+
+                                    </th>
+
+                                )
+                            )}
+
+                        </tr>
+
+                    </thead>
+
+
+                    <tbody>
+
+                        {filteredAnalysts.map(
+                            analyst => (
+
+                                <tr
+                                    key={
+                                        analyst.id
+                                    }
+                                    className="
+                                        border-b
+                                        border-slate-100
+                                        last:border-0
+                                    "
+                                >
+
+                                    {/* ANALYST */}
+
+                                    <td className="
+                                        sticky
+                                        left-0
+                                        z-20
+                                        border-r
+                                        border-slate-200
+                                        bg-white
+                                        px-3
+                                        py-2
+                                        align-top
+                                    ">
+
+                                        <div className="
+                                            text-sm
+                                            font-semibold
+                                            text-slate-900
+                                        ">
+                                            {
+                                                analyst.name
+                                            }
+                                        </div>
+
+
+                                        {analyst.email && (
+
+                                            <div className="
+                                                mt-0.5
+                                                truncate
+                                                text-[10px]
+                                                text-slate-400
+                                            ">
+                                                {
+                                                    analyst.email
+                                                }
+                                            </div>
+
+                                        )}
+
+                                    </td>
+
+
+                                    {/* DAYS */}
+
+                                    {days.map(
+                                        day => {
+
+                                            const shifts =
+                                                rosterByAnalystAndDay.get(
+                                                    `${analyst.name}|${day.key}`
+                                                ) ??
+                                                [];
+
+
+                                            const games =
+                                                assignmentsByAnalystAndDay.get(
+                                                    `${analyst.id}|${day.key}`
+                                                ) ??
+                                                [];
+
+
+                                            const status =
+                                                getDayStatus(
+                                                    analyst,
+                                                    day.key
+                                                );
+
+
+                                            const available =
+                                                shifts.length >
+                                                0;
+
+
+                                            return (
+
+                                                <td
+                                                    key={`${analyst.id}-${day.key}`}
+                                                    className="
+        border-r
+        border-slate-100
+        p-1.5
+        align-top
+         "
+                                                >
+
+                                                    <div
+                                                        onClick={() => {
+
+                                                            if (
+                                                                available &&
+                                                                games.length === 0
+                                                            ) {
+
+                                                                setAllocationSlot({
+                                                                    analystId:
+                                                                        analyst.id,
+
+                                                                    analystName:
+                                                                        analyst.name,
+
+                                                                    date:
+                                                                        day.key,
+                                                                });
+
+                                                            }
+
+                                                        }}
+                                                        className={`
+        min-h-[72px]
+        rounded-md
+        p-1.5
+        ${status === "Assigned"
+                                                                ? "bg-blue-50"
+                                                                : status === "Available"
+                                                                    ? "cursor-pointer bg-emerald-50 hover:bg-emerald-100"
+                                                                    : "bg-slate-50"
+                                                            }
+         `}
+                                                    >
+
+                                                        {/* ASSIGNED FIXTURES */}
+
+                                                        {games.map(
+                                                            assignment => (
+
+                                                                <div
+                                                                    key={
+                                                                        assignment.id
+                                                                    }
+                                                                    className="
+                                                                        mb-1
+                                                                        rounded-md
+                                                                        border
+                                                                        border-blue-200
+                                                                        bg-blue-600
+                                                                        px-2
+                                                                        py-1.5
+                                                                        text-white
+                                                                    "
+                                                                >
+
+                                                                    <div className="
+                                                                        truncate
+                                                                        text-[10px]
+                                                                        font-semibold
+                                                                        leading-tight
+                                                                    ">
+
+                                                                        {
+                                                                            assignment.fixture.homeTeam
+                                                                        }
+
+                                                                        {" vs "}
+
+                                                                        {
+                                                                            assignment.fixture.awayTeam
+                                                                        }
+
+                                                                    </div>
+
+
+                                                                    <div className="
+                                                                        mt-0.5
+                                                                        flex
+                                                                        items-center
+                                                                        justify-between
+                                                                        gap-1
+                                                                        text-[9px]
+                                                                        text-blue-100
+                                                                    ">
+
+                                                                        <span>
+                                                                            {
+                                                                                assignment.location
+                                                                            }
+                                                                        </span>
+
+                                                                        <span>
+                                                                            {
+                                                                                assignment.fixture.status
+                                                                            }
+                                                                        </span>
+
+                                                                    </div>
+
+                                                                </div>
+
+                                                            )
+                                                        )}
+
+
+                                                        {/* ROSTER SHIFT */}
+
+                                                        {available && (
+
+                                                            <div className="
+                                                                mt-1
+                                                                rounded-md
+                                                                border
+                                                                border-slate-200
+                                                                bg-white
+                                                                px-2
+                                                                py-1
+                                                            ">
+
+                                                                {shifts.map(
+                                                                    (
+                                                                        shift,
+                                                                        index
+                                                                    ) => (
+
+                                                                        <div
+                                                                            key={
+                                                                                `${shift.roster_key}-${index}`
+                                                                            }
+                                                                            className="
+                                                                                text-[10px]
+                                                                                leading-tight
+                                                                            "
+                                                                        >
+
+                                                                            <div className="
+                                                                                font-semibold
+                                                                                text-slate-700
+                                                                            ">
+
+                                                                                {
+                                                                                    shift.start_time ??
+                                                                                    "—"
+                                                                                }
+
+                                                                                {" - "}
+
+                                                                                {
+                                                                                    shift.end_time ??
+                                                                                    "—"
+                                                                                }
+
+                                                                            </div>
+
+
+                                                                            <div className="
+                                                                                mt-0.5
+                                                                                truncate
+                                                                                text-[9px]
+                                                                                text-slate-400
+                                                                            ">
+
+                                                                                {
+                                                                                    shift.area_name ??
+                                                                                    shift.location ??
+                                                                                    "Unknown"
+                                                                                }
+
+                                                                            </div>
+
+                                                                        </div>
+
+                                                                    )
+                                                                )}
+
+                                                            </div>
+
+                                                        )}
+
+
+                                                        {/* AVAILABLE / ALLOCATE */}
+
+                                                        {available &&
+                                                            games.length === 0 && (
+
+                                                                <div className="
+            mt-1
+            text-center
+            text-[9px]
+            font-semibold
+            text-emerald-600
+        ">
+                                                                    Available · Click to Allocate
+                                                                </div>
+
+                                                            )}
+                                                        {/* NOT ROSTERED */}
+
+                                                        {!available &&
+                                                            games.length === 0 && (
+
+                                                                <div className="
+                                                                flex
+                                                                min-h-[60px]
+                                                                items-center
+                                                                justify-center
+                                                                text-[9px]
+                                                                font-medium
+                                                                text-slate-300
+                                                            ">
+                                                                    Not rostered
+                                                                </div>
+
+                                                            )}
+
+                                                    </div>
+
+                                                </td>
+
+                                            );
+
+                                        }
+                                    )}
+
+                                </tr>
+
+                            )
+                        )}
+
+
+                        {filteredAnalysts.length ===
+                            0 && (
+
+                                <tr>
+
+                                    <td
+                                        colSpan={
+                                            days.length + 1
+                                        }
+                                        className="
+                                        px-6
+                                        py-12
+                                        text-center
+                                        text-sm
+                                        text-slate-400
+                                    "
+                                    >
+                                        No analysts match the current filters.
+                                    </td>
+
+                                </tr>
+
+                            )}
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+
+            {allocationSlot ? (
+
+                <AllocationModal
+                    slot={
+                        allocationSlot
+                    }
+
+                    games={allGames}
+
+                    fixtures={fixtures}
+
+                    allocating={
+                        allocating
+                    }
+
+                    onClose={() =>
+                        setAllocationSlot(
+                            null
+                        )
+                    }
+
+                    onAllocate={
+                        allocateFixture
+                    }
+                />
+
+            ) : null}
+
+
+        </div>
+
+    );
+
+}
