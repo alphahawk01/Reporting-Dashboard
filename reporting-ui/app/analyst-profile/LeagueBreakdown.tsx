@@ -42,8 +42,11 @@ export default function LeagueBreakdown({ data }: Props) {
 
   return (
     <Card>
-      <h2 className="text-white text-center font-semibold mb-4">
+      <h2 className="mb-4 flex items-center justify-center gap-2 text-center font-semibold text-white">
         Leagues Analysed
+        <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-bold text-sky-300">
+          {leagues.length}
+        </span>
       </h2>
 
       <div className="max-h-[320px] overflow-y-auto rounded-lg border border-gray-200 bg-white">

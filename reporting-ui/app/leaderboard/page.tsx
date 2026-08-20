@@ -295,6 +295,13 @@ function PodiumSlot({
 
         <div className="flex items-center gap-1">
           <span className="font-semibold text-slate-200">
+            {analyst.avgGamesPerWeek.toFixed(2)}
+          </span>
+          games / wk
+        </div>
+
+        <div className="flex items-center gap-1">
+          <span className="font-semibold text-slate-200">
             {analyst.avgHoursPerGame.toFixed(2)}
           </span>
           hrs / game
@@ -364,6 +371,10 @@ function LeaderboardList({
               Games Coded
             </th>
 
+            <th className="w-32 px-3 py-3 text-right font-semibold">
+              Ave Games / Wk
+            </th>
+
             <th className="w-28 px-3 py-3 text-right font-semibold">
               Ave Time
             </th>
@@ -431,6 +442,11 @@ function LeaderboardRow({
       {/* GAMES CODED */}
       <td className="px-3 py-3 text-right text-sm font-semibold text-slate-200">
         {analyst.totalGames.toFixed(1)}
+      </td>
+
+      {/* AVE GAMES PER WEEK */}
+      <td className="px-3 py-3 text-right text-sm font-semibold text-slate-200">
+        {analyst.avgGamesPerWeek.toFixed(2)}
       </td>
 
       {/* AVE TIME */}
