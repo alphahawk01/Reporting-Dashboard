@@ -11,9 +11,20 @@ import {
     deleteComputer,
     type Computer,
 } from "@/lib/api/computers";
+
+import {
+    getAnalysts,
+    updateHomeComputer,
+    updateOfficeComputer,
+    type Analyst,
+} from "@/lib/api/analysts";
+
 import { useCallback, useMemo } from "react";
 import { getHubConnection } from "@/lib/signalr";
 import { HubConnectionState } from "@microsoft/signalr";
+
+import AllocateAnalystModal from "./AllocateAnalystModal";
+import ReassignComputerModal from "../analyst-management/ReassignComputerModal";
 
 type AllocationFilter = "All" | "Allocated" | "Unallocated";
 
@@ -21,6 +32,26 @@ export default function ComputersPage() {
 
     const [computers, setComputers] =
         useState<Computer[]>([]);
+
+    const [analysts, setAnalysts] =
+        useState<Analyst[]>([]);
+
+    const [allocateTarget, setAllocateTarget] =
+        useState<Computer | null>(null);
+
+    const [saving, setSaving] =
+        useState(false);
+
+    const [reassign, setReassign] =
+        useState<{
+            open: boolean;
+            analystId: number;
+            computerId: number;
+            location: "Home" | "Office";
+            currentAnalyst: string;
+            newAnalyst: string;
+            computerName: string;
+        } | null>(null);
 
     const [search, setSearch] =
         useState("");
@@ -45,12 +76,24 @@ export default function ComputersPage() {
 
         try {
 
-            const data =
-                await getComputers();
+            const [data, analystData] =
+                await Promise.all([
+                    getComputers(),
+                    getAnalysts(),
+                ]);
 
             setComputers(
                 Array.isArray(data)
                     ? data
+                    : []
+            );
+
+            setAnalysts(
+                Array.isArray(analystData)
+                    ? [...analystData].sort(
+                        (a, b) =>
+                            a.name.localeCompare(b.name)
+                    )
                     : []
             );
 
@@ -271,6 +314,200 @@ export default function ComputersPage() {
 
             alert(
                 "Delete failed"
+            );
+
+        }
+
+    }
+
+
+    /*
+     * Resolve which analyst holds this computer and in which slot.
+     * Matching on computer id rather than name, since names are not unique.
+     */
+    function findAllocation(
+        computer: Computer
+    ): {
+        analyst: Analyst;
+        location: "Home" | "Office";
+    } | null {
+
+        for (const analyst of analysts) {
+
+            if (analyst.homeComputer?.id === computer.id) {
+                return { analyst, location: "Home" };
+            }
+
+            if (analyst.officeComputer?.id === computer.id) {
+                return { analyst, location: "Office" };
+            }
+
+        }
+
+        return null;
+
+    }
+
+
+    /*
+     * ALLOCATE — assigns the analyst's Home or Office slot to this computer.
+     * The API rejects with requiresConfirmation when the computer already
+     * belongs to someone else; we then retry with force via the modal.
+     */
+    async function allocateAnalyst(
+        analystId: number,
+        location: "Home" | "Office"
+    ) {
+
+        if (!allocateTarget) return;
+
+        const computerId = allocateTarget.id;
+
+        setSaving(true);
+
+        try {
+
+            if (location === "Home") {
+                await updateHomeComputer(analystId, computerId);
+            }
+            else {
+                await updateOfficeComputer(analystId, computerId);
+            }
+
+            setAllocateTarget(null);
+
+            await load();
+
+        }
+        catch (error: any) {
+
+            if (error?.requiresConfirmation === true) {
+
+                setReassign({
+                    open: true,
+                    analystId,
+                    computerId,
+                    location,
+                    currentAnalyst: error.currentAnalyst ?? "",
+                    newAnalyst: error.newAnalyst ?? "",
+                    computerName:
+                        error.computerName ??
+                        allocateTarget.computerName,
+                });
+
+                return;
+
+            }
+
+            console.error("Failed allocating analyst:", error);
+
+            alert(
+                error?.message ||
+                "Failed allocating analyst to this computer"
+            );
+
+        }
+        finally {
+
+            setSaving(false);
+
+        }
+
+    }
+
+
+    async function confirmReassign() {
+
+        if (!reassign) return;
+
+        setSaving(true);
+
+        try {
+
+            if (reassign.location === "Home") {
+                await updateHomeComputer(
+                    reassign.analystId,
+                    reassign.computerId,
+                    true
+                );
+            }
+            else {
+                await updateOfficeComputer(
+                    reassign.analystId,
+                    reassign.computerId,
+                    true
+                );
+            }
+
+            setReassign(null);
+            setAllocateTarget(null);
+
+            await load();
+
+        }
+        catch (error: any) {
+
+            console.error("Failed reassigning computer:", error);
+
+            alert(
+                error?.message ||
+                "Failed reassigning computer"
+            );
+
+        }
+        finally {
+
+            setSaving(false);
+
+        }
+
+    }
+
+
+    async function unallocate(
+        computer: Computer
+    ) {
+
+        const current = findAllocation(computer);
+
+        if (!current) {
+
+            alert(
+                "Could not determine which analyst holds this computer."
+            );
+
+            return;
+
+        }
+
+        if (
+            !confirm(
+                `Remove ${computer.computerName} as ${current.analyst.name}'s ` +
+                `${current.location.toLowerCase()} computer?`
+            )
+        ) {
+            return;
+        }
+
+        try {
+
+            if (current.location === "Home") {
+                await updateHomeComputer(current.analyst.id, null);
+            }
+            else {
+                await updateOfficeComputer(current.analyst.id, null);
+            }
+
+            await load();
+
+        }
+        catch (error: any) {
+
+            console.error("Failed unallocating computer:", error);
+
+            alert(
+                error?.message ||
+                "Failed unallocating computer"
             );
 
         }
@@ -841,26 +1078,75 @@ export default function ComputersPage() {
 
                                     <td className="p-4">
 
-                                        <button
-                                            onClick={() =>
-                                                removeComputer(
-                                                    computer.id
-                                                )
-                                            }
-                                            className="
-                                rounded-lg
-                                bg-red-600
-                                px-3
-                                py-1.5
-                                text-sm
-                                font-semibold
-                                text-white
-                                transition
-                                hover:bg-red-700
-                            "
-                                        >
-                                            Delete
-                                        </button>
+                                        <div className="flex flex-wrap items-center gap-2">
+
+                                            <button
+                                                onClick={() =>
+                                                    setAllocateTarget(computer)
+                                                }
+                                                className="
+                                                    rounded-lg
+                                                    bg-sky-600
+                                                    px-3
+                                                    py-1.5
+                                                    text-sm
+                                                    font-semibold
+                                                    text-white
+                                                    transition
+                                                    hover:bg-sky-700
+                                                "
+                                            >
+                                                {isAllocated(computer)
+                                                    ? "Reallocate"
+                                                    : "Allocate"}
+                                            </button>
+
+                                            {isAllocated(computer) && (
+
+                                                <button
+                                                    onClick={() =>
+                                                        unallocate(computer)
+                                                    }
+                                                    className="
+                                                        rounded-lg
+                                                        border
+                                                        border-slate-300
+                                                        px-3
+                                                        py-1.5
+                                                        text-sm
+                                                        font-semibold
+                                                        text-slate-700
+                                                        transition
+                                                        hover:bg-slate-100
+                                                    "
+                                                >
+                                                    Unallocate
+                                                </button>
+
+                                            )}
+
+                                            <button
+                                                onClick={() =>
+                                                    removeComputer(
+                                                        computer.id
+                                                    )
+                                                }
+                                                className="
+                                                    rounded-lg
+                                                    bg-red-600
+                                                    px-3
+                                                    py-1.5
+                                                    text-sm
+                                                    font-semibold
+                                                    text-white
+                                                    transition
+                                                    hover:bg-red-700
+                                                "
+                                            >
+                                                Delete
+                                            </button>
+
+                                        </div>
 
                                     </td>
 
@@ -887,6 +1173,25 @@ export default function ComputersPage() {
                 </table>
 
             </div>
+
+
+            <AllocateAnalystModal
+                computer={allocateTarget}
+                analysts={analysts}
+                saving={saving}
+                onCancel={() => setAllocateTarget(null)}
+                onConfirm={allocateAnalyst}
+            />
+
+
+            <ReassignComputerModal
+                open={reassign?.open ?? false}
+                computerName={reassign?.computerName ?? ""}
+                currentAnalyst={reassign?.currentAnalyst ?? ""}
+                newAnalyst={reassign?.newAnalyst ?? ""}
+                onCancel={() => setReassign(null)}
+                onConfirm={confirmReassign}
+            />
 
         </div>
 
