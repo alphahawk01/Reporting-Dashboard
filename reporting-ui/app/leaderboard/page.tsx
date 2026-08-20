@@ -17,6 +17,13 @@ import {
 const PAGE_SIZE = 1000;
 const LEADERBOARD_SIZE = 20;
 
+type Team = "AUS" | "PHL";
+
+const TEAM_LABELS: Record<Team, string> = {
+  AUS: "Australia",
+  PHL: "Philippines",
+};
+
 async function fetchAll<T>(table: string): Promise<T[]> {
   let from = 0;
   let all: T[] = [];
@@ -47,6 +54,7 @@ async function fetchAll<T>(table: string): Promise<T[]> {
 export default function LeaderboardPage() {
   const [analysts, setAnalysts] = useState<AnalystMetrics[]>([]);
   const [loading, setLoading] = useState(true);
+  const [team, setTeam] = useState<Team>("AUS");
 
   useEffect(() => {
     async function load() {
@@ -66,19 +74,17 @@ export default function LeaderboardPage() {
     load();
   }, []);
 
-  // Single ranking across every analyst, regardless of team, by overall
-  // score. buildAnalystBenchmark ranks AUS/PHL separately, which is not
-  // what a single top-20 leaderboard wants.
+  // Ranked within the selected team only, by overall score.
   const ranked = useMemo(() => {
-    return [...analysts]
-      .filter((a) => a.totalGames > 0)
+    return analysts
+      .filter((a) => a.team === team && a.totalGames > 0)
       .sort((a, b) => b.ratings.overall - a.ratings.overall)
       .slice(0, LEADERBOARD_SIZE)
       .map((analyst, index) => ({
         ...analyst,
         leaderboardRank: index + 1,
       }));
-  }, [analysts]);
+  }, [analysts, team]);
 
   const podium = ranked.slice(0, 3);
   const rest = ranked.slice(3);
@@ -101,18 +107,29 @@ export default function LeaderboardPage() {
     >
       <div className="mx-auto max-w-5xl">
 
-        <h1 className="mb-1 text-3xl font-bold text-white">
-          Leaderboard
-        </h1>
+        <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
 
-        <p className="mb-8 text-sm text-slate-500">
-          Top {LEADERBOARD_SIZE} analysts by overall rating
-        </p>
+          <div>
+            <h1 className="mb-1 text-3xl font-bold text-white">
+              Leaderboard
+            </h1>
+
+            <p className="text-sm text-slate-500">
+              Top {LEADERBOARD_SIZE} {TEAM_LABELS[team]} analysts by overall rating
+            </p>
+          </div>
+
+          <TeamToggle
+            value={team}
+            onChange={setTeam}
+          />
+
+        </div>
 
         {ranked.length === 0 ? (
 
           <div className="rounded-xl border border-slate-700 bg-[#0f1b2d] p-10 text-center text-slate-500">
-            No analysts have coded games yet.
+            No {TEAM_LABELS[team]} analysts have coded games yet.
           </div>
 
         ) : (
@@ -129,6 +146,41 @@ export default function LeaderboardPage() {
         )}
 
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* TEAM TOGGLE                                                          */
+/* ------------------------------------------------------------------ */
+
+function TeamToggle({
+  value,
+  onChange,
+}: {
+  value: Team;
+  onChange: (team: Team) => void;
+}) {
+  return (
+    <div className="flex rounded-lg border border-slate-700 bg-[#0f1b2d] p-1">
+
+      {(["AUS", "PHL"] as Team[]).map((option) => (
+
+        <button
+          key={option}
+          type="button"
+          onClick={() => onChange(option)}
+          className={`rounded-md px-4 py-2 text-sm font-semibold transition ${
+            value === option
+              ? "bg-sky-600 text-white"
+              : "text-slate-400 hover:text-white"
+          }`}
+        >
+          {TEAM_LABELS[option]}
+        </button>
+
+      ))}
+
     </div>
   );
 }
