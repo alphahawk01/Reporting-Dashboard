@@ -54,6 +54,9 @@ export default function RecommendationPage() {
   const [teamHistoryOpen, setTeamHistoryOpen] =
     useState<string | null>(null);
 
+  const [dayAssignConfirm, setDayAssignConfirm] =
+    useState<{ recommendation: Recommendation; day: string; date: string } | null>(null);
+
   const [manualSearch, setManualSearch] =
     useState("");
 
@@ -669,6 +672,115 @@ export default function RecommendationPage() {
   }
 
 
+  function calculateScheduledDate(dayName: string): string {
+    const dayIndex: Record<string, number> = {
+      Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3,
+      Thursday: 4, Friday: 5, Saturday: 6,
+    };
+
+    const targetDay = dayIndex[dayName] ?? 0;
+    const fixtureDate = selectedFixture?.Date
+      ? new Date(selectedFixture.Date)
+      : new Date();
+
+    const currentDay = fixtureDate.getDay();
+    let diff = targetDay - currentDay;
+    if (diff < 0) diff += 7;
+    const scheduledDate = new Date(fixtureDate);
+    scheduledDate.setDate(fixtureDate.getDate() + diff);
+    return scheduledDate.toISOString().split("T")[0];
+  }
+
+  // Opens the confirmation modal
+  function handleAssignDay(
+    recommendation: Recommendation,
+    dayName: string
+  ) {
+    if (!selectedFixture) return;
+
+    setDayAssignConfirm({
+      recommendation,
+      day: dayName,
+      date: calculateScheduledDate(dayName),
+    });
+  }
+
+  // Performs the actual assignment after confirmation
+  async function confirmAssignDay() {
+    if (!dayAssignConfirm || !selectedFixture) return;
+
+    const { recommendation, day: dayName, date: scheduledDateStr } = dayAssignConfirm;
+
+    try {
+      const autoAnalyst = autoAnalysts.find(
+        a =>
+          a.name.trim().toLowerCase() ===
+          recommendation.analyst.name.trim().toLowerCase()
+      );
+
+      if (!autoAnalyst) {
+        alert("Analyst not found in AutoDownload.");
+        setDayAssignConfirm(null);
+        return;
+      }
+
+      const location: "Home" | "Office" =
+        autoAnalyst.officeComputer ? "Office" : "Home";
+
+      const computer =
+        location === "Office"
+          ? autoAnalyst.officeComputer
+          : autoAnalyst.homeComputer;
+
+      if (!computer) {
+        alert(`${autoAnalyst.name} does not have a computer assigned.`);
+        setDayAssignConfirm(null);
+        return;
+      }
+
+      const autoFixture = autoFixtures.find(
+        (a: any) => {
+          const afHome = (a.homeTeam ?? "").trim().toLowerCase();
+          const afAway = (a.awayTeam ?? "").trim().toLowerCase();
+          const fHome = (selectedFixture.home_team ?? "").trim().toLowerCase();
+          const fAway = (selectedFixture.away_team ?? "").trim().toLowerCase();
+          return afHome === fHome && afAway === fAway;
+        }
+      );
+
+      // 1. Assign with scheduled date (shows on Schedule page)
+      if (autoFixture && (autoFixture as any).id) {
+        await assignFixture(
+          (autoFixture as any).id,
+          autoAnalyst.id,
+          location,
+          scheduledDateStr
+        );
+      }
+
+      // 2. Create download job (triggers autodownload)
+      await createDownloadJob({
+        gameKey: selectedFixture.game_key,
+        videoUrl: selectedFixture.videoURL ?? "",
+        analystId: autoAnalyst.id,
+        computerId: computer.id,
+        assignmentLocation: location,
+        year: selectedFixture.Date.substring(0, 4),
+        leagueName: selectedFixture.Competition,
+        fileSizeBytes: autoFixture?.fileSizeBytes ?? null,
+      });
+
+      setDayAssignConfirm(null);
+      alert(`Assigned to ${autoAnalyst.name} for ${dayName}`);
+
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : "Assignment failed.");
+      setDayAssignConfirm(null);
+    }
+  }
+
+
   async function handleManualAssign(
     analyst: AutoDownloadAnalyst,
     location?: "Home" | "Office"
@@ -1215,6 +1327,7 @@ export default function RecommendationPage() {
                     ) ?? null
                   }
                   onAssign={handleAssign}
+                  onAssignDay={handleAssignDay}
                   onAssignOther={() => setManualAssignOpen(true)}
                 />
 
@@ -1386,6 +1499,74 @@ export default function RecommendationPage() {
 
         </div>
 
+      )}
+
+      {/* DAY ASSIGN CONFIRMATION MODAL */}
+      {dayAssignConfirm && selectedFixture && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70"
+          onClick={() => setDayAssignConfirm(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl bg-slate-900 border border-slate-700 p-6 shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-bold text-white mb-1">
+              Confirm Allocation
+            </h2>
+
+            <p className="text-sm text-slate-400 mb-5">
+              Assign this fixture to the analyst for the selected day?
+            </p>
+
+            <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4 space-y-3">
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-slate-500">Analyst</div>
+                <div className="font-semibold text-white">
+                  {dayAssignConfirm.recommendation.analyst.name}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-slate-500">Fixture</div>
+                <div className="font-semibold text-white">
+                  {selectedFixture.home_team} vs {selectedFixture.away_team}
+                </div>
+                <div className="text-xs text-slate-400">
+                  {selectedFixture.Competition} • Round {selectedFixture.Round}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-slate-500">Scheduled Day</div>
+                <div className="font-semibold text-sky-400">
+                  {dayAssignConfirm.day}
+                  {" — "}
+                  {new Date(`${dayAssignConfirm.date}T00:00:00`).toLocaleDateString("en-AU", {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => setDayAssignConfirm(null)}
+                className="flex-1 rounded-lg border border-slate-700 py-2.5 text-sm font-medium text-slate-300 hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmAssignDay}
+                className="flex-1 rounded-lg bg-sky-600 py-2.5 text-sm font-semibold text-white hover:bg-sky-500"
+              >
+                Confirm Allocation
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* TEAM HISTORY MODAL */}

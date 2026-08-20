@@ -26,6 +26,11 @@ interface Props {
     recommendation: Recommendation
   ) => void;
 
+  onAssignDay: (
+    recommendation: Recommendation,
+    day: string
+  ) => void;
+
   onAssignOther: () => void;
 }
 
@@ -34,6 +39,7 @@ export default function RecommendationTable({
   recommendations,
   downloadJob,
   onAssign,
+  onAssignDay,
   onAssignOther,
 }: Props) {
 
@@ -113,7 +119,7 @@ export default function RecommendationTable({
               Rank
             </th>
 
-            <th className="w-[30%] px-3 py-3 text-left">
+            <th className="w-[34%] px-3 py-3 text-left">
               Analyst
             </th>
 
@@ -121,11 +127,7 @@ export default function RecommendationTable({
               Score
             </th>
 
-            <th className="w-[16%] px-3 py-3 text-center">
-              Confidence
-            </th>
-
-            <th className="w-[24%] px-3 py-3 text-center">
+            <th className="w-[28%] px-3 py-3 text-center">
               Availability
             </th>
 
@@ -207,21 +209,6 @@ export default function RecommendationTable({
                     </span>
                   </td>
 
-                  <td className="px-3 py-3 text-center">
-                    <span
-                      className={`rounded-full px-3 py-1 text-xs font-semibold ${r.confidence === "Excellent"
-                        ? "bg-green-500/20 text-green-400"
-                        : r.confidence === "High"
-                          ? "bg-emerald-500/20 text-emerald-400"
-                          : r.confidence === "Medium"
-                            ? "bg-yellow-500/20 text-yellow-400"
-                            : "bg-red-500/20 text-red-400"
-                        }`}
-                    >
-                      {r.confidence}
-                    </span>
-                  </td>
-
                   <td className="px-3 py-3">
                     <div className="flex justify-center gap-1">
 
@@ -238,7 +225,7 @@ export default function RecommendationTable({
 
                         if (expected && works) {
                           classes +=
-                            " border-green-400 bg-green-500/30 text-green-200";
+                            " border-green-400 bg-green-500/30 text-green-200 cursor-pointer hover:bg-green-500/50";
                         }
                         else if (expected && !works) {
                           classes +=
@@ -246,7 +233,7 @@ export default function RecommendationTable({
                         }
                         else if (works) {
                           classes +=
-                            " border-sky-400 bg-sky-500/20 text-sky-200";
+                            " border-sky-400 bg-sky-500/20 text-sky-200 cursor-pointer hover:bg-sky-500/40";
                         }
                         else {
                           classes +=
@@ -254,13 +241,19 @@ export default function RecommendationTable({
                         }
 
                         return (
-                          <div
+                          <button
                             key={day.full}
                             className={classes}
-                            title={day.full}
+                            title={works ? `Assign for ${day.full}` : `Not working ${day.full}`}
+                            disabled={!works}
+                            onClick={() => {
+                              if (works) {
+                                onAssignDay(r, day.full);
+                              }
+                            }}
                           >
                             {day.short}
-                          </div>
+                          </button>
                         );
 
                       })}
@@ -300,7 +293,7 @@ export default function RecommendationTable({
 
                 {expanded === r.analyst.key && (
                   <tr className="bg-slate-900">
-                    <td colSpan={6} className="p-0">
+                    <td colSpan={5} className="p-0">
                       <RecommendationDetails
                         recommendation={r}
                         fixture={fixture}

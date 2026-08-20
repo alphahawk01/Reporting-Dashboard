@@ -20,6 +20,13 @@
 # production
 /build
 
+# cloudflare / opennext build output
+/.open-next/
+/.wrangler/
+
+# office / editor temp files
+~$*
+
 # misc
 .DS_Store
 *.pem

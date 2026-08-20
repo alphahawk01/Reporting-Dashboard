@@ -1,36 +1,135 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Premier Data — Operations Platform
 
-## Getting Started
+Internal platform for managing match video downloads, analyst allocation, and workforce reporting.
 
-First, run the development server:
+## Architecture
+
+Two independently deployed pieces:
+
+| Component | Location | Deploys to | URL |
+|---|---|---|---|
+| **Frontend** (`reporting-ui/`) | this repo | GitHub Pages (via Actions on push to `main`) | https://dashboard.premierdata-technology.com |
+| **API** (`PDAutoDownload.Api`) | separate repo/folder | Windows Service on EC2 (`pdlive.leagueadmin.com.au`) | https://downloads.premierdata-technology.com |
+
+Data sources:
+
+- **Supabase** — `TT_Games` (fixture master list), `deputy_shifts`, `deputy_roster`, `teams`, `analyst_team_affiliations`
+- **PDAutoDownload API** (PostgreSQL) — live download status, fixture assignments, computers, analysts
+- **SignalR** (`/operationsHub`) — real-time allocation/progress broadcasts to all open pages
+
+## Pages
+
+| Route | Purpose |
+|---|---|
+| `/` and `/dashboard` | Landing page with links to all sections |
+| `/operations` | Live Board — analyst allocations and computer status |
+| `/fixtures` | Match Video Auto Download Dashboard |
+| `/schedule` | Analyst roster grid with fixture allocation |
+| `/recommendations` | Fixture Allocation Engine (AI recommendations) |
+| `/analyst-management` | Analyst records and computer assignments |
+| `/analyst-profile` | Individual analyst metrics, ratings, games coded |
+| `/analyst-compare` | Side-by-side analyst comparison |
+| `/affiliated-teams` | Team performance and analyst affiliations |
+| `/reporting` | Workforce hours, cost, and performance analytics |
+| `/computers`, `/downloads`, `/notifications`, `/settings` | Supporting admin views |
+
+## Local development
 
 ```bash
+cd reporting-ui
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Runs on http://localhost:3000. In development the API clients point at `http://localhost:5165`, so run the API locally too:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+cd <PDAutoDownload path>/PDAutoDownload.Api
+dotnet run
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Required environment variables
 
-## Learn More
+Create `reporting-ui/.env.local`:
 
-To learn more about Next.js, take a look at the following resources:
+```
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The Excel → Supabase sync script (`sync-deputy.js`) additionally needs:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+SUPABASE_URL=...
+SUPABASE_SERVICE_KEY=...
+AZURE_TENANT_ID=...
+AZURE_CLIENT_ID=...
+AZURE_CLIENT_SECRET=...
+SITE_ID=...
+DRIVE_ID=...
+FILE_ID=...
+```
 
-## Deploy on Vercel
+These are stored as GitHub Actions secrets for the scheduled sync workflow.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Deploying
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Frontend
+
+Pushing to `main` triggers `.github/workflows/deploy.yml`, which builds `reporting-ui` as a static export and publishes to GitHub Pages.
+
+```bash
+git add -A
+git commit -m "your change"
+git push origin platform-ui
+git checkout main
+git merge platform-ui --no-edit
+git push origin main
+git checkout platform-ui
+```
+
+Notes:
+
+- `next.config.js` uses `output: "export"` — everything must be statically renderable. Client components using `useSearchParams()` need a `<Suspense>` boundary.
+- `public/CNAME` pins the custom domain. Do not delete it or GitHub Pages will drop the domain on the next deploy.
+- No `basePath` is set because the site is served from the root of a custom domain.
+
+### API
+
+See the deploy script in the PDAutoDownload project:
+
+```powershell
+.\deploy-api.ps1        # builds and packages
+```
+
+Then copy the zip to the EC2 and run the update script there. The API runs as the `PDAutoDownloadApi` Windows Service (Automatic start, auto-restart on failure).
+
+CORS on the API must include the frontend origin (`dashboard.premierdata-technology.com`) or every request will fail silently in the browser.
+
+## Scheduled jobs
+
+| Workflow | Schedule | Purpose |
+|---|---|---|
+| `.github/workflows/sync.yml` | every 6 hours | Pulls the Deputy/fixtures Excel from SharePoint into Supabase |
+| `.github/workflows/deploy.yml` | on push to `main` | Builds and publishes the frontend |
+
+## Repository layout
+
+```
+reporting-ui/          The application (this is the only deployed frontend)
+  app/                 Next.js App Router pages
+  components/          Shared UI
+  lib/api/             API clients for the PDAutoDownload API
+  lib/analytics/       Analyst metric and rating calculations
+  lib/recommendations/ Allocation scoring engine
+  types/               Shared TypeScript types
+  sync-deputy.js       Excel → Supabase sync (run by GitHub Actions)
+docs/reference/        Source spreadsheets and reference material
+.github/workflows/     CI: deploy + scheduled sync
+```
+
+## Known gotchas
+
+- **`game_key` does not match between Supabase and the API.** `TT_Games.game_key` and the API's `gameKey`/`fixtureId` are different identifier systems. Fixtures are matched on `home_team` + `away_team` instead.
+- **File sizes** are resolved by the API's `FileMetadataService`, which issues HEAD requests against the Cloudflare video URLs and caches `FileSizeBytes`. Fixtures not yet imported into the API show "Checking...".
+- **Assignment writes to two places.** `assignFixture` creates the `FixtureAssignment` (drives Schedule/Live Board/Fixtures) and `createDownloadJob` queues the actual download for the desktop agent. Allocation flows call both.
