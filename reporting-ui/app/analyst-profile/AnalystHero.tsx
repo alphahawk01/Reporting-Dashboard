@@ -348,11 +348,11 @@ function StatCard({
   return (
     <div className="flex min-w-[86px] flex-col justify-center rounded-xl border border-slate-700 bg-black/20 px-3 py-2 text-center transition-colors hover:border-slate-500">
 
-      <div className="text-xl font-bold leading-none text-white">
+      <div className="text-2xl font-bold leading-none text-white">
         {value}
       </div>
 
-      <div className="mt-1 text-[9px] uppercase tracking-wider text-slate-400">
+      <div className="mt-1 text-[12px] uppercase tracking-wider text-slate-400">
         {title}
       </div>
 

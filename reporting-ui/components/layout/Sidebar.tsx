@@ -14,6 +14,7 @@ import {
   BarChart3,
   Bell,
   Settings,
+  Trophy,
 } from "lucide-react";
 
 const sections = [
@@ -103,6 +104,11 @@ const sections = [
         title: "Reporting",
         href: "/reporting",
         icon: BarChart3,
+      },
+      {
+        title: "Leaderboard",
+        href: "/leaderboard",
+        icon: Trophy,
       },
     ],
   },

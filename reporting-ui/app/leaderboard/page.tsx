@@ -1,0 +1,390 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+import { supabase } from "@/lib/supabase";
+import { buildAnalystMetrics } from "@/lib/analytics/buildAnalystMetrics";
+import { THEME } from "@/lib/theme";
+import type { AnalystMetrics } from "@/types/analyst";
+import type { DeputyShift } from "@/types/deputy";
+import type { TTGame } from "@/types/ttgame";
+
+import {
+  getAnalystImage,
+  getAnalystInitials,
+} from "@/app/analyst-profile/analystImages";
+
+const PAGE_SIZE = 1000;
+const LEADERBOARD_SIZE = 20;
+
+async function fetchAll<T>(table: string): Promise<T[]> {
+  let from = 0;
+  let all: T[] = [];
+
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select("*")
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) {
+      console.error(`Error fetching ${table}:`, error);
+      break;
+    }
+
+    if (!data || data.length === 0) break;
+
+    all = all.concat(data as T[]);
+
+    if (data.length < PAGE_SIZE) break;
+
+    from += PAGE_SIZE;
+  }
+
+  return all;
+}
+
+export default function LeaderboardPage() {
+  const [analysts, setAnalysts] = useState<AnalystMetrics[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+
+      const [shifts, games] = await Promise.all([
+        fetchAll<DeputyShift>("deputy_shifts"),
+        fetchAll<TTGame>("TT_Games"),
+      ]);
+
+      const metrics = buildAnalystMetrics(shifts, games);
+
+      setAnalysts(metrics);
+      setLoading(false);
+    }
+
+    load();
+  }, []);
+
+  // Single ranking across every analyst, regardless of team, by overall
+  // score. buildAnalystBenchmark ranks AUS/PHL separately, which is not
+  // what a single top-20 leaderboard wants.
+  const ranked = useMemo(() => {
+    return [...analysts]
+      .filter((a) => a.totalGames > 0)
+      .sort((a, b) => b.ratings.overall - a.ratings.overall)
+      .slice(0, LEADERBOARD_SIZE)
+      .map((analyst, index) => ({
+        ...analyst,
+        leaderboardRank: index + 1,
+      }));
+  }, [analysts]);
+
+  const podium = ranked.slice(0, 3);
+  const rest = ranked.slice(3);
+
+  if (loading) {
+    return (
+      <div
+        className="min-h-screen p-10 text-slate-200"
+        style={{ background: THEME.bg }}
+      >
+        Loading leaderboard...
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="min-h-screen p-6 text-slate-200"
+      style={{ background: THEME.bg }}
+    >
+      <div className="mx-auto max-w-5xl">
+
+        <h1 className="mb-1 text-3xl font-bold text-white">
+          Leaderboard
+        </h1>
+
+        <p className="mb-8 text-sm text-slate-500">
+          Top {LEADERBOARD_SIZE} analysts by overall rating
+        </p>
+
+        {ranked.length === 0 ? (
+
+          <div className="rounded-xl border border-slate-700 bg-[#0f1b2d] p-10 text-center text-slate-500">
+            No analysts have coded games yet.
+          </div>
+
+        ) : (
+
+          <>
+            {podium.length > 0 && <Podium analysts={podium} />}
+
+            <LeaderboardList
+              analysts={rest}
+              startRank={4}
+            />
+          </>
+
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* PODIUM                                                              */
+/* ------------------------------------------------------------------ */
+
+function Podium({
+  analysts,
+}: {
+  analysts: (AnalystMetrics & { leaderboardRank: number })[];
+}) {
+  const first = analysts.find((a) => a.leaderboardRank === 1);
+  const second = analysts.find((a) => a.leaderboardRank === 2);
+  const third = analysts.find((a) => a.leaderboardRank === 3);
+
+  return (
+    <div className="mb-10 flex items-end justify-center gap-4 sm:gap-8">
+
+      <PodiumSlot analyst={second} place={2} />
+      <PodiumSlot analyst={first} place={1} />
+      <PodiumSlot analyst={third} place={3} />
+
+    </div>
+  );
+}
+
+const PLACE_STYLES: Record<
+  number,
+  {
+    height: string;
+    block: string;
+    ring: string;
+    avatarSize: string;
+    crown: boolean;
+  }
+> = {
+  1: {
+    height: "h-28",
+    block: "bg-sky-500",
+    ring: "ring-sky-400",
+    avatarSize: "h-16 w-16",
+    crown: true,
+  },
+  2: {
+    height: "h-20",
+    block: "bg-slate-500",
+    ring: "ring-slate-400",
+    avatarSize: "h-14 w-14",
+    crown: false,
+  },
+  3: {
+    height: "h-14",
+    block: "bg-amber-700",
+    ring: "ring-amber-500",
+    avatarSize: "h-14 w-14",
+    crown: false,
+  },
+};
+
+function PodiumSlot({
+  analyst,
+  place,
+}: {
+  analyst?: AnalystMetrics & { leaderboardRank: number };
+  place: 1 | 2 | 3;
+}) {
+  const style = PLACE_STYLES[place];
+
+  if (!analyst) {
+    return <div className="w-24 sm:w-28" />;
+  }
+
+  const image = getAnalystImage(analyst.name);
+  const initials = getAnalystInitials(analyst.name);
+
+  return (
+    <div className="flex w-24 flex-col items-center sm:w-28">
+
+      {/* CROWN */}
+      {style.crown && (
+        <div className="mb-1 text-2xl" aria-hidden="true">
+          👑
+        </div>
+      )}
+
+      {/* AVATAR */}
+      <div
+        className={`relative mb-2 overflow-hidden rounded-full ring-4 ${style.avatarSize} ${style.ring}`}
+      >
+        <AvatarImage
+          src={image}
+          initials={initials}
+        />
+      </div>
+
+      {/* NAME */}
+      <div className="w-full truncate text-center text-sm font-semibold text-white">
+        {analyst.name}
+      </div>
+
+      {/* SCORE CHIP */}
+      <div className="mt-1 rounded-full bg-slate-800 px-3 py-1 text-xs font-bold text-sky-300">
+        {analyst.ratings.overall}
+      </div>
+
+      {/* BLOCK */}
+      <div
+        className={`mt-3 flex w-full items-end justify-center rounded-t-lg ${style.height} ${style.block}`}
+      >
+        <span className="mb-2 text-2xl font-black text-white/90">
+          {place}
+        </span>
+      </div>
+
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* LEADERBOARD LIST                                                    */
+/* ------------------------------------------------------------------ */
+
+function LeaderboardList({
+  analysts,
+  startRank,
+}: {
+  analysts: (AnalystMetrics & { leaderboardRank: number })[];
+  startRank: number;
+}) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-slate-700 bg-[#0f1b2d]">
+
+      <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
+
+        <div className="text-sm font-semibold text-white">
+          Full Leaderboard
+        </div>
+
+        <div className="text-xs uppercase tracking-wide text-slate-500">
+          Rank {startRank}
+          {"–"}
+          {startRank + analysts.length - 1}
+        </div>
+
+      </div>
+
+      <div className="divide-y divide-slate-800">
+
+        {analysts.map((analyst) => (
+          <LeaderboardRow
+            key={analyst.key}
+            analyst={analyst}
+          />
+        ))}
+
+      </div>
+
+    </div>
+  );
+}
+
+function LeaderboardRow({
+  analyst,
+}: {
+  analyst: AnalystMetrics & { leaderboardRank: number };
+}) {
+  const image = getAnalystImage(analyst.name);
+  const initials = getAnalystInitials(analyst.name);
+
+  return (
+    <div className="flex items-center gap-4 px-5 py-3 transition hover:bg-slate-800/50">
+
+      {/* RANK */}
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-800 text-sm font-bold text-slate-300">
+        {analyst.leaderboardRank}
+      </div>
+
+      {/* AVATAR */}
+      <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full ring-2 ring-slate-700">
+        <AvatarImage
+          src={image}
+          initials={initials}
+        />
+      </div>
+
+      {/* NAME + GAMES */}
+      <div className="min-w-0 flex-1">
+
+        <div className="truncate text-sm font-semibold text-white">
+          {analyst.name}
+        </div>
+
+        <div className="text-xs text-slate-500">
+          {analyst.totalGames.toFixed(1)} games coded
+        </div>
+
+      </div>
+
+      {/* AVG TIME PER GAME */}
+      <div className="w-24 shrink-0 text-right">
+
+        <div className="text-sm font-semibold text-slate-200">
+          {analyst.avgHoursPerGame.toFixed(2)} hrs
+        </div>
+
+        <div className="text-xs text-slate-500">
+          per game
+        </div>
+
+      </div>
+
+      {/* OVERALL SCORE */}
+      <div className="w-16 shrink-0 text-right text-lg font-bold text-sky-400">
+        {analyst.ratings.overall}
+      </div>
+
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* AVATAR (shared image-with-fallback behaviour)                       */
+/* ------------------------------------------------------------------ */
+
+function AvatarImage({
+  src,
+  initials,
+}: {
+  src: string;
+  initials: string;
+}) {
+  const [errored, setErrored] = useState(false);
+
+  useEffect(() => {
+    setErrored(false);
+  }, [src]);
+
+  if (errored) {
+    return (
+      <div
+        className="flex h-full w-full items-center justify-center text-sm font-bold"
+        style={{ background: THEME.panel, color: THEME.accent }}
+      >
+        {initials}
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt=""
+      className="h-full w-full object-cover"
+      onError={() => setErrored(true)}
+    />
+  );
+}
