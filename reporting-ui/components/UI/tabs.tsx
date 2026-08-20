@@ -25,16 +25,30 @@ export function Tabs({
   );
 }
 
-export function TabsList({ children }: { children: React.ReactNode }) {
-  return <div className="flex gap-2 border-b mb-4">{children}</div>;
+export function TabsList({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={className ?? "flex gap-2 border-b mb-4"}>
+      {children}
+    </div>
+  );
 }
 
 export function TabsTrigger({
   value,
   children,
+  activeClassName,
+  inactiveClassName,
 }: {
   value: string;
   children: React.ReactNode;
+  activeClassName?: string;
+  inactiveClassName?: string;
 }) {
   const ctx = React.useContext(TabsContext);
 
@@ -45,11 +59,13 @@ export function TabsTrigger({
   return (
     <button
       onClick={() => ctx.setValue(value)}
-      className={`px-4 py-2 text-sm border-b-2 transition ${
+      className={
         active
-          ? "border-blue-600 text-blue-600"
-          : "border-transparent text-gray-500"
-      }`}
+          ? activeClassName ??
+            "px-4 py-2 text-sm border-b-2 transition border-blue-600 text-blue-600"
+          : inactiveClassName ??
+            "px-4 py-2 text-sm border-b-2 transition border-transparent text-gray-500"
+      }
     >
       {children}
     </button>

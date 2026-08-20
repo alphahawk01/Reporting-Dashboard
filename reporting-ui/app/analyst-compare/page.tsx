@@ -15,6 +15,12 @@ import ComparisonTrendCharts from "./ComparisonTrendCharts";
 import ComparisonAttributes from "./ComparisonAttributes";
 import ComparisonRanking from "./ComparisonRanking";
 import ComparisonGaps from "./ComparisonGaps";
+import {
+    Tabs,
+    TabsList,
+    TabsTrigger,
+    TabsContent,
+} from "@/components/UI/tabs";
 
 const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -107,6 +113,13 @@ export default function AnalystComparePage() {
 
     }, [benchmark, analystB]);
 
+    function swapAnalysts() {
+        const a = analystA;
+        const b = analystB;
+        setAnalystA(b);
+        setAnalystB(a);
+    }
+
     if (loading) {
 
         return (
@@ -157,7 +170,13 @@ export default function AnalystComparePage() {
 
                 </div>
 
-                <div className="grid grid-cols-2 gap-8 mb-10">
+                <datalist id="analyst-options">
+                    {analysts.map(name => (
+                        <option key={name} value={name} />
+                    ))}
+                </datalist>
+
+                <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-4 mb-10">
 
                     <div>
 
@@ -165,9 +184,12 @@ export default function AnalystComparePage() {
                             Analyst A
                         </label>
 
-                        <select
+                        <input
+                            type="text"
+                            list="analyst-options"
                             value={analystA}
                             onChange={(e) => setAnalystA(e.target.value)}
+                            placeholder="Search analyst..."
                             className="
                                 w-full
                                 rounded-lg
@@ -176,19 +198,38 @@ export default function AnalystComparePage() {
                                 border-slate-700
                                 px-4
                                 py-3
+                                text-white
+                                placeholder:text-slate-500
+                                focus:outline-none
+                                focus:border-sky-500
                             "
-                        >
-                            {analysts.map(name => (
-                                <option
-                                    key={name}
-                                    value={name}
-                                >
-                                    {name}
-                                </option>
-                            ))}
-                        </select>
+                        />
 
                     </div>
+
+                    <button
+                        type="button"
+                        onClick={swapAnalysts}
+                        title="Swap analysts"
+                        className="
+                            mb-0.5
+                            flex
+                            h-11
+                            w-11
+                            items-center
+                            justify-center
+                            rounded-full
+                            border
+                            border-slate-700
+                            bg-slate-900
+                            text-slate-300
+                            transition-colors
+                            hover:border-sky-500
+                            hover:text-sky-400
+                        "
+                    >
+                        ⇄
+                    </button>
 
                     <div>
 
@@ -196,9 +237,12 @@ export default function AnalystComparePage() {
                             Analyst B
                         </label>
 
-                        <select
+                        <input
+                            type="text"
+                            list="analyst-options"
                             value={analystB}
                             onChange={(e) => setAnalystB(e.target.value)}
+                            placeholder="Search analyst..."
                             className="
                                 w-full
                                 rounded-lg
@@ -207,21 +251,17 @@ export default function AnalystComparePage() {
                                 border-slate-700
                                 px-4
                                 py-3
+                                text-white
+                                placeholder:text-slate-500
+                                focus:outline-none
+                                focus:border-sky-500
                             "
-                        >
-                            {analysts.map(name => (
-                                <option
-                                    key={name}
-                                    value={name}
-                                >
-                                    {name}
-                                </option>
-                            ))}
-                        </select>
+                        />
 
                     </div>
 
                 </div>
+
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-10">
 
                     <div>
@@ -254,86 +294,110 @@ export default function AnalystComparePage() {
 
                 </div>
 
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-10">
+                {analystDataA && analystDataB ? (
 
-                    <div>
+                    <Tabs defaultValue="overview">
 
-                        {analystDataA && (
+                        <TabsList className="flex gap-2 border-b border-slate-800 mb-8 overflow-x-auto">
+                            {[
+                                ["overview", "Overview"],
+                                ["attributes", "Attributes"],
+                                ["kpis", "KPIs"],
+                                ["trends", "Trends"],
+                                ["rankings", "Rankings"],
+                                ["gaps", "Gaps"],
+                            ].map(([value, label]) => (
+                                <TabsTrigger
+                                    key={value}
+                                    value={value}
+                                    activeClassName="px-4 py-2.5 text-sm font-semibold whitespace-nowrap border-b-2 transition border-sky-500 text-sky-400"
+                                    inactiveClassName="px-4 py-2.5 text-sm font-semibold whitespace-nowrap border-b-2 transition border-transparent text-slate-400 hover:text-slate-200"
+                                >
+                                    {label}
+                                </TabsTrigger>
+                            ))}
+                        </TabsList>
 
-                            <AttributeRatings
-                                ratings={analystDataA.ratings}
+                        <TabsContent value="overview">
+                            <div className="space-y-8">
+
+                                <ComparisonSummary
+                                    analystA={analystDataA}
+                                    analystB={analystDataB}
+                                />
+
+                                <ComparisonRadar
+                                    analystA={analystDataA}
+                                    analystB={analystDataB}
+                                />
+
+                            </div>
+                        </TabsContent>
+
+                        <TabsContent value="attributes">
+                            <div className="space-y-8">
+
+                                <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+
+                                    <AttributeRatings
+                                        ratings={analystDataA.ratings}
+                                    />
+
+                                    <AttributeRatings
+                                        ratings={analystDataB.ratings}
+                                    />
+
+                                </div>
+
+                                <ComparisonAttributes
+                                    analystA={analystDataA}
+                                    analystB={analystDataB}
+                                />
+
+                            </div>
+                        </TabsContent>
+
+                        <TabsContent value="kpis">
+                            <ComparisonKPIs
+                                analystA={analystDataA}
+                                analystB={analystDataB}
                             />
+                        </TabsContent>
 
-                        )}
-
-                    </div>
-
-                    <div>
-
-                        {analystDataB && (
-
-                            <AttributeRatings
-                                ratings={analystDataB.ratings}
+                        <TabsContent value="trends">
+                            <ComparisonTrendCharts
+                                analystA={analystDataA.name}
+                                analystB={analystDataB.name}
+                                shifts={shiftRows}
+                                games={ttRows}
                             />
+                        </TabsContent>
 
-                        )}
+                        <TabsContent value="rankings">
+                            <ComparisonRanking
+                                analysts={benchmark}
+                                analystA={analystDataA}
+                                analystB={analystDataB}
+                            />
+                        </TabsContent>
 
+                        <TabsContent value="gaps">
+                            <ComparisonGaps
+                                analystA={analystDataA}
+                                analystB={analystDataB}
+                            />
+                        </TabsContent>
+
+                    </Tabs>
+
+                ) : (
+
+                    <div className="rounded-xl border border-slate-700 bg-[#0f172a] p-8 text-center text-slate-400">
+                        Select two analysts to compare.
                     </div>
 
-                </div>
-
-                <div className="mb-10">
-                    <ComparisonRadar
-                        analystA={analystDataA}
-                        analystB={analystDataB}
-                    />
-                </div>
-
-                {analystDataA && analystDataB && (
-                    <div className="mb-10">
-                        <ComparisonSummary
-                            analystA={analystDataA}
-                            analystB={analystDataB}
-                        />
-                    </div>
                 )}
 
-                {analystDataA && analystDataB && (
-                    <div className="mb-10">
-                        <ComparisonKPIs
-                            analystA={analystDataA}
-                            analystB={analystDataB}
-                        />
-                    </div>
-                )}
-
-                {analystDataA && analystDataB && (
-                    <div className="mb-10">
-                        <ComparisonAttributes
-                            analystA={analystDataA}
-                            analystB={analystDataB}
-                        />
-                    </div>
-                )}
-
-                {analystDataA && analystDataB && (
-                    <div className="mb-10">
-                        <ComparisonRanking
-                            analysts={benchmark}
-                            analystA={analystDataA}
-                            analystB={analystDataB}
-                        />
-                    </div>
-                )}
-
-                {analystDataA && analystDataB && (
-                    <div className="mb-10">
-                        <ComparisonGaps
-                            analystA={analystDataA}
-                            analystB={analystDataB}
-                        />
-                    </div>
-                )}
             </div>
 
         </main>
