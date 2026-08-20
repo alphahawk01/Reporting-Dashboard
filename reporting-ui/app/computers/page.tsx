@@ -557,7 +557,7 @@ export default function ComputersPage() {
                 computer.analystName
                     ?.toLowerCase()
                     .includes(term) ||
-                computer.workLocation
+                (computer.assignmentLocation ?? computer.workLocation)
                     ?.toLowerCase()
                     .includes(term);
 
@@ -639,8 +639,8 @@ export default function ComputersPage() {
                         break;
 
                     case "location":
-                        valueA = a.workLocation ?? "";
-                        valueB = b.workLocation ?? "";
+                        valueA = a.assignmentLocation ?? a.workLocation ?? "";
+                        valueB = b.assignmentLocation ?? b.workLocation ?? "";
                         break;
 
                     case "fixtures":
@@ -979,7 +979,7 @@ export default function ComputersPage() {
                         text-sm
                         text-slate-600
                     ">
-                                        {computer.workLocation || "Unassigned"}
+                                        {computer.assignmentLocation ?? computer.workLocation ?? "Unassigned"}
                                     </td>
 
 
