@@ -17,11 +17,13 @@ export function buildAnalystBenchmark(
       analyst.rank = index + 1;
       analyst.totalAnalysts = total;
 
-      // Higher score = better percentile
-      analyst.percentile =
-        total <= 1
-          ? 100
-          : Math.round(((total - index) / total) * 100);
+      // "Top X%" — rank 1 of 102 is top 1%, last place is top 100%.
+      // Clamped to a minimum of 1 so the best analyst never reads "Top 0%"
+      // in large groups.
+      analyst.percentile = Math.max(
+        1,
+        Math.round(((index + 1) / total) * 100)
+      );
     });
   }
 

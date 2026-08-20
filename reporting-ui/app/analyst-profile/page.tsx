@@ -36,6 +36,8 @@ function AnalystProfileContent() {
   const [shifts, setShifts] = useState<DeputyShift[]>([]);
   const [games, setGames] = useState<TTGame[]>([]);
   const [teamLogoMap, setTeamLogoMap] = useState<Record<string, string>>({});
+  const [affiliations, setAffiliations] =
+    useState<Map<string, string[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [gameSortField, setGameSortField] = useState("Week");
   const [gameSortDir, setGameSortDir] = useState<"asc" | "desc">("desc");
@@ -99,6 +101,33 @@ const gamesData = await fetchAll<TTGame>("TT_Games");
         }
       } catch {
         // Fall back to static clubLogos mapping
+      }
+
+      // Fetch analyst → team affiliations
+      try {
+        const { data: affiliationData, error: affiliationError } =
+          await supabase
+            .from("analyst_team_affiliations")
+            .select("analyst_name, teams ( team_name )");
+
+        if (!affiliationError && affiliationData) {
+          const map = new Map<string, string[]>();
+
+          for (const row of affiliationData as any[]) {
+            const name = row.analyst_name?.trim().toLowerCase();
+            const team = row.teams?.team_name?.trim();
+
+            if (!name || !team) continue;
+
+            const existing = map.get(name) ?? [];
+            if (!existing.includes(team)) existing.push(team);
+            map.set(name, existing);
+          }
+
+          setAffiliations(map);
+        }
+      } catch {
+        // Affiliations are supplementary — fail quietly
       }
 
       setShifts(shiftsData);
@@ -271,7 +300,15 @@ const filteredGames = useMemo(() => {
         {activeData ? (
           <>
             <div className="relative z-20">
-              <AnalystHero data={activeData} />
+              <AnalystHero
+                data={activeData}
+                affiliatedTeams={
+                  affiliations.get(
+                    activeData.name.trim().toLowerCase()
+                  ) ?? []
+                }
+                logoMap={teamLogoMap}
+              />
             </div>
 
             <div className="relative z-10">

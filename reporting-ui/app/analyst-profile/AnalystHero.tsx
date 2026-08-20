@@ -11,13 +11,48 @@ import {
   getAnalystInitials,
 } from "./analystImages";
 
-import AttributeBar from "./AttributeBar";
+import { clubLogos } from "./clubLogos";
 
 type Props = {
   data: AnalystMetrics;
+  affiliatedTeams?: string[];
+  logoMap?: Record<string, string>;
 };
 
-export default function AnalystHero({ data }: Props) {
+/**
+ * Maps an overall rating to its grade tier colours so the badge reflects
+ * performance instead of always rendering amber.
+ * Tiers mirror the Overall Rating Guide in the tooltip below.
+ */
+function gradeTheme(overall: number) {
+  if (overall >= 95)
+    return { text: "text-emerald-400", border: "border-emerald-500/40", bg: "bg-emerald-500/10", label: "text-emerald-400" };
+  if (overall >= 90)
+    return { text: "text-green-400", border: "border-green-500/40", bg: "bg-green-500/10", label: "text-green-400" };
+  if (overall >= 85)
+    return { text: "text-sky-400", border: "border-sky-500/40", bg: "bg-sky-500/10", label: "text-sky-400" };
+  if (overall >= 80)
+    return { text: "text-amber-400", border: "border-amber-500/40", bg: "bg-amber-500/10", label: "text-amber-400" };
+  if (overall >= 75)
+    return { text: "text-orange-400", border: "border-orange-500/40", bg: "bg-orange-500/10", label: "text-orange-400" };
+  if (overall >= 60)
+    return { text: "text-orange-500", border: "border-orange-700/50", bg: "bg-orange-700/10", label: "text-orange-500" };
+  return { text: "text-rose-400", border: "border-rose-500/40", bg: "bg-rose-500/10", label: "text-rose-400" };
+}
+
+function resolveTeamLogo(
+  team: string,
+  logoMap: Record<string, string>
+): string | null {
+  const key = team.trim().toLowerCase();
+  return logoMap[key] ?? clubLogos[key] ?? null;
+}
+
+export default function AnalystHero({
+  data,
+  affiliatedTeams = [],
+  logoMap = {},
+}: Props) {
   const image = getAnalystImage(data.name);
   const initials = getAnalystInitials(data.name);
 
@@ -26,6 +61,8 @@ export default function AnalystHero({ data }: Props) {
   useEffect(() => {
     setImageError(false);
   }, [image]);
+
+  const grade = gradeTheme(data.ratings.overall);
 
   return (
     <Card>
@@ -75,18 +112,67 @@ export default function AnalystHero({ data }: Props) {
               )}
             </div>
 
-            <div>
+            <div className="min-w-0">
               <h1 className="text-4xl font-bold text-white">
                 {data.name}
               </h1>
 
-              <div className="mt-3 text-slate-300">
-                Rank #{data.rank} of {data.totalAnalysts}
+              {/* RANK + PERCENTILE */}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="rounded-md border border-slate-600 bg-black/30 px-2.5 py-1 text-sm font-semibold text-slate-200">
+                  Rank #{data.rank}
+                  <span className="ml-1 font-normal text-slate-500">
+                    of {data.totalAnalysts}
+                  </span>
+                </span>
+
+                <span className={`rounded-md px-2.5 py-1 text-sm font-semibold ${grade.bg} ${grade.text}`}>
+                  Top {data.percentile}%
+                </span>
+
+                <span className="rounded-md border border-slate-700 bg-black/20 px-2 py-1 text-xs font-medium uppercase tracking-wide text-slate-400">
+                  {data.team}
+                </span>
               </div>
 
-              <div className="text-slate-500">
-                Top {data.percentile}%
-              </div>
+              {/* AFFILIATED TEAMS */}
+              {affiliatedTeams.length > 0 && (
+                <div className="mt-3">
+                  <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/80">
+                    Affiliated {affiliatedTeams.length > 1 ? "Teams" : "Team"}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {affiliatedTeams.map(team => {
+                      const logo = resolveTeamLogo(team, logoMap);
+
+                      return (
+                        <span
+                          key={team}
+                          className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 py-1 pl-1 pr-2.5 text-xs font-medium text-emerald-200"
+                          title={team}
+                        >
+                          {logo ? (
+                            <img
+                              src={logo}
+                              alt=""
+                              className="h-5 w-5 rounded-full bg-white/10 object-contain"
+                              onError={e => {
+                                (e.currentTarget as HTMLImageElement).style.display = "none";
+                              }}
+                            />
+                          ) : (
+                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/20 text-[9px] font-bold">
+                              {team.slice(0, 2).toUpperCase()}
+                            </span>
+                          )}
+                          {team}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
           </div>
@@ -97,7 +183,7 @@ export default function AnalystHero({ data }: Props) {
 
             {/* KPI CARDS */}
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-3">
 
               <StatCard
                 title="Hours"
@@ -110,11 +196,6 @@ export default function AnalystHero({ data }: Props) {
               />
 
               <StatCard
-                title="Cost"
-                value={`$${Math.round(data.totalCost).toLocaleString()}`}
-              />
-
-              <StatCard
                 title="Hrs / Game"
                 value={data.avgHoursPerGame.toFixed(2)}
               />
@@ -123,11 +204,11 @@ export default function AnalystHero({ data }: Props) {
 
             {/* OVERALL CARD */}
 
-            <div className="relative w-44 rounded-3xl border border-sky-500/30 bg-sky-500/10 p-6 text-center">
+            <div className={`relative w-44 rounded-3xl border p-6 text-center ${grade.border} ${grade.bg}`}>
 
               <div className="flex items-center justify-center gap-2">
 
-                <div className="text-xs uppercase tracking-[0.35em] text-sky-400">
+                <div className={`text-xs uppercase tracking-[0.3em] ${grade.text}`}>
                   Overall
                 </div>
 
@@ -244,7 +325,7 @@ export default function AnalystHero({ data }: Props) {
                 {data.ratings.overall}
               </div>
 
-              <div className="mt-4 text-lg font-semibold text-amber-400">
+              <div className={`mt-4 text-lg font-semibold ${grade.label}`}>
                 {data.grade}
               </div>
 
@@ -267,13 +348,13 @@ function StatCard({
   value: string;
 }) {
   return (
-    <div className="min-w-[145px] rounded-2xl border border-slate-700 bg-black/20 px-6 py-4 text-center">
+    <div className="min-w-[110px] rounded-2xl border border-slate-700 bg-black/20 px-4 py-4 text-center transition-colors hover:border-slate-500">
 
-      <div className="text-3xl font-bold text-white">
+      <div className="text-2xl font-bold text-white">
         {value}
       </div>
 
-      <div className="mt-2 text-xs uppercase tracking-wider text-slate-400">
+      <div className="mt-1.5 text-[10px] uppercase tracking-wider text-slate-400">
         {title}
       </div>
 
