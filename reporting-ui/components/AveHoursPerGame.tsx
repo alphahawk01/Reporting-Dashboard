@@ -12,6 +12,7 @@ import {
   Cell,
   ReferenceLine,
 } from "recharts";
+import { isExcludedAnalystName } from "@/lib/analytics/excludedAnalysts";
 
 // -------------------------
 // THEME
@@ -61,7 +62,7 @@ export default function AveHoursPerGame({
 
     (deputyData ?? []).forEach((r) => {
       const name = r.employee_name;
-      if (!name) return;
+      if (!name || isExcludedAnalystName(name)) return;
 
       const key = norm(name);
 
@@ -85,6 +86,8 @@ export default function AveHoursPerGame({
       const week = String(r.week ?? "").trim();
       if (!week) return;
 
+      if (isExcludedAnalystName(r.employee_name)) return;
+
       const area = String(r.area_name ?? "").trim();
       const allowed = area === "Home Analyst" || area === "Office Analyst";
       if (!allowed) return;
@@ -102,13 +105,19 @@ export default function AveHoursPerGame({
       const week = String(r.week ?? r.Week ?? "").trim();
       if (!week) return;
 
+      const homeIsExcluded = isExcludedAnalystName(r.home_allocated);
+      const awayIsExcluded = isExcludedAnalystName(r.away_allocated);
+
       let gameCredit = 0;
 
       if (isAll) {
+        // Skip games where both sides are the placeholder; count games
+        // with at least one real analyst as before.
+        if (homeIsExcluded && awayIsExcluded) return;
         gameCredit = 1;
       } else {
-        if (norm(r.home_allocated) === selected) gameCredit += 1;
-        if (norm(r.away_allocated) === selected) gameCredit += 1;
+        if (!homeIsExcluded && norm(r.home_allocated) === selected) gameCredit += 1;
+        if (!awayIsExcluded && norm(r.away_allocated) === selected) gameCredit += 1;
         gameCredit = gameCredit / 2;
       }
 

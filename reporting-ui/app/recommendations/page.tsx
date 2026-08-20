@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase";
 import { leagueLogos } from "@/app/analyst-profile/leagueLogos";
 
 import { buildAnalystMetrics } from "@/lib/analytics/buildAnalystMetrics";
+import { isExcludedAnalystName } from "@/lib/analytics/excludedAnalysts";
 import {
   buildRecommendations,
   type Recommendation,
@@ -1586,10 +1587,14 @@ export default function RecommendationPage() {
         const analystNames = new Set<string>();
         teamGames.forEach(g => {
           if (g.home_team?.trim().toLowerCase() === teamName.trim().toLowerCase()) {
-            if (g.home_allocated) analystNames.add(g.home_allocated);
+            if (g.home_allocated && !isExcludedAnalystName(g.home_allocated)) {
+              analystNames.add(g.home_allocated);
+            }
           }
           if (g.away_team?.trim().toLowerCase() === teamName.trim().toLowerCase()) {
-            if (g.away_allocated) analystNames.add(g.away_allocated);
+            if (g.away_allocated && !isExcludedAnalystName(g.away_allocated)) {
+              analystNames.add(g.away_allocated);
+            }
           }
         });
 

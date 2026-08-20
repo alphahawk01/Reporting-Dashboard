@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { isExcludedAnalystName } from "@/lib/analytics/excludedAnalysts";
 
 // -------------------------
 // THEME
@@ -61,7 +62,7 @@ export default function AveHoursTopAnalysts({
       if (area !== "Home Analyst" && area !== "Office Analyst") return;
 
       const name = r.employee_name;
-      if (!name) return;
+      if (!name || isExcludedAnalystName(name)) return;
 
       upsert(name, Number(r.total_hours ?? 0), 0);
     });
@@ -70,8 +71,8 @@ export default function AveHoursTopAnalysts({
       const home = r.home_allocated;
       const away = r.away_allocated;
 
-      if (home) upsert(home, 0, 0.5);
-      if (away) upsert(away, 0, 0.5);
+      if (home && !isExcludedAnalystName(home)) upsert(home, 0, 0.5);
+      if (away && !isExcludedAnalystName(away)) upsert(away, 0, 0.5);
     });
 
     return Array.from(map.values())

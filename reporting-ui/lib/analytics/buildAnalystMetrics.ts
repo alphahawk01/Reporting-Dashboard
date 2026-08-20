@@ -1,5 +1,6 @@
 import { buildRatings } from "./ratings/buildRatings";
 import { buildOverall } from "./ratings/buildOverall";
+import { isExcludedAnalystName } from "./excludedAnalysts";
 
 import type { AnalystMetrics } from "@/types/analyst";
 import type { DeputyShift } from "@/types/deputy";
@@ -96,6 +97,7 @@ export function buildAnalystMetrics(
   // =====================================================
   for (const shift of shifts) {
     if (!shift?.employee_name) continue;
+    if (isExcludedAnalystName(shift.employee_name)) continue;
 
     const analyst = getOrCreate(shift.employee_name);
     const area = shift.area_name ?? "Unknown";
@@ -144,7 +146,7 @@ export function buildAnalystMetrics(
     // HOME ANALYST
     // ===================================================
 
-    if (game.home_allocated) {
+    if (game.home_allocated && !isExcludedAnalystName(game.home_allocated)) {
 
       homeCount++;
 
@@ -180,7 +182,7 @@ export function buildAnalystMetrics(
     // AWAY ANALYST
     // ===================================================
 
-    if (game.away_allocated) {
+    if (game.away_allocated && !isExcludedAnalystName(game.away_allocated)) {
 
       awayCount++;
 

@@ -11,6 +11,7 @@ import {
   CartesianGrid,
   LabelList,
 } from "recharts";
+import { isExcludedAnalystName } from "@/lib/analytics/excludedAnalysts";
 
 // -------------------------
 // THEME
@@ -47,6 +48,8 @@ export default function HoursByEmployee({ data }: { data: any[] }) {
   const grouped = useMemo(() => {
     return Object.values(
       filteredData.reduce((acc: any, row) => {
+        if (isExcludedAnalystName(row.employee_name)) return acc;
+
         const name = row.employee_name || "Unknown";
 
         if (!acc[name]) acc[name] = { name, hours: 0 };
