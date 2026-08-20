@@ -8,21 +8,25 @@ import Link from "next/link";
 
 import {
     getComputers,
-    registerComputer,
     deleteComputer,
     type Computer,
 } from "@/lib/api/computers";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { getHubConnection } from "@/lib/signalr";
 import { HubConnectionState } from "@microsoft/signalr";
+
+type AllocationFilter = "All" | "Allocated" | "Unallocated";
 
 export default function ComputersPage() {
 
     const [computers, setComputers] =
         useState<Computer[]>([]);
 
-    const [name, setName] =
+    const [search, setSearch] =
         useState("");
+
+    const [allocationFilter, setAllocationFilter] =
+        useState<AllocationFilter>("All");
 
     const [loading, setLoading] =
         useState(true);
@@ -238,39 +242,6 @@ export default function ComputersPage() {
     }
 
 
-    async function addComputer() {
-
-        if (!name.trim())
-            return;
-
-
-        try {
-
-            await registerComputer(
-                name.trim()
-            );
-
-            setName("");
-
-            await load();
-
-        }
-        catch (err) {
-
-            console.error(
-                "Failed registering computer:",
-                err
-            );
-
-            alert(
-                "Failed registering computer"
-            );
-
-        }
-
-    }
-
-
     async function removeComputer(
         id: number
     ) {
@@ -307,8 +278,71 @@ export default function ComputersPage() {
     }
 
 
+    /*
+     * A computer counts as allocated when it has an analyst attached.
+     */
+    function isAllocated(
+        computer: Computer
+    ) {
+        return !!computer.analystName?.trim();
+    }
+
+
+    const totals = useMemo(() => {
+
+        const allocated =
+            computers.filter(isAllocated).length;
+
+        return {
+            registered: computers.length,
+            allocated,
+            unallocated: computers.length - allocated,
+        };
+
+    }, [computers]);
+
+
+    /*
+     * SEARCH + ALLOCATION FILTER
+     */
+    const visibleComputers = useMemo(() => {
+
+        const term =
+            search.trim().toLowerCase();
+
+        return computers.filter(computer => {
+
+            const matchesSearch =
+                !term ||
+                computer.computerName
+                    ?.toLowerCase()
+                    .includes(term) ||
+                computer.analystName
+                    ?.toLowerCase()
+                    .includes(term) ||
+                computer.workLocation
+                    ?.toLowerCase()
+                    .includes(term);
+
+            if (!matchesSearch) return false;
+
+            if (allocationFilter === "Allocated") {
+                return isAllocated(computer);
+            }
+
+            if (allocationFilter === "Unallocated") {
+                return !isAllocated(computer);
+            }
+
+            return true;
+
+        });
+
+    }, [computers, search, allocationFilter]);
+
+
     const sortedComputers =
-        [...computers].sort(
+        [...visibleComputers].sort(
             (a, b) => {
 
                 let valueA:
@@ -321,14 +355,6 @@ export default function ComputersPage() {
                 switch (
                 sortField
                 ) {
-
-                    case "id":
-
-                        valueA = a.id;
-                        valueB = b.id;
-
-                        break;
-
 
                     case "name":
 
@@ -485,37 +511,75 @@ export default function ComputersPage() {
             </div>
 
 
+            {/* TOTALS SUMMARY */}
+
+            <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+
+                <SummaryCard
+                    title="Registered"
+                    value={totals.registered}
+                    active={allocationFilter === "All"}
+                    accent="text-slate-900"
+                    onClick={() =>
+                        setAllocationFilter("All")
+                    }
+                />
+
+                <SummaryCard
+                    title="Allocated"
+                    value={totals.allocated}
+                    active={allocationFilter === "Allocated"}
+                    accent="text-green-600"
+                    onClick={() =>
+                        setAllocationFilter(
+                            allocationFilter === "Allocated"
+                                ? "All"
+                                : "Allocated"
+                        )
+                    }
+                />
+
+                <SummaryCard
+                    title="Unallocated"
+                    value={totals.unallocated}
+                    active={allocationFilter === "Unallocated"}
+                    accent="text-amber-600"
+                    onClick={() =>
+                        setAllocationFilter(
+                            allocationFilter === "Unallocated"
+                                ? "All"
+                                : "Unallocated"
+                        )
+                    }
+                />
+
+            </div>
+
+
+            {/* SEARCH */}
+
             <div className="
                 mb-6
                 rounded-xl
                 border
                 border-slate-200
                 bg-white
-                p-5
+                p-4
                 shadow-sm
             ">
 
-                <div className="flex gap-3">
+                <div className="flex flex-wrap items-center gap-3">
 
                     <input
-                        value={name}
+                        value={search}
                         onChange={e =>
-                            setName(
+                            setSearch(
                                 e.target.value
                             )
                         }
-                        onKeyDown={e => {
-
-                            if (
-                                e.key === "Enter"
-                            ) {
-                                addComputer();
-                            }
-
-                        }}
-                        placeholder="Computer name"
+                        placeholder="Search by computer, analyst or location..."
                         className="
-                            w-80
+                            w-96
                             rounded-lg
                             border
                             border-slate-300
@@ -529,23 +593,44 @@ export default function ComputersPage() {
                         "
                     />
 
+                    {(search || allocationFilter !== "All") && (
 
-                    <button
-                        onClick={addComputer}
-                        className="
-                            rounded-lg
-                            bg-sky-600
-                            px-5
-                            py-2
-                            text-sm
-                            font-semibold
-                            text-white
-                            transition
-                            hover:bg-sky-700
-                        "
-                    >
-                        Register Computer
-                    </button>
+                        <button
+                            onClick={() => {
+                                setSearch("");
+                                setAllocationFilter("All");
+                            }}
+                            className="
+                                rounded-lg
+                                border
+                                border-slate-300
+                                px-3
+                                py-2
+                                text-sm
+                                font-medium
+                                text-slate-600
+                                transition
+                                hover:bg-slate-100
+                            "
+                        >
+                            Clear filters
+                        </button>
+
+                    )}
+
+                    <div className="ml-auto text-sm text-slate-500">
+                        Showing{" "}
+                        <span className="font-semibold text-slate-700">
+                            {sortedComputers.length}
+                        </span>
+                        {" of "}
+                        {totals.registered}
+                        {allocationFilter !== "All" && (
+                            <span className="ml-2 rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                                {allocationFilter}
+                            </span>
+                        )}
+                    </div>
 
                 </div>
 
@@ -571,7 +656,6 @@ export default function ComputersPage() {
                         <tr>
 
                             {[
-                                ["id", "ID"],
                                 ["name", "Name"],
                                 ["analyst", "Analyst"],
                                 ["location", "Location"],
@@ -632,15 +716,6 @@ export default function ComputersPage() {
                         hover:bg-slate-50
                     "
                                 >
-
-                                    <td className="
-                        p-4
-                        text-sm
-                        text-slate-500
-                    ">
-                                        {computer.id}
-                                    </td>
-
 
                                     <td className="
                         p-4
@@ -794,6 +869,19 @@ export default function ComputersPage() {
                             )
                         )}
 
+                        {sortedComputers.length === 0 && (
+
+                            <tr>
+                                <td
+                                    colSpan={7}
+                                    className="p-10 text-center text-sm text-slate-500"
+                                >
+                                    No computers match your search or filter.
+                                </td>
+                            </tr>
+
+                        )}
+
                     </tbody>
 
                 </table>
@@ -801,6 +889,58 @@ export default function ComputersPage() {
             </div>
 
         </div>
+
+    );
+
+}
+
+
+function SummaryCard({
+    title,
+    value,
+    accent,
+    active,
+    onClick,
+}: {
+    title: string;
+    value: number;
+    accent: string;
+    active: boolean;
+    onClick: () => void;
+}) {
+
+    return (
+
+        <button
+            type="button"
+            onClick={onClick}
+            aria-pressed={active}
+            className={`
+                rounded-xl
+                border
+                bg-white
+                p-5
+                text-left
+                shadow-sm
+                transition
+                hover:border-sky-400
+                hover:shadow
+                ${active
+                    ? "border-sky-500 ring-2 ring-sky-100"
+                    : "border-slate-200"
+                }
+            `}
+        >
+
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                {title}
+            </div>
+
+            <div className={`mt-1 text-3xl font-bold ${accent}`}>
+                {value}
+            </div>
+
+        </button>
 
     );
 
