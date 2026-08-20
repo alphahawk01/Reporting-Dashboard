@@ -283,9 +283,27 @@ function PodiumSlot({
         {analyst.name}
       </div>
 
-      {/* SCORE CHIP */}
-      <div className="mt-1 rounded-full bg-slate-800 px-3 py-1 text-xs font-bold text-sky-300">
-        {analyst.ratings.overall}
+      {/* STATS */}
+      <div className="mt-1.5 flex flex-col items-center gap-1 text-[11px] text-slate-400">
+
+        <div className="flex items-center gap-1">
+          <span className="font-semibold text-slate-200">
+            {analyst.totalGames.toFixed(1)}
+          </span>
+          games
+        </div>
+
+        <div className="flex items-center gap-1">
+          <span className="font-semibold text-slate-200">
+            {analyst.avgHoursPerGame.toFixed(2)}
+          </span>
+          hrs / game
+        </div>
+
+        <div className="rounded-full bg-slate-800 px-3 py-1 text-xs font-bold text-sky-300">
+          {analyst.ratings.overall} rating
+        </div>
+
       </div>
 
       {/* BLOCK */}
@@ -329,16 +347,46 @@ function LeaderboardList({
 
       </div>
 
-      <div className="divide-y divide-slate-800">
+      <table className="w-full text-left">
 
-        {analysts.map((analyst) => (
-          <LeaderboardRow
-            key={analyst.key}
-            analyst={analyst}
-          />
-        ))}
+        <thead>
+          <tr className="border-b border-slate-800 text-xs uppercase tracking-wide text-slate-500">
 
-      </div>
+            <th className="w-14 px-5 py-3 font-semibold">
+              Rank
+            </th>
+
+            <th className="px-3 py-3 font-semibold">
+              Analyst
+            </th>
+
+            <th className="w-32 px-3 py-3 text-right font-semibold">
+              Games Coded
+            </th>
+
+            <th className="w-28 px-3 py-3 text-right font-semibold">
+              Ave Time
+            </th>
+
+            <th className="w-20 px-5 py-3 text-right font-semibold">
+              Rating
+            </th>
+
+          </tr>
+        </thead>
+
+        <tbody className="divide-y divide-slate-800">
+
+          {analysts.map((analyst) => (
+            <LeaderboardRow
+              key={analyst.key}
+              analyst={analyst}
+            />
+          ))}
+
+        </tbody>
+
+      </table>
 
     </div>
   );
@@ -353,53 +401,49 @@ function LeaderboardRow({
   const initials = getAnalystInitials(analyst.name);
 
   return (
-    <div className="flex items-center gap-4 px-5 py-3 transition hover:bg-slate-800/50">
+    <tr className="transition hover:bg-slate-800/50">
 
       {/* RANK */}
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-800 text-sm font-bold text-slate-300">
-        {analyst.leaderboardRank}
-      </div>
-
-      {/* AVATAR */}
-      <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full ring-2 ring-slate-700">
-        <AvatarImage
-          src={image}
-          initials={initials}
-        />
-      </div>
-
-      {/* NAME + GAMES */}
-      <div className="min-w-0 flex-1">
-
-        <div className="truncate text-sm font-semibold text-white">
-          {analyst.name}
+      <td className="px-5 py-3">
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-sm font-bold text-slate-300">
+          {analyst.leaderboardRank}
         </div>
+      </td>
 
-        <div className="text-xs text-slate-500">
-          {analyst.totalGames.toFixed(1)} games coded
+      {/* ANALYST */}
+      <td className="px-3 py-3">
+        <div className="flex items-center gap-3">
+
+          <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full ring-2 ring-slate-700">
+            <AvatarImage
+              src={image}
+              initials={initials}
+            />
+          </div>
+
+          <div className="min-w-0 truncate text-sm font-semibold text-white">
+            {analyst.name}
+          </div>
+
         </div>
+      </td>
 
-      </div>
+      {/* GAMES CODED */}
+      <td className="px-3 py-3 text-right text-sm font-semibold text-slate-200">
+        {analyst.totalGames.toFixed(1)}
+      </td>
 
-      {/* AVG TIME PER GAME */}
-      <div className="w-24 shrink-0 text-right">
+      {/* AVE TIME */}
+      <td className="px-3 py-3 text-right text-sm font-semibold text-slate-200">
+        {analyst.avgHoursPerGame.toFixed(2)} hrs
+      </td>
 
-        <div className="text-sm font-semibold text-slate-200">
-          {analyst.avgHoursPerGame.toFixed(2)} hrs
-        </div>
-
-        <div className="text-xs text-slate-500">
-          per game
-        </div>
-
-      </div>
-
-      {/* OVERALL SCORE */}
-      <div className="w-16 shrink-0 text-right text-lg font-bold text-sky-400">
+      {/* RATING */}
+      <td className="px-5 py-3 text-right text-lg font-bold text-sky-400">
         {analyst.ratings.overall}
-      </div>
+      </td>
 
-    </div>
+    </tr>
   );
 }
 
