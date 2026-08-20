@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
 
+import { supabase } from "@/lib/supabase";
 import AnalystHero from "../analyst-profile/AnalystHero";
 import AttributeRatings from "../analyst-profile/AttributeRatings";
 import ComparisonRadar from "./ComparisonRadar";
@@ -22,13 +22,38 @@ import {
     TabsContent,
 } from "@/components/UI/tabs";
 
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
 type ShiftRow = any;
 type TTGameRow = any;
+
+const PAGE_SIZE = 1000;
+
+async function fetchAll<T>(table: string): Promise<T[]> {
+    let from = 0;
+    let all: T[] = [];
+
+    while (true) {
+
+        const { data, error } = await supabase
+            .from(table)
+            .select("*")
+            .range(from, from + PAGE_SIZE - 1);
+
+        if (error) {
+            console.error(`Error fetching ${table}:`, error);
+            break;
+        }
+
+        if (!data || data.length === 0) break;
+
+        all = all.concat(data as T[]);
+
+        if (data.length < PAGE_SIZE) break;
+
+        from += PAGE_SIZE;
+    }
+
+    return all;
+}
 
 export default function AnalystComparePage() {
 
@@ -46,16 +71,13 @@ export default function AnalystComparePage() {
 
             setLoading(true);
 
-            const shifts = await supabase
-                .from("deputy_shifts")
-                .select("*");
+            const [shifts, tt] = await Promise.all([
+                fetchAll<ShiftRow>("deputy_shifts"),
+                fetchAll<TTGameRow>("TT_Games"),
+            ]);
 
-            const tt = await supabase
-                .from("TT_Games")
-                .select("*");
-
-            setShiftRows(shifts.data ?? []);
-            setTTRows(tt.data ?? []);
+            setShiftRows(shifts);
+            setTTRows(tt);
 
             setLoading(false);
         }
@@ -262,7 +284,7 @@ export default function AnalystComparePage() {
 
                 </div>
 
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-10">
+                <div className="grid grid-cols-1 gap-4 mb-10">
 
                     <div>
 

@@ -15,6 +15,7 @@ import {
   Bell,
   Settings,
   Trophy,
+  GitCompare,
 } from "lucide-react";
 
 const sections = [
@@ -109,6 +110,11 @@ const sections = [
         title: "Leaderboard",
         href: "/leaderboard",
         icon: Trophy,
+      },
+      {
+        title: "Analyst Comparison",
+        href: "/analyst-compare",
+        icon: GitCompare,
       },
     ],
   },
