@@ -304,36 +304,58 @@ function dedupe(records, key) {
 // UPLOAD DEPUTY
 // ----------------------
 async function uploadToSupabase(records) {
+  let uploaded = 0;
+
   for (let i = 0; i < records.length; i += CHUNK_SIZE) {
     const chunk = records.slice(i, i + CHUNK_SIZE);
-    console.log(JSON.stringify(chunk[0], null, 2));
-    return;
 
-    console.log("Uploading Deputy chunk:", chunk.length);
+    console.log(
+      `Uploading Deputy chunk ${i / CHUNK_SIZE + 1}:`,
+      chunk.length,
+      "rows"
+    );
 
     const { error } = await supabase
       .from("deputy_shifts")
       .upsert(chunk, { onConflict: "shift_key" });
 
     if (error) throw new Error(JSON.stringify(error));
+
+    uploaded += chunk.length;
   }
+
+  console.log("Deputy rows uploaded:", uploaded);
+
+  return uploaded;
 }
 
 // ----------------------
 // UPLOAD TT
 // ----------------------
 async function uploadTT(records) {
+  let uploaded = 0;
+
   for (let i = 0; i < records.length; i += CHUNK_SIZE) {
     const chunk = records.slice(i, i + CHUNK_SIZE);
 
-    console.log("Uploading TT chunk:", chunk.length);
+    console.log(
+      `Uploading TT chunk ${i / CHUNK_SIZE + 1}:`,
+      chunk.length,
+      "rows"
+    );
 
     const { error } = await supabase
       .from("TT_Games")
       .upsert(chunk, { onConflict: "game_key" });
 
     if (error) throw new Error(JSON.stringify(error));
+
+    uploaded += chunk.length;
   }
+
+  console.log("TT rows uploaded:", uploaded);
+
+  return uploaded;
 }
 
 // ----------------------
@@ -366,12 +388,28 @@ async function sync() {
     // ----------------------
     // UPLOAD
     // ----------------------
-    await uploadToSupabase(deputy);
-    await uploadTT(tt);
+    const deputyUploaded = await uploadToSupabase(deputy);
+    const ttUploaded = await uploadTT(tt);
 
-    await logSuccess(deputy.length + tt.length);
+    // Guard against a silent no-op sync. If we parsed rows but wrote
+    // none, that is a failure even though no error was thrown.
+    if (deputy.length > 0 && deputyUploaded === 0) {
+      throw new Error(
+        `Parsed ${deputy.length} Deputy rows but uploaded 0 — aborting as failure.`
+      );
+    }
 
-    console.log("🎉 Sync complete!");
+    if (tt.length > 0 && ttUploaded === 0) {
+      throw new Error(
+        `Parsed ${tt.length} TT rows but uploaded 0 — aborting as failure.`
+      );
+    }
+
+    await logSuccess(deputyUploaded + ttUploaded);
+
+    console.log(
+      `🎉 Sync complete! Deputy: ${deputyUploaded}, TT: ${ttUploaded}`
+    );
   } catch (err) {
     console.error("💥 Sync failed:", err);
     await logFailure(err);
