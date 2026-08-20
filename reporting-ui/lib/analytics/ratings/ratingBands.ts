@@ -77,9 +77,9 @@ export const ratingBands = {
 
   // Unique Competitions - HIGHER IS BETTER
   versatility: [
-    { min: 50, rating: 99 },
-    { min: 40, rating: 90 },
-    { min: 35, rating: 85 },
+    { min: 60, rating: 99 },
+    { min: 50, rating: 90 },
+    { min: 40, rating: 85 },
     { min: 30, rating: 80 },
     { min: 25, rating: 75 },
     { min: 20, rating: 65 },
@@ -91,9 +91,9 @@ export const ratingBands = {
 
   // Unique Teams - HIGHER IS BETTER
   knowledge: [
-    { min: 100, rating: 99 },
-    { min: 90, rating: 90 },
-    { min: 80, rating: 80 },
+    { min: 130, rating: 99 },
+    { min: 110, rating: 90 },
+    { min: 90, rating: 80 },
     { min: 70, rating: 70 },
     { min: 60, rating: 60 },
     { min: 50, rating: 50 },

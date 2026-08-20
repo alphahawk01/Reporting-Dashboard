@@ -307,6 +307,22 @@ function PodiumSlot({
           hrs / game
         </div>
 
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-1">
+            <span className="font-semibold text-slate-200">
+              {Object.keys(analyst.competitions ?? {}).length}
+            </span>
+            comps
+          </span>
+
+          <span className="flex items-center gap-1">
+            <span className="font-semibold text-slate-200">
+              {Object.keys(analyst.teams ?? {}).length}
+            </span>
+            clubs
+          </span>
+        </div>
+
         <div className="rounded-full bg-slate-800 px-3 py-1 text-xs font-bold text-sky-300">
           {analyst.ratings.overall} rating
         </div>
@@ -377,6 +393,14 @@ function LeaderboardList({
 
             <th className="w-28 px-3 py-3 text-right font-semibold">
               Ave Time
+            </th>
+
+            <th className="w-24 px-3 py-3 text-right font-semibold">
+              Comps
+            </th>
+
+            <th className="w-24 px-3 py-3 text-right font-semibold">
+              Clubs
             </th>
 
             <th className="w-20 px-5 py-3 text-right font-semibold">
@@ -452,6 +476,16 @@ function LeaderboardRow({
       {/* AVE TIME */}
       <td className="px-3 py-3 text-right text-sm font-semibold text-slate-200">
         {analyst.avgHoursPerGame.toFixed(2)} hrs
+      </td>
+
+      {/* COMPETITIONS COVERED */}
+      <td className="px-3 py-3 text-right text-sm font-semibold text-slate-200">
+        {Object.keys(analyst.competitions ?? {}).length}
+      </td>
+
+      {/* CLUBS COVERED */}
+      <td className="px-3 py-3 text-right text-sm font-semibold text-slate-200">
+        {Object.keys(analyst.teams ?? {}).length}
       </td>
 
       {/* RATING */}
