@@ -67,7 +67,7 @@ export default function AnalystHero({
   return (
     <Card>
       <div
-        className="relative overflow-visible rounded-3xl p-6"
+        className="relative overflow-visible rounded-2xl px-5 py-4"
         style={{
           background: `linear-gradient(135deg, ${THEME.panelSoft}, ${THEME.panel})`,
         }}
@@ -80,14 +80,14 @@ export default function AnalystHero({
           }}
         />
 
-        <div className="relative flex items-start justify-between gap-8">
+        <div className="relative flex items-center justify-between gap-6">
 
           {/* LEFT */}
 
-          <div className="flex items-center gap-6">
+          <div className="flex min-w-0 items-center gap-4">
 
             <div
-              className="h-28 w-28 overflow-hidden rounded-full border-4 shadow-xl flex-shrink-0"
+              className="h-20 w-20 overflow-hidden rounded-full border-2 shadow-lg flex-shrink-0"
               style={{
                 borderColor: THEME.accent,
               }}
@@ -101,7 +101,7 @@ export default function AnalystHero({
                 />
               ) : (
                 <div
-                  className="flex h-full w-full items-center justify-center text-4xl font-bold"
+                  className="flex h-full w-full items-center justify-center text-2xl font-bold"
                   style={{
                     background: THEME.panel,
                     color: THEME.accent,
@@ -113,64 +113,62 @@ export default function AnalystHero({
             </div>
 
             <div className="min-w-0">
-              <h1 className="text-4xl font-bold text-white">
+              <h1 className="truncate text-2xl font-bold leading-tight text-white">
                 {data.name}
               </h1>
 
               {/* RANK + PERCENTILE */}
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span className="rounded-md border border-slate-600 bg-black/30 px-2.5 py-1 text-sm font-semibold text-slate-200">
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <span className="rounded border border-slate-600/70 bg-black/30 px-2 py-0.5 text-xs font-semibold text-slate-200">
                   Rank #{data.rank}
                   <span className="ml-1 font-normal text-slate-500">
-                    of {data.totalAnalysts}
+                    / {data.totalAnalysts}
                   </span>
                 </span>
 
-                <span className={`rounded-md px-2.5 py-1 text-sm font-semibold ${grade.bg} ${grade.text}`}>
+                <span className={`rounded px-2 py-0.5 text-xs font-semibold ${grade.bg} ${grade.text}`}>
                   Top {data.percentile}%
                 </span>
 
-                <span className="rounded-md border border-slate-700 bg-black/20 px-2 py-1 text-xs font-medium uppercase tracking-wide text-slate-400">
+                <span className="rounded border border-slate-700 bg-black/20 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-400">
                   {data.team}
                 </span>
               </div>
 
               {/* AFFILIATED TEAMS */}
               {affiliatedTeams.length > 0 && (
-                <div className="mt-3">
-                  <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-400/80">
-                    Affiliated {affiliatedTeams.length > 1 ? "Teams" : "Team"}
-                  </div>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[9px] font-semibold uppercase tracking-wider text-emerald-400/70">
+                    Affiliated
+                  </span>
 
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {affiliatedTeams.map(team => {
-                      const logo = resolveTeamLogo(team, logoMap);
+                  {affiliatedTeams.map(team => {
+                    const logo = resolveTeamLogo(team, logoMap);
 
-                      return (
-                        <span
-                          key={team}
-                          className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 py-1 pl-1 pr-2.5 text-xs font-medium text-emerald-200"
-                          title={team}
-                        >
-                          {logo ? (
-                            <img
-                              src={logo}
-                              alt=""
-                              className="h-5 w-5 rounded-full bg-white/10 object-contain"
-                              onError={e => {
-                                (e.currentTarget as HTMLImageElement).style.display = "none";
-                              }}
-                            />
-                          ) : (
-                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/20 text-[9px] font-bold">
-                              {team.slice(0, 2).toUpperCase()}
-                            </span>
-                          )}
-                          {team}
-                        </span>
-                      );
-                    })}
-                  </div>
+                    return (
+                      <span
+                        key={team}
+                        className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 py-0.5 pl-0.5 pr-2 text-[11px] font-medium text-emerald-200"
+                        title={team}
+                      >
+                        {logo ? (
+                          <img
+                            src={logo}
+                            alt=""
+                            className="h-4 w-4 rounded-full bg-white/10 object-contain"
+                            onError={e => {
+                              (e.currentTarget as HTMLImageElement).style.display = "none";
+                            }}
+                          />
+                        ) : (
+                          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/20 text-[8px] font-bold">
+                            {team.slice(0, 1).toUpperCase()}
+                          </span>
+                        )}
+                        {team}
+                      </span>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -179,11 +177,11 @@ export default function AnalystHero({
 
           {/* RIGHT */}
 
-          <div className="flex items-start gap-8">
+          <div className="flex flex-shrink-0 items-stretch gap-3">
 
             {/* KPI CARDS */}
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-3 gap-2">
 
               <StatCard
                 title="Hours"
@@ -204,17 +202,17 @@ export default function AnalystHero({
 
             {/* OVERALL CARD */}
 
-            <div className={`relative w-44 rounded-3xl border p-6 text-center ${grade.border} ${grade.bg}`}>
+            <div className={`relative w-[104px] rounded-xl border px-3 py-2.5 text-center ${grade.border} ${grade.bg}`}>
 
-              <div className="flex items-center justify-center gap-2">
+              <div className="flex items-center justify-center gap-1">
 
-                <div className={`text-xs uppercase tracking-[0.3em] ${grade.text}`}>
+                <div className={`text-[9px] font-semibold uppercase tracking-[0.15em] ${grade.text}`}>
                   Overall
                 </div>
 
                 <div className="group relative">
 
-                  <span className="cursor-help text-slate-400 transition-colors hover:text-sky-400">
+                  <span className="cursor-help text-[10px] text-slate-400 transition-colors hover:text-sky-400">
                     ⓘ
                   </span>
 
@@ -321,11 +319,11 @@ export default function AnalystHero({
 
               </div>
 
-              <div className="mt-3 text-7xl font-black leading-none text-white">
+              <div className="mt-0.5 text-4xl font-black leading-none tracking-tight text-white">
                 {data.ratings.overall}
               </div>
 
-              <div className={`mt-4 text-lg font-semibold ${grade.label}`}>
+              <div className={`mt-1 text-[11px] font-semibold ${grade.label}`}>
                 {data.grade}
               </div>
 
@@ -348,13 +346,13 @@ function StatCard({
   value: string;
 }) {
   return (
-    <div className="min-w-[110px] rounded-2xl border border-slate-700 bg-black/20 px-4 py-4 text-center transition-colors hover:border-slate-500">
+    <div className="flex min-w-[86px] flex-col justify-center rounded-xl border border-slate-700 bg-black/20 px-3 py-2 text-center transition-colors hover:border-slate-500">
 
-      <div className="text-2xl font-bold text-white">
+      <div className="text-xl font-bold leading-none text-white">
         {value}
       </div>
 
-      <div className="mt-1.5 text-[10px] uppercase tracking-wider text-slate-400">
+      <div className="mt-1 text-[9px] uppercase tracking-wider text-slate-400">
         {title}
       </div>
 
