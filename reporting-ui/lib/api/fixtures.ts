@@ -85,6 +85,7 @@ export async function getFixtures() {
                 "",
 
             videoURL:
+                fixture.videoUrl ??
                 fixture.videoURL ??
                 "",
 
