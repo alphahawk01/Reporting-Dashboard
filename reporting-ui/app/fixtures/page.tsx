@@ -632,22 +632,56 @@ export default function FixturesPage() {
 
     const mergedFixtures = useMemo(() => {
 
-        // Build a lookup by composite key for API fixtures
+        // Build a lookup by composite key for API fixtures.
+        //
+        // `autoFixtures` is built as a 1:1, index-aligned .map() over
+        // `fixtures` (see load()/refreshFixtures() above) — pair them
+        // by index directly rather than re-resolving each autoFixture
+        // back to a row via `fixtures.find(f => f.game_key === af.gameKey)`.
+        // That re-lookup breaks when the API has duplicate Fixture rows
+        // sharing the same game_key (e.g. a sync ran twice with a
+        // slightly different league-name format, so the API's own
+        // duplicate check missed it and created a second row) — .find()
+        // always resolves to the same single row for every duplicate, so
+        // whichever duplicate is processed last silently overwrites the
+        // correct entry in the map, even if that duplicate is an
+        // unassigned/blank row. Indexing directly avoids that collision,
+        // and when two rows still land on the same composite key we keep
+        // whichever one is further along (has a status past "Pending" or
+        // has an assigned analyst) instead of last-wins.
         const autoByComposite = new Map<string, AutoDownloadFixture>();
         const fixtureByComposite = new Map<string, TTGame>();
 
-        fixtures.forEach(f => {
-            const key = `${(f.home_team ?? "").toLowerCase()}|${(f.away_team ?? "").toLowerCase()}|${(f.Competition ?? "").toLowerCase()}|${(f.Round ?? "").toLowerCase()}`;
-            fixtureByComposite.set(key, f);
-        });
+        fixtures.forEach((f, index) => {
 
-        autoFixtures.forEach(af => {
-            // Find the matching TTGame-shaped fixture from API
-            const apiFixture = fixtures.find(f => f.game_key === af.gameKey);
-            if (apiFixture) {
-                const key = `${(apiFixture.home_team ?? "").toLowerCase()}|${(apiFixture.away_team ?? "").toLowerCase()}|${(apiFixture.Competition ?? "").toLowerCase()}|${(apiFixture.Round ?? "").toLowerCase()}`;
-                autoByComposite.set(key, af);
+            const key = `${(f.home_team ?? "").toLowerCase()}|${(f.away_team ?? "").toLowerCase()}|${(f.Competition ?? "").toLowerCase()}|${(f.Round ?? "").toLowerCase()}`;
+
+            const af = autoFixtures[index] ?? null;
+
+            const existingAuto = autoByComposite.get(key);
+
+            const isBetter =
+                !existingAuto ||
+                (
+                    af?.status &&
+                    af.status !== "Pending" &&
+                    existingAuto.status === "Pending"
+                ) ||
+                (
+                    !!af?.analyst &&
+                    !existingAuto.analyst
+                );
+
+            if (isBetter) {
+
+                fixtureByComposite.set(key, f);
+
+                if (af) {
+                    autoByComposite.set(key, af);
+                }
+
             }
+
         });
 
         return allGames.map(
