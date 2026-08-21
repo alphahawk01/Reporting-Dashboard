@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 
 type Props = {
     options: string[];
@@ -13,19 +14,12 @@ export default function AnalystSelect({
     options,
     value,
     onChange,
-    placeholder = "Search analyst...",
+    placeholder = "Select analyst...",
 }: Props) {
 
     const [open, setOpen] = useState(false);
-    const [query, setQuery] = useState(value);
 
     const containerRef = useRef<HTMLDivElement>(null);
-
-    // Keep the input text in sync when the selected value changes
-    // from outside this component (e.g. swap button).
-    useEffect(() => {
-        setQuery(value);
-    }, [value]);
 
     // Close the dropdown when clicking outside of it.
     useEffect(() => {
@@ -36,7 +30,6 @@ export default function AnalystSelect({
                 !containerRef.current.contains(e.target as Node)
             ) {
                 setOpen(false);
-                setQuery(value);
             }
         }
 
@@ -46,52 +39,49 @@ export default function AnalystSelect({
             document.removeEventListener("mousedown", handleClickOutside);
         };
 
-    }, [value]);
-
-    const filtered = useMemo(() => {
-
-        const q = query.trim().toLowerCase();
-
-        if (!q) return options;
-
-        return options.filter(name =>
-            name.toLowerCase().includes(q)
-        );
-
-    }, [options, query]);
+    }, []);
 
     function selectOption(name: string) {
         onChange(name);
-        setQuery(name);
         setOpen(false);
     }
 
     return (
         <div ref={containerRef} className="relative">
 
-            <input
-                type="text"
-                value={query}
-                onFocus={() => setOpen(true)}
-                onChange={(e) => {
-                    setQuery(e.target.value);
-                    setOpen(true);
-                }}
-                placeholder={placeholder}
+            <button
+                type="button"
+                onClick={() => setOpen(prev => !prev)}
                 className="
+                    flex
                     w-full
+                    items-center
+                    justify-between
                     rounded-lg
                     bg-slate-900
                     border
                     border-slate-700
                     px-4
                     py-3
+                    text-left
                     text-white
-                    placeholder:text-slate-500
+                    transition-colors
+                    hover:border-slate-500
                     focus:outline-none
                     focus:border-sky-500
                 "
-            />
+            >
+                <span className={value ? "truncate" : "truncate text-slate-500"}>
+                    {value || placeholder}
+                </span>
+
+                <ChevronDown
+                    size={18}
+                    className={`ml-2 flex-shrink-0 text-slate-400 transition-transform ${
+                        open ? "rotate-180" : ""
+                    }`}
+                />
+            </button>
 
             {open && (
 
@@ -113,9 +103,9 @@ export default function AnalystSelect({
                     "
                 >
 
-                    {filtered.length ? (
+                    {options.length ? (
 
-                        filtered.map(name => (
+                        options.map(name => (
 
                             <button
                                 key={name}
