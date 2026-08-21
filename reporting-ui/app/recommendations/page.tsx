@@ -146,15 +146,32 @@ export default function RecommendationPage() {
         );
       }
 
-      const { data: rosterData, error: rosterError } =
-        await supabase
-          .from("deputy_roster")
-          .select("*");
+      // deputy_roster now holds 2000+ rows — Supabase caps an
+      // unpaginated select("*") at 1000, so page through with
+      // .range() to make sure every row (including current week) loads.
+      const rosterData: DeputyRoster[] = [];
+      let rosterFrom = 0;
+      const rosterPageSize = 1000;
 
-      if (rosterError || !rosterData)
-        throw rosterError;
+      while (true) {
+        const { data: rosterPage, error: rosterError } =
+          await supabase
+            .from("deputy_roster")
+            .select("*")
+            .range(rosterFrom, rosterFrom + rosterPageSize - 1);
 
-      setRoster(rosterData as DeputyRoster[]);
+        if (rosterError) throw rosterError;
+
+        if (!rosterPage?.length) break;
+
+        rosterData.push(...(rosterPage as DeputyRoster[]));
+
+        if (rosterPage.length < rosterPageSize) break;
+
+        rosterFrom += rosterPageSize;
+      }
+
+      setRoster(rosterData);
 
       const autoFixtureData =
         await getAutoDownloadFixtures();
