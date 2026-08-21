@@ -17,6 +17,39 @@ const ATTRIBUTE_LABELS: Record<string, string> = {
   knowledge: "🧠 Knowledge",
 };
 
+/**
+ * Builds a plain-English sentence explaining what a rating actually
+ * means, using the real underlying metric (hours/game, cost/game,
+ * games/week, etc.) rather than just the attribute name and score —
+ * so it's meaningful to someone with no context on the rating system.
+ */
+function describeAttribute(
+  key: string,
+  data: AnalystMetrics
+): string {
+  const leagueCount = Object.keys(data.competitions ?? {}).length;
+  const teamCount = Object.keys(data.teams ?? {}).length;
+
+  switch (key) {
+    case "speed":
+      return `Codes a game in an average of ${data.avgHoursPerGame.toFixed(1)} hours, making them one of the faster turnaround analysts.`;
+    case "efficiency":
+      return `Costs an average of $${data.avgCostPerGame.toFixed(0)} per game coded, keeping delivery cost low relative to peers.`;
+    case "workRate":
+      return `Puts in an average of ${data.avgHoursPerWeek.toFixed(1)} hours of coding work per week.`;
+    case "experience":
+      return `Has coded ${data.totalGames} games in total, reflecting a strong depth of experience.`;
+    case "consistency":
+      return `Completes an average of ${data.avgGamesPerWeek.toFixed(1)} games per week, showing a steady, reliable output.`;
+    case "versatility":
+      return `Has analysed ${leagueCount} different competition${leagueCount === 1 ? "" : "s"}, showing broad coverage across leagues.`;
+    case "knowledge":
+      return `Has analysed ${teamCount} different team${teamCount === 1 ? "" : "s"}, reflecting deep familiarity with a wide range of clubs.`;
+    default:
+      return "";
+  }
+}
+
 export default function ExecutiveSummary({ data }: Props) {
 
   // -------------------------
@@ -30,6 +63,7 @@ export default function ExecutiveSummary({ data }: Props) {
       key,
       label: ATTRIBUTE_LABELS[key] ?? key,
       value,
+      sentence: describeAttribute(key, data),
     }));
 
   // -------------------------
@@ -47,11 +81,13 @@ export default function ExecutiveSummary({ data }: Props) {
   const teamCount = Object.keys(data.teams ?? {}).length;
 
   const strengthNames = strengths
-    .map((s) => s.label.replace(/^[^\s]+\s/, ""))
+    .map((s) => s.label.replace(/^[^\s]+\s/, "").toLowerCase())
     .join(", ");
 
   const topLeagueName = topLeagues[0]?.[0];
   const topTeamName = topTeams[0]?.[0];
+
+  const topStrengthSentence = strengths[0]?.sentence ?? "";
 
   return (
     <Card>
@@ -65,9 +101,9 @@ export default function ExecutiveSummary({ data }: Props) {
           {data.name} is rated{" "}
           <span className="font-semibold text-white">{data.grade}</span>{" "}
           overall — ranked #{data.rank} of {data.totalAnalysts} in{" "}
-          {data.team} (top {data.percentile}%). Their strongest attributes
-          are {strengthNames}. Across {data.totalGames} games coded,{" "}
-          {data.name} has covered {leagueCount} competition
+          {data.team} (top {data.percentile}%). Their strongest areas are{" "}
+          {strengthNames}. {topStrengthSentence} Across {data.totalGames}{" "}
+          games coded, {data.name} has covered {leagueCount} competition
           {leagueCount === 1 ? "" : "s"}
           {topLeagueName ? `, most frequently ${topLeagueName}` : ""}, and
           analysed {teamCount} team{teamCount === 1 ? "" : "s"}
@@ -82,16 +118,24 @@ export default function ExecutiveSummary({ data }: Props) {
               Key Strengths
             </h3>
 
-            <div className="space-y-2">
+            <div className="space-y-3">
               {strengths.map((s) => (
                 <div
                   key={s.key}
-                  className="flex items-center justify-between rounded-lg bg-slate-900 px-3 py-2"
+                  className="rounded-lg bg-slate-900 px-3 py-2.5"
                 >
-                  <span className="text-sm text-slate-200">{s.label}</span>
-                  <span className="text-sm font-bold text-sky-400">
-                    {s.value}
-                  </span>
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-sm font-semibold text-slate-200">
+                      {s.label}
+                    </span>
+                    <span className="text-sm font-bold text-sky-400">
+                      {s.value}
+                    </span>
+                  </div>
+
+                  <p className="text-xs leading-5 text-slate-400">
+                    {s.sentence}
+                  </p>
                 </div>
               ))}
             </div>
