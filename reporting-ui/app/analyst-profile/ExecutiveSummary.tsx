@@ -71,11 +71,11 @@ export default function ExecutiveSummary({ data }: Props) {
   // -------------------------
   const topLeagues = Object.entries(data.competitions ?? {})
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 5);
+    .slice(0, 3);
 
   const topTeams = Object.entries(data.teams ?? {})
     .sort((a, b) => b[1].count - a[1].count)
-    .slice(0, 5);
+    .slice(0, 3);
 
   const leagueCount = Object.keys(data.competitions ?? {}).length;
   const teamCount = Object.keys(data.teams ?? {}).length;
@@ -102,70 +102,16 @@ export default function ExecutiveSummary({ data }: Props) {
           <span className="font-semibold text-white">{data.grade}</span>{" "}
           overall — ranked #{data.rank} of {data.totalAnalysts} in{" "}
           {data.team} (top {data.percentile}%). Their strongest areas are{" "}
-          {strengthNames}. {topStrengthSentence} Across {data.totalGames}{" "}
-          games coded, {data.name} has covered {leagueCount} competition
-          {leagueCount === 1 ? "" : "s"}
+          {strengthNames}. {topStrengthSentence} They average{" "}
+          {data.avgHoursPerGame.toFixed(1)} hours per game. Across{" "}
+          {data.totalGames} games coded, {data.name} has covered{" "}
+          {leagueCount} competition{leagueCount === 1 ? "" : "s"}
           {topLeagueName ? `, most frequently ${topLeagueName}` : ""}, and
           analysed {teamCount} team{teamCount === 1 ? "" : "s"}
           {topTeamName ? `, including ${topTeamName}` : ""}.
         </p>
 
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
-
-          {/* KEY STRENGTHS */}
-          <div>
-            <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              Key Strengths
-            </h3>
-
-            <div className="space-y-1">
-              {strengths.map((s) => (
-                <div
-                  key={s.key}
-                  className="group relative flex items-center justify-between gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-slate-900"
-                >
-                  <span className="truncate text-xs text-slate-300">
-                    {s.label}
-                  </span>
-
-                  <span className="flex-shrink-0 text-xs font-bold text-sky-400">
-                    {s.value}
-                  </span>
-
-                  {/* HOVER TOOLTIP — matches AttributeRatings pattern */}
-                  <div
-                    className="
-                      absolute
-                      left-0
-                      top-full
-                      z-50
-                      mt-1
-                      w-64
-                      rounded-lg
-                      border
-                      border-slate-700
-                      bg-[#0b1220]
-                      px-3
-                      py-2
-                      text-xs
-                      leading-5
-                      text-slate-300
-                      opacity-0
-                      invisible
-                      shadow-2xl
-                      transition-all
-                      duration-150
-                      pointer-events-none
-                      group-hover:visible
-                      group-hover:opacity-100
-                    "
-                  >
-                    {s.sentence}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
 
           {/* TOP LEAGUES */}
           <div>
