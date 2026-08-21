@@ -417,6 +417,79 @@ export default function SchedulePage() {
         );
 
 
+    /*
+     * ROSTER FOR VISIBLE WEEK
+     *
+     * Loaded separately from the rest of the schedule data and scoped
+     * to the currently visible week's date range. deputy_roster holds
+     * 2000+ rows — fetching everything on every load is unnecessary
+     * and slow when only one week is ever shown at a time. Re-runs
+     * whenever the visible week changes (Previous / Today / Next).
+     */
+
+    const [
+        rosterLoading,
+        setRosterLoading,
+    ] =
+        useState(true);
+
+    useEffect(
+        () => {
+
+            let cancelled = false;
+
+            async function loadRosterForWeek() {
+
+                setRosterLoading(true);
+
+                try {
+
+                    const startDate =
+                        days[0]?.key;
+
+                    const endDate =
+                        days[days.length - 1]?.key;
+
+                    const rosterData =
+                        await loadDeputyRoster({
+                            startDate,
+                            endDate,
+                        });
+
+                    if (!cancelled) {
+                        setRoster(rosterData);
+                    }
+
+                }
+                catch (err) {
+
+                    console.error(
+                        "Failed loading Deputy roster for week:",
+                        err
+                    );
+
+                }
+                finally {
+
+                    if (!cancelled) {
+                        setRosterLoading(false);
+                    }
+
+                }
+
+            }
+
+            loadRosterForWeek();
+
+            return () => {
+                cancelled = true;
+            };
+
+        },
+        [days]
+    );
+
+
     async function loadSchedule() {
 
         try {
@@ -426,19 +499,6 @@ export default function SchedulePage() {
             );
 
             setError("");
-
-
-            console.log(
-                "SCHEDULE: loading Deputy roster..."
-            );
-
-            const rosterData =
-                await loadDeputyRoster();
-
-            console.log(
-                "SCHEDULE: Deputy roster loaded:",
-                rosterData.length
-            );
 
 
             console.log(
@@ -467,9 +527,6 @@ export default function SchedulePage() {
             );
 
 
-            setRoster(
-                rosterData
-            );
             setFixtures(
                 fixtureData
             );
@@ -1491,6 +1548,18 @@ export default function SchedulePage() {
                     items-center
                     gap-1.5
                 ">
+
+                    {rosterLoading && (
+
+                        <span className="
+                            mr-1
+                            text-xs
+                            text-slate-400
+                        ">
+                            Loading shifts...
+                        </span>
+
+                    )}
 
                     <button
                         type="button"
