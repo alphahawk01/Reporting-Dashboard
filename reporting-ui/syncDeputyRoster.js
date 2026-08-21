@@ -81,11 +81,25 @@ function excelTimeToString(value) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-function excelDateToJS(serial) {
-  if (!serial) return null;
-  return new Date((serial - 25569) * 86400 * 1000)
-    .toISOString()
-    .split("T")[0];
+function excelDateToJS(value) {
+  if (!value) return null;
+
+  // Already an ISO/string date value (e.g. "2026-01-22" or similar)
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    if (isNaN(parsed.getTime())) return null;
+    return parsed.toISOString().split("T")[0];
+  }
+
+  // Excel serial number
+  const num = Number(value);
+  if (isNaN(num)) return null;
+
+  const date = new Date((num - 25569) * 86400 * 1000);
+
+  if (isNaN(date.getTime())) return null;
+
+  return date.toISOString().split("T")[0];
 }
 
 // ----------------------
@@ -157,32 +171,60 @@ function parseDeputyRoster(buffer) {
 
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-  return rows
-  .slice(1)
-  .filter(r => r && r.length)
-  .map(r => ({
-    roster_key: `${r[13]}_${excelDateToJS(r[3])}_${excelTimeToString(r[4])}`,
+  let skipped = 0;
 
-    employee_name: r[2] || null,
-    email: r[13] || null,
+  const parsed = rows
+    .slice(1)
+    .filter(r => r && r.length)
+    .map(r => {
 
-    location: r[0] || null,
-    area_name: r[1] || null,
+      const shiftDate = excelDateToJS(r[3]);
 
-    shift_date: excelDateToJS(r[3]),
-    start_time: excelTimeToString(r[4]),
+      return {
+        roster_key: `${r[13]}_${shiftDate}_${excelTimeToString(r[4])}`,
 
-    end_date: excelDateToJS(r[5]),
-    end_time: excelTimeToString(r[6]),
+        employee_name: r[2] || null,
+        email: r[13] || null,
 
-    total_hours: Number(r[9]) || 0,
+        location: r[0] || null,
+        area_name: r[1] || null,
 
-    status: r[10] || null,
-    note: r[11] || null,
-    cost: Number(r[12]) || 0,
+        shift_date: shiftDate,
+        start_time: excelTimeToString(r[4]),
 
-    week: Number(r[14]) || null,
-  }));
+        end_date: excelDateToJS(r[5]),
+        end_time: excelTimeToString(r[6]),
+
+        total_hours: Number(r[9]) || 0,
+
+        status: r[10] || null,
+        note: r[11] || null,
+        cost: Number(r[12]) || 0,
+
+        week: Number(r[14]) || null,
+      };
+    })
+    // Skip malformed rows that have no employee or no valid shift date —
+    // these would otherwise break the roster_key and any downstream
+    // NOT NULL constraint on shift_date.
+    .filter(row => {
+      if (!row.employee_name || !row.shift_date) {
+        skipped++;
+
+        console.log(
+          "⚠️ Skipping malformed roster row (missing employee/shift_date):",
+          JSON.stringify(row)
+        );
+
+        return false;
+      }
+
+      return true;
+    });
+
+  console.log("Skipped malformed roster rows:", skipped);
+
+  return parsed;
 }
 
 // ----------------------
