@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import { supabase } from "@/lib/supabase";
+import AnalystSelect from "./AnalystSelect";
 import AnalystHero from "../analyst-profile/AnalystHero";
 import AttributeRatings from "../analyst-profile/AttributeRatings";
 import ComparisonRadar from "./ComparisonRadar";
@@ -192,12 +193,6 @@ export default function AnalystComparePage() {
 
                 </div>
 
-                <datalist id="analyst-options">
-                    {analysts.map(name => (
-                        <option key={name} value={name} />
-                    ))}
-                </datalist>
-
                 <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-4 mb-10">
 
                     <div>
@@ -206,25 +201,10 @@ export default function AnalystComparePage() {
                             Analyst A
                         </label>
 
-                        <input
-                            type="text"
-                            list="analyst-options"
+                        <AnalystSelect
+                            options={analysts}
                             value={analystA}
-                            onChange={(e) => setAnalystA(e.target.value)}
-                            placeholder="Search analyst..."
-                            className="
-                                w-full
-                                rounded-lg
-                                bg-slate-900
-                                border
-                                border-slate-700
-                                px-4
-                                py-3
-                                text-white
-                                placeholder:text-slate-500
-                                focus:outline-none
-                                focus:border-sky-500
-                            "
+                            onChange={setAnalystA}
                         />
 
                     </div>
@@ -259,25 +239,10 @@ export default function AnalystComparePage() {
                             Analyst B
                         </label>
 
-                        <input
-                            type="text"
-                            list="analyst-options"
+                        <AnalystSelect
+                            options={analysts}
                             value={analystB}
-                            onChange={(e) => setAnalystB(e.target.value)}
-                            placeholder="Search analyst..."
-                            className="
-                                w-full
-                                rounded-lg
-                                bg-slate-900
-                                border
-                                border-slate-700
-                                px-4
-                                py-3
-                                text-white
-                                placeholder:text-slate-500
-                                focus:outline-none
-                                focus:border-sky-500
-                            "
+                            onChange={setAnalystB}
                         />
 
                     </div>

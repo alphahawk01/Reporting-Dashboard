@@ -240,40 +240,67 @@ function parseTTData(buffer) {
   });
   console.log("Raw videoURL value:", rows[1][13]);
 
+  let skippedTT = 0;
+
   const parsed = rows
     .slice(1)
     .filter(r => r && r.length)
-    .map(r => ({
+    .map(r => {
 
-      game_key: `${excelDateToJS(r[0])}_${r[3]}_${r[4]}`,
+      const date = excelDateToJS(r[0]);
+      const home_team = r[3] || null;
+      const away_team = r[4] || null;
 
-      Date: excelDateToJS(r[0]),
+      return {
 
-      Competition: r[1] || null,
-      Round: r[2] || null,
+        game_key: `${date}_${home_team}_${away_team}`,
 
-      home_team: r[3] || null,
-      away_team: r[4] || null,
+        Date: date,
 
-      home_allocated: r[5] || null,
-      away_allocated: r[6] || null,
+        Competition: r[1] || null,
+        Round: r[2] || null,
 
-      Location: r[7] || null,
-      Additional: r[8] || null,
+        home_team,
+        away_team,
 
-      Week:
-        r[9] == null || r[9] === ""
-          ? 0
-          : Number(r[9]),
+        home_allocated: r[5] || null,
+        away_allocated: r[6] || null,
 
-      Column11: r[10] || null,      // Month
+        Location: r[7] || null,
+        Additional: r[8] || null,
 
-      expected_day: r[11] || null,  // Completion day
+        Week:
+          r[9] == null || r[9] === ""
+            ? 0
+            : Number(r[9]),
 
-      videoURL: r[12] || null,
+        Column11: r[10] || null,      // Month
 
-    }));
+        expected_day: r[11] || null,  // Completion day
 
+        videoURL: r[12] || null,
+
+      };
+    })
+    // Skip malformed rows missing the fields required by the
+    // TT_Games NOT NULL constraints (Date) or that have no way to
+    // form a meaningful game_key (home/away team missing).
+    .filter(row => {
+      if (!row.Date || !row.home_team || !row.away_team) {
+        skippedTT++;
+
+        console.log(
+          "⚠️ Skipping malformed TT row (missing Date/home/away):",
+          JSON.stringify(row)
+        );
+
+        return false;
+      }
+
+      return true;
+    });
+
+  console.log("Skipped malformed TT rows:", skippedTT);
   console.log("First Parsed TT Row:", parsed[0]);
 
   return parsed;
