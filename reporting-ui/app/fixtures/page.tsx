@@ -16,6 +16,7 @@ import {
 } from "@/lib/api/analysts";
 
 import { assignFixture } from "@/lib/api/assignFixture";
+import { createDownloadJob } from "@/lib/api/downloadJobs";
 
 import {
     getHubConnection,
@@ -1065,6 +1066,27 @@ export default function FixturesPage() {
             );
 
 
+            // Queue the actual download on the desktop agent. Assigning
+            // alone only records who is responsible for the fixture —
+            // the agent polls /api/downloadjobs, not fixture assignments,
+            // so without this the download never starts and the status
+            // never advances past "Pending".
+            if (fixture.videoURL) {
+
+                await createDownloadJob({
+                    gameKey: fixture.game_key,
+                    videoUrl: fixture.videoURL,
+                    year: (fixture.Date ?? "").substring(0, 4),
+                    leagueName: fixture.Competition,
+                    analystId,
+                    computerId: computer.id,
+                    assignmentLocation: location,
+                    fileSizeBytes: fixture.fileSizeBytes ?? null,
+                });
+
+            }
+
+
             await refreshFixtures();
 
 
@@ -1081,7 +1103,9 @@ export default function FixturesPage() {
             );
 
             alert(
-                "Assignment failed."
+                err instanceof Error
+                    ? err.message
+                    : "Assignment failed."
             );
 
         }

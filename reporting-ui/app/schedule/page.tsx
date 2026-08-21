@@ -20,6 +20,10 @@ import {
 } from "@/lib/api/assignFixture";
 
 import {
+    createDownloadJob,
+} from "@/lib/api/downloadJobs";
+
+import {
     loadDeputyRoster,
 } from "@/lib/data/loadDeputyRoster";
 
@@ -299,6 +303,18 @@ export default function SchedulePage() {
     ] =
         useState<
             ScheduleAnalyst[]
+        >([]);
+
+    // Full analyst records (including home/office computer assignments)
+    // from the AutoDownload API — kept separately from `analysts` since
+    // ScheduleAnalyst only carries id/name/email. Needed to resolve which
+    // computer a download job should be queued against on allocation.
+    const [
+        fullAnalystData,
+        setFullAnalystData,
+    ] =
+        useState<
+            ApiAnalyst[]
         >([]);
 
 
@@ -590,6 +606,10 @@ export default function SchedulePage() {
                 )
             );
 
+            setFullAnalystData(
+                analystData
+            );
+
 
             const scheduleAssignments:
                 ScheduleAssignment[] = [];
@@ -739,6 +759,43 @@ export default function SchedulePage() {
                 location,
                 allocationSlot.date
             );
+
+            // Queue the actual download on the desktop agent. Assigning
+            // alone only records who is responsible for the fixture —
+            // the agent polls /api/downloadjobs, not fixture assignments,
+            // so without this the download never starts and the status
+            // never advances past "Pending".
+            const fixture =
+                fixtures.find(
+                    (f: any) =>
+                        Number(f.id) === fixtureId
+                );
+
+            const fullAnalyst =
+                fullAnalystData.find(
+                    a =>
+                        a.id === allocationSlot.analystId
+                );
+
+            const computer =
+                location === "Home"
+                    ? fullAnalyst?.homeComputer
+                    : fullAnalyst?.officeComputer;
+
+            if (fixture?.videoURL && computer) {
+
+                await createDownloadJob({
+                    gameKey: fixture.game_key,
+                    videoUrl: fixture.videoURL,
+                    year: (fixture.Date ?? "").substring(0, 4),
+                    leagueName: fixture.Competition,
+                    analystId: allocationSlot.analystId,
+                    computerId: computer.id,
+                    assignmentLocation: location,
+                    fileSizeBytes: fixture.fileSizeBytes ?? null,
+                });
+
+            }
 
             await loadSchedule();
 
