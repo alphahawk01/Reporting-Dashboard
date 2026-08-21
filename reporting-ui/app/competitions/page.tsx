@@ -14,6 +14,19 @@ import type { TTGame } from "@/types/ttgame";
 
 const PAGE_SIZE = 1000;
 
+/**
+ * Normalises a competition name so that entries differing only by
+ * incidental whitespace (e.g. a trailing space introduced by a source
+ * spreadsheet) are treated as the same competition instead of showing
+ * up as separate dropdown entries with a subset of fixtures each.
+ */
+function normaliseCompetition(name: string | null | undefined): string {
+    return String(name ?? "")
+        .replace(/\u00A0/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
 async function fetchAll<T>(table: string): Promise<T[]> {
     let from = 0;
     let all: T[] = [];
@@ -84,7 +97,8 @@ export default function CompetitionsPage() {
         const unique = new Set<string>();
 
         games.forEach((g) => {
-            if (g.Competition) unique.add(g.Competition);
+            const name = normaliseCompetition(g.Competition);
+            if (name) unique.add(name);
         });
 
         return [...unique].sort((a, b) => a.localeCompare(b));
@@ -105,7 +119,11 @@ export default function CompetitionsPage() {
     const fixtures = useMemo(() => {
 
         return games
-            .filter((g) => g.Competition === selectedCompetition)
+            .filter(
+                (g) =>
+                    normaliseCompetition(g.Competition) ===
+                    selectedCompetition
+            )
             .sort((a, b) => {
                 const weekA = Number(a.Week) || 0;
                 const weekB = Number(b.Week) || 0;
@@ -414,106 +432,124 @@ export default function CompetitionsPage() {
 
                         </div>
 
-                        {/* ANALYTICS CARDS */}
-                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                        {/* MOST GAMES CODED */}
+                        <div className="mb-6 rounded-2xl border border-slate-700 bg-[#0f1b2d] p-5">
 
-                            {/* TOP ANALYSTS */}
-                            <div className="rounded-2xl border border-slate-700 bg-[#0f1b2d] p-5">
+                            <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-400">
+                                Most Games Coded
+                            </h2>
 
-                                <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-400">
-                                    Most Games Coded
-                                </h2>
+                            {topAnalysts.length === 0 ? (
+                                <div className="text-sm text-slate-500">
+                                    No analysts have coded this competition yet.
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                                    {topAnalysts.map((a, index) => {
 
-                                {topAnalysts.length === 0 ? (
-                                    <div className="text-sm text-slate-500">
-                                        No analysts have coded this competition yet.
-                                    </div>
-                                ) : (
-                                    <div className="space-y-2">
-                                        {topAnalysts.map((a, index) => {
+                                        const image = getAnalystImage(a.name);
+                                        const initials = getAnalystInitials(a.name);
 
-                                            const image = getAnalystImage(a.name);
-                                            const initials = getAnalystInitials(a.name);
-
-                                            return (
-                                                <div
-                                                    key={a.name}
-                                                    className="flex items-center gap-3 rounded-lg px-2 py-2 transition hover:bg-slate-900"
-                                                >
-                                                    <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-slate-800 text-xs font-bold text-slate-300">
-                                                        {index + 1}
-                                                    </div>
-
-                                                    <div className="h-8 w-8 flex-shrink-0 overflow-hidden rounded-full ring-2 ring-slate-700">
-                                                        <TeamCoderAvatar
-                                                            src={image}
-                                                            initials={initials}
-                                                        />
-                                                    </div>
-
-                                                    <div className="min-w-0 flex-1 truncate text-sm font-medium text-slate-200">
-                                                        {a.name}
-                                                    </div>
-
-                                                    <div className="flex-shrink-0 text-sm font-bold text-sky-400">
-                                                        {a.games.toFixed(1)}
-                                                    </div>
-                                                </div>
-                                            );
-
-                                        })}
-                                    </div>
-                                )}
-
-                            </div>
-
-                            {/* TEAM CODERS */}
-                            <div className="rounded-2xl border border-slate-700 bg-[#0f1b2d] p-5">
-
-                                <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-400">
-                                    Top Coder by Team
-                                    <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-bold normal-case text-sky-300">
-                                        {teamCoders.length}
-                                    </span>
-                                </h2>
-
-                                <div className="max-h-[360px] space-y-1 overflow-y-auto">
-
-                                    {teamCoders.length === 0 ? (
-                                        <div className="text-sm text-slate-500">
-                                            No team data available.
-                                        </div>
-                                    ) : (
-                                        teamCoders.map((tc) => (
+                                        return (
                                             <div
-                                                key={tc.team}
-                                                className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 transition hover:bg-slate-900"
+                                                key={a.name}
+                                                className="flex items-center gap-3 rounded-lg px-2 py-2 transition hover:bg-slate-900"
                                             >
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="truncate text-sm font-medium text-slate-200">
-                                                        {tc.team}
-                                                    </div>
-
-                                                    <div className="truncate text-xs text-slate-500">
-                                                        {tc.topAnalyst ?? "No analyst recorded"}
-                                                    </div>
+                                                <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-slate-800 text-xs font-bold text-slate-300">
+                                                    {index + 1}
                                                 </div>
 
-                                                <div className="flex-shrink-0 text-right">
-                                                    <div className="text-sm font-bold text-emerald-400">
-                                                        {tc.topGames}
-                                                    </div>
-                                                    <div className="text-[10px] text-slate-500">
-                                                        of {tc.totalGames}
-                                                    </div>
+                                                <div className="h-8 w-8 flex-shrink-0 overflow-hidden rounded-full ring-2 ring-slate-700">
+                                                    <TeamCoderAvatar
+                                                        src={image}
+                                                        initials={initials}
+                                                    />
+                                                </div>
+
+                                                <div className="min-w-0 flex-1 truncate text-sm font-medium text-slate-200">
+                                                    {a.name}
+                                                </div>
+
+                                                <div className="flex-shrink-0 text-sm font-bold text-sky-400">
+                                                    {a.games.toFixed(1)}
                                                 </div>
                                             </div>
-                                        ))
-                                    )}
+                                        );
 
+                                    })}
+                                </div>
+                            )}
+
+                        </div>
+
+                        {/* TOP CODER BY TEAM */}
+                        <div className="overflow-hidden rounded-2xl border border-slate-700 bg-[#0f1b2d]">
+
+                            <div className="flex items-center gap-2 border-b border-slate-700 px-5 py-4">
+
+                                <div className="text-sm font-semibold text-white">
+                                    Top Coder by Team
                                 </div>
 
+                                <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-bold text-sky-300">
+                                    {teamCoders.length}
+                                </span>
+
                             </div>
+
+                            {teamCoders.length === 0 ? (
+
+                                <div className="px-5 py-6 text-sm text-slate-500">
+                                    No team data available.
+                                </div>
+
+                            ) : (
+
+                                <table className="w-full text-left text-sm">
+
+                                    <thead className="bg-slate-800 text-xs uppercase tracking-wide text-slate-400">
+                                        <tr>
+                                            <th className="px-5 py-3 font-semibold">Team</th>
+                                            <th className="px-4 py-3 font-semibold">Top Analyst</th>
+                                            <th className="w-40 px-4 py-3 text-right font-semibold">Times Coded</th>
+                                        </tr>
+                                    </thead>
+
+                                    <tbody className="divide-y divide-slate-800">
+
+                                        {teamCoders.map((tc) => (
+                                            <tr
+                                                key={tc.team}
+                                                className="transition hover:bg-slate-800/50"
+                                            >
+                                                <td className="px-5 py-2.5 font-medium text-slate-200">
+                                                    {tc.team}
+                                                </td>
+
+                                                <td className="px-4 py-2.5 text-slate-300">
+                                                    {tc.topAnalyst ?? (
+                                                        <span className="text-slate-600">
+                                                            No analyst recorded
+                                                        </span>
+                                                    )}
+                                                </td>
+
+                                                <td className="px-4 py-2.5 text-right">
+                                                    <span className="font-bold text-emerald-400">
+                                                        {tc.topGames}
+                                                    </span>
+                                                    <span className="ml-1 text-xs text-slate-500">
+                                                        of {tc.totalGames}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+
+                                    </tbody>
+
+                                </table>
+
+                            )}
 
                         </div>
 
