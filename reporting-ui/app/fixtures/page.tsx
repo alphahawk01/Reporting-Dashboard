@@ -632,33 +632,51 @@ export default function FixturesPage() {
 
     const mergedFixtures = useMemo(() => {
 
-        // Build a lookup by composite key for API fixtures.
+        // Build lookups keyed by game_key first (a stable identifier
+        // derived from date+teams), falling back to a home/away/
+        // competition/round composite only when a row has no game_key
+        // (older synced rows). Matching on the composite alone used to
+        // be the only strategy here, which silently collapsed distinct
+        // fixtures onto one map entry whenever the API ended up with
+        // duplicate rows for the same game (a past sync bug created a
+        // second row whenever the league-name formatting drifted, e.g.
+        // "APS" vs "APS 2026" — now fixed at the source, but keying by
+        // game_key here as well keeps this page correct even if that
+        // ever recurs).
         //
         // `autoFixtures` is built as a 1:1, index-aligned .map() over
-        // `fixtures` (see load()/refreshFixtures() above) — pair them
-        // by index directly rather than re-resolving each autoFixture
-        // back to a row via `fixtures.find(f => f.game_key === af.gameKey)`.
-        // That re-lookup breaks when the API has duplicate Fixture rows
-        // sharing the same game_key (e.g. a sync ran twice with a
-        // slightly different league-name format, so the API's own
-        // duplicate check missed it and created a second row) — .find()
-        // always resolves to the same single row for every duplicate, so
-        // whichever duplicate is processed last silently overwrites the
-        // correct entry in the map, even if that duplicate is an
-        // unassigned/blank row. Indexing directly avoids that collision,
-        // and when two rows still land on the same composite key we keep
-        // whichever one is further along (has a status past "Pending" or
-        // has an assigned analyst) instead of last-wins.
-        const autoByComposite = new Map<string, AutoDownloadFixture>();
-        const fixtureByComposite = new Map<string, TTGame>();
+        // `fixtures` (see load()/refreshFixtures() above), so we still
+        // pair them by index while building the lookups rather than
+        // re-resolving via .find() — with duplicate rows removed at the
+        // source this is now mostly a defensive measure, but keeping it
+        // avoids reintroducing the same last-wins collision if a
+        // duplicate ever reappears.
+        const autoByKey = new Map<string, AutoDownloadFixture>();
+        const fixtureByKey = new Map<string, TTGame>();
+
+        function keyFor(f: {
+            game_key?: string | null;
+            home_team?: string | null;
+            away_team?: string | null;
+            Competition?: string | null;
+            Round?: string | null;
+        }): string {
+
+            const gameKey = f.game_key?.trim();
+
+            if (gameKey) return `gk:${gameKey}`;
+
+            return `composite:${(f.home_team ?? "").toLowerCase()}|${(f.away_team ?? "").toLowerCase()}|${(f.Competition ?? "").toLowerCase()}|${(f.Round ?? "").toLowerCase()}`;
+
+        }
 
         fixtures.forEach((f, index) => {
 
-            const key = `${(f.home_team ?? "").toLowerCase()}|${(f.away_team ?? "").toLowerCase()}|${(f.Competition ?? "").toLowerCase()}|${(f.Round ?? "").toLowerCase()}`;
+            const key = keyFor(f);
 
             const af = autoFixtures[index] ?? null;
 
-            const existingAuto = autoByComposite.get(key);
+            const existingAuto = autoByKey.get(key);
 
             const isBetter =
                 !existingAuto ||
@@ -674,10 +692,10 @@ export default function FixturesPage() {
 
             if (isBetter) {
 
-                fixtureByComposite.set(key, f);
+                fixtureByKey.set(key, f);
 
                 if (af) {
-                    autoByComposite.set(key, af);
+                    autoByKey.set(key, af);
                 }
 
             }
@@ -687,13 +705,13 @@ export default function FixturesPage() {
         return allGames.map(
             game => {
 
-                const compositeKey = `${(game.home_team ?? "").toLowerCase()}|${(game.away_team ?? "").toLowerCase()}|${(game.Competition ?? "").toLowerCase()}|${(game.Round ?? "").toLowerCase()}`;
+                const key = keyFor(game);
 
                 const autoFixture =
-                    autoByComposite.get(compositeKey) ?? null;
+                    autoByKey.get(key) ?? null;
 
                 const apiFixture =
-                    fixtureByComposite.get(compositeKey) ?? null;
+                    fixtureByKey.get(key) ?? null;
 
                 // Use file size from API (Cloudflare HEAD check),
                 // fall back to TT_Games value

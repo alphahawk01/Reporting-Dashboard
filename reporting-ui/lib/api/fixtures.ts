@@ -79,9 +79,14 @@ export async function getFixtures() {
                 fixture.expectedDay ??
                 null,
 
+            // Only use the real GameKey here — do NOT fall back to
+            // fixtureId (an internal GUID). Several places match
+            // fixtures across systems by comparing game_key values, and
+            // a GUID would never match anything, silently breaking that
+            // matching in a way that's hard to notice (it just falls
+            // through to a different match strategy instead of erroring).
             game_key:
                 fixture.gameKey ??
-                fixture.fixtureId ??
                 "",
 
             videoURL:

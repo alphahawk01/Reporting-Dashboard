@@ -41,6 +41,46 @@ import type { DeputyRoster } from "@/types/deputyRoster";
 import { buildAnalystAvailability } from "@/lib/recommendations/buildAnalystAvailability";
 import { Info } from "lucide-react";
 
+/**
+ * Finds the API fixture matching a TT_Games row.
+ *
+ * Prefers matching on game_key/gameKey — a stable identifier derived
+ * from date+teams. Falls back to a home/away team name match only when
+ * either side is missing a game_key (older synced rows). Fuzzy
+ * home/away-only matching was the previous approach everywhere on this
+ * page, but it silently collapses onto whichever fixture happens to
+ * match first when the API has more than one row for the same teams
+ * (e.g. duplicate rows from a past sync bug, or two fixtures between
+ * the same two teams in different rounds/seasons) — which is why a
+ * fixture allocated on the Fixtures/Schedule pages could show as
+ * "allocated" there while Recommendations kept showing it as
+ * unassigned, or vice versa.
+ */
+function findAutoFixture(
+  autoFixtures: AutoDownloadFixture[],
+  fixture: { game_key?: string | null; home_team?: string | null; away_team?: string | null }
+): AutoDownloadFixture | undefined {
+
+  const key = fixture.game_key?.trim();
+
+  if (key) {
+    const byKey = autoFixtures.find(
+      (af: any) => af.gameKey && af.gameKey === key
+    );
+
+    if (byKey) return byKey;
+  }
+
+  const fHome = (fixture.home_team ?? "").trim().toLowerCase();
+  const fAway = (fixture.away_team ?? "").trim().toLowerCase();
+
+  return autoFixtures.find((af: any) => {
+    const afHome = (af.homeTeam ?? "").trim().toLowerCase();
+    const afAway = (af.awayTeam ?? "").trim().toLowerCase();
+    return afHome === fHome && afAway === fAway;
+  });
+}
+
 export default function RecommendationPage() {
   const [historicalGames, setHistoricalGames] = useState<TTGame[]>([]);
   const [fixtures, setFixtures] = useState<TTGame[]>([]);
@@ -434,26 +474,9 @@ export default function RecommendationPage() {
       return sortedFixtures;
     }
 
-    // Build composite key lookup for autoFixtures
-    // since game_key doesn't match between TT_Games and API
-    const autoByComposite = new Map<string, AutoDownloadFixture>();
-    autoFixtures.forEach(af => {
-      // We need to find the matching fixture from the API response
-      // The autoFixture has analyst/status but uses fixtureId as gameKey
-      // Match will happen via the composite built below
-    });
-
     return sortedFixtures.map(fixture => {
 
-      // Match by home + away team names
-      const autoFixture =
-        autoFixtures.find((af: any) => {
-          const afHome = (af.homeTeam ?? "").trim().toLowerCase();
-          const afAway = (af.awayTeam ?? "").trim().toLowerCase();
-          const fHome = (fixture.home_team ?? "").trim().toLowerCase();
-          const fAway = (fixture.away_team ?? "").trim().toLowerCase();
-          return afHome === fHome && afAway === fAway;
-        });
+      const autoFixture = findAutoFixture(autoFixtures, fixture);
 
       const downloadJob = downloadJobs.find(
         job => job.gameKey === fixture.game_key
@@ -507,13 +530,13 @@ export default function RecommendationPage() {
       return new Map<string, any>();
     }
 
-    // Build lookup by home+away team (most reliable match)
+    // Keyed by gameKey — a stable identifier, unlike a bare home+away
+    // composite which collapses distinct fixtures between the same two
+    // teams (different rounds/seasons) onto a single map entry.
     const map = new Map<string, any>();
     autoFixtures.forEach((af: any) => {
-      const home = (af.homeTeam ?? "").trim().toLowerCase();
-      const away = (af.awayTeam ?? "").trim().toLowerCase();
-      if (home && away) {
-        map.set(`${home}|${away}`, af);
+      if (af.gameKey) {
+        map.set(af.gameKey, af);
       }
     });
     return map;
@@ -647,15 +670,7 @@ export default function RecommendationPage() {
       }
 
       // Find the API fixture ID for this game
-      const autoFixture = autoFixtures.find(
-        (a: any) => {
-          const afHome = (a.homeTeam ?? "").trim().toLowerCase();
-          const afAway = (a.awayTeam ?? "").trim().toLowerCase();
-          const fHome = (selectedFixture.home_team ?? "").trim().toLowerCase();
-          const fAway = (selectedFixture.away_team ?? "").trim().toLowerCase();
-          return afHome === fHome && afAway === fAway;
-        }
-      );
+      const autoFixture = findAutoFixture(autoFixtures, selectedFixture);
 
       // 1. Assign the fixture (creates FixtureAssignment, syncs with all pages)
       if (autoFixture && (autoFixture as any).id) {
@@ -756,15 +771,7 @@ export default function RecommendationPage() {
         return;
       }
 
-      const autoFixture = autoFixtures.find(
-        (a: any) => {
-          const afHome = (a.homeTeam ?? "").trim().toLowerCase();
-          const afAway = (a.awayTeam ?? "").trim().toLowerCase();
-          const fHome = (selectedFixture.home_team ?? "").trim().toLowerCase();
-          const fAway = (selectedFixture.away_team ?? "").trim().toLowerCase();
-          return afHome === fHome && afAway === fAway;
-        }
-      );
+      const autoFixture = findAutoFixture(autoFixtures, selectedFixture);
 
       // 1. Assign with scheduled date (shows on Schedule page)
       if (autoFixture && (autoFixture as any).id) {
@@ -825,15 +832,7 @@ export default function RecommendationPage() {
     try {
 
       // Find the API fixture for this game
-      const autoFixture = autoFixtures.find(
-        (a: any) => {
-          const afHome = (a.homeTeam ?? "").trim().toLowerCase();
-          const afAway = (a.awayTeam ?? "").trim().toLowerCase();
-          const fHome = (selectedFixture.home_team ?? "").trim().toLowerCase();
-          const fAway = (selectedFixture.away_team ?? "").trim().toLowerCase();
-          return afHome === fHome && afAway === fAway;
-        }
-      );
+      const autoFixture = findAutoFixture(autoFixtures, selectedFixture);
 
       // 1. Assign the fixture (syncs with all pages)
       if (autoFixture && (autoFixture as any).id) {
@@ -1117,9 +1116,11 @@ export default function RecommendationPage() {
 
                 <div className="flex-1 overflow-y-auto">
                   {sortedFixtures.map((fixture, index) => {
-                    const compositeKey = `${(fixture.home_team ?? "").trim().toLowerCase()}|${(fixture.away_team ?? "").trim().toLowerCase()}`;
                     const autoFixture =
-                      autoFixturesByGameKey.get(compositeKey);
+                      (fixture.game_key
+                        ? autoFixturesByGameKey.get(fixture.game_key)
+                        : undefined) ??
+                      findAutoFixture(autoFixtures, fixture);
 
                     return (
                       <button
@@ -1254,13 +1255,7 @@ export default function RecommendationPage() {
 
                   {/* ALLOCATED ANALYST */}
                   {(() => {
-                    const selectedAutoFixture = autoFixtures.find((af: any) => {
-                      const afHome = (af.homeTeam ?? "").trim().toLowerCase();
-                      const afAway = (af.awayTeam ?? "").trim().toLowerCase();
-                      const fHome = (selectedFixture.home_team ?? "").trim().toLowerCase();
-                      const fAway = (selectedFixture.away_team ?? "").trim().toLowerCase();
-                      return afHome === fHome && afAway === fAway;
-                    });
+                    const selectedAutoFixture = findAutoFixture(autoFixtures, selectedFixture);
 
                     if (selectedAutoFixture && (selectedAutoFixture as any).analyst) {
                       return (
@@ -1706,13 +1701,7 @@ export default function RecommendationPage() {
                             }
 
                             try {
-                              const autoFixture = autoFixtures.find((a: any) => {
-                                const afHome = (a.homeTeam ?? "").trim().toLowerCase();
-                                const afAway = (a.awayTeam ?? "").trim().toLowerCase();
-                                const fHome = (selectedFixture.home_team ?? "").trim().toLowerCase();
-                                const fAway = (selectedFixture.away_team ?? "").trim().toLowerCase();
-                                return afHome === fHome && afAway === fAway;
-                              });
+                              const autoFixture = findAutoFixture(autoFixtures, selectedFixture);
 
                               if (autoFixture && (autoFixture as any).id) {
                                 await assignFixture(
