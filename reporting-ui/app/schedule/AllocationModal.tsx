@@ -55,6 +55,28 @@ export default function AllocationModal({
             }
         );
 
+    function formatFixtureDate(
+        date: string | null | undefined
+    ): string {
+
+        if (!date) return "Date TBC";
+
+        const parsed =
+            new Date(`${date}T00:00:00`);
+
+        if (isNaN(parsed.getTime())) return "Date TBC";
+
+        return parsed.toLocaleDateString(
+            "en-AU",
+            {
+                weekday: "short",
+                day: "numeric",
+                month: "short",
+            }
+        );
+
+    }
+
     // Map API fixtures by game_key for quick lookup
     const fixturesByGameKey = useMemo(() => {
         const map = new Map<string, ApiFixture>();
@@ -471,6 +493,16 @@ export default function AllocationModal({
                                                     {game.home_team ?? ""}
                                                     {" vs "}
                                                     {game.away_team ?? ""}
+                                                </div>
+
+
+                                                <div className="
+                                                    mt-1
+                                                    text-[11px]
+                                                    font-medium
+                                                    text-blue-600
+                                                ">
+                                                    {formatFixtureDate(game.Date)}
                                                 </div>
 
 
