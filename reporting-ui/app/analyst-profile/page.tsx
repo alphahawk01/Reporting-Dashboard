@@ -4,8 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import AnalystHero from "./AnalystHero";
-import StrengthPanel from "./StrengthPanel";
-import WeaknessPanel from "./WeaknessPanel";
+import ExecutiveSummary from "./ExecutiveSummary";
 import LeagueBreakdown from "./LeagueBreakdown";
 import TeamBreakdown from "./TeamBreakdown";
 import AverageCodingTimeTrend from "./AverageCodingTimeTrend";
@@ -312,6 +311,10 @@ const filteredGames = useMemo(() => {
             </div>
 
             <div className="relative z-10">
+              <ExecutiveSummary data={activeData} />
+            </div>
+
+            <div className="relative z-10">
               <AttributeRatings ratings={activeData.ratings} />
             </div>
 
@@ -353,17 +356,6 @@ const filteredGames = useMemo(() => {
 
               <div className="h-full">
                 <TeamBreakdown data={activeData.teams} logoMap={teamLogoMap} />
-              </div>
-            </div>
-
-            {/* FINAL ROW */}
-            <div className="grid grid-cols-2 gap-6 items-stretch">
-              <div className="h-full">
-                <WeaknessPanel data={activeData} />
-              </div>
-
-              <div className="h-full">
-                <StrengthPanel data={activeData} />
               </div>
             </div>
 

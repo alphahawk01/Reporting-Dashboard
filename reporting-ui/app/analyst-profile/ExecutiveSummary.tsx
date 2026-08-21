@@ -1,0 +1,163 @@
+"use client";
+
+import Card from "@/components/UI/Card";
+import type { AnalystMetrics } from "@/types/analyst";
+
+type Props = {
+  data: AnalystMetrics;
+};
+
+const ATTRIBUTE_LABELS: Record<string, string> = {
+  speed: "⚡ Speed",
+  efficiency: "💰 Efficiency",
+  workRate: "🏃 Work Rate",
+  experience: "🎯 Experience",
+  consistency: "📅 Consistency",
+  versatility: "🌍 Versatility",
+  knowledge: "🧠 Knowledge",
+};
+
+export default function ExecutiveSummary({ data }: Props) {
+
+  // -------------------------
+  // TOP STRENGTHS (highest rated attributes)
+  // -------------------------
+  const strengths = Object.entries(data.ratings)
+    .filter(([key]) => key !== "overall")
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([key, value]) => ({
+      key,
+      label: ATTRIBUTE_LABELS[key] ?? key,
+      value,
+    }));
+
+  // -------------------------
+  // TOP LEAGUES / TEAMS
+  // -------------------------
+  const topLeagues = Object.entries(data.competitions ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  const topTeams = Object.entries(data.teams ?? {})
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 5);
+
+  const leagueCount = Object.keys(data.competitions ?? {}).length;
+  const teamCount = Object.keys(data.teams ?? {}).length;
+
+  const strengthNames = strengths
+    .map((s) => s.label.replace(/^[^\s]+\s/, ""))
+    .join(", ");
+
+  const topLeagueName = topLeagues[0]?.[0];
+  const topTeamName = topTeams[0]?.[0];
+
+  return (
+    <Card>
+      <div className="p-6">
+
+        <h2 className="mb-4 text-xl font-bold text-white">
+          Executive Summary
+        </h2>
+
+        <p className="mb-6 leading-7 text-slate-300">
+          {data.name} is rated{" "}
+          <span className="font-semibold text-white">{data.grade}</span>{" "}
+          overall — ranked #{data.rank} of {data.totalAnalysts} in{" "}
+          {data.team} (top {data.percentile}%). Their strongest attributes
+          are {strengthNames}. Across {data.totalGames} games coded,{" "}
+          {data.name} has covered {leagueCount} competition
+          {leagueCount === 1 ? "" : "s"}
+          {topLeagueName ? `, most frequently ${topLeagueName}` : ""}, and
+          analysed {teamCount} team{teamCount === 1 ? "" : "s"}
+          {topTeamName ? `, including ${topTeamName}` : ""}.
+        </p>
+
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+
+          {/* KEY STRENGTHS */}
+          <div>
+            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
+              Key Strengths
+            </h3>
+
+            <div className="space-y-2">
+              {strengths.map((s) => (
+                <div
+                  key={s.key}
+                  className="flex items-center justify-between rounded-lg bg-slate-900 px-3 py-2"
+                >
+                  <span className="text-sm text-slate-200">{s.label}</span>
+                  <span className="text-sm font-bold text-sky-400">
+                    {s.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* TOP LEAGUES */}
+          <div>
+            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
+              Top Leagues
+            </h3>
+
+            <div className="space-y-2">
+              {topLeagues.length ? (
+                topLeagues.map(([league, games]) => (
+                  <div
+                    key={league}
+                    className="flex items-center justify-between gap-2 rounded-lg bg-slate-900 px-3 py-2"
+                  >
+                    <span className="truncate text-sm text-slate-200">
+                      {league}
+                    </span>
+                    <span className="flex-shrink-0 text-sm font-bold text-emerald-400">
+                      {games}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-slate-500">
+                  No league data.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* TOP TEAMS */}
+          <div>
+            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-400">
+              Top Teams
+            </h3>
+
+            <div className="space-y-2">
+              {topTeams.length ? (
+                topTeams.map(([team, value]) => (
+                  <div
+                    key={team}
+                    className="flex items-center justify-between gap-2 rounded-lg bg-slate-900 px-3 py-2"
+                  >
+                    <span className="truncate text-sm text-slate-200">
+                      {team}
+                    </span>
+                    <span className="flex-shrink-0 text-sm font-bold text-emerald-400">
+                      {value.count}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-slate-500">
+                  No team data.
+                </div>
+              )}
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </Card>
+  );
+}
