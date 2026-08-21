@@ -89,6 +89,43 @@ type FixtureFilter =
     | "No Fixture";
 
 
+/*
+ * ROSTER MATCH KEY
+ *
+ * deputy_roster often records shortened nicknames or slightly
+ * different spellings than the AutoDownload API's analyst name
+ * (e.g. "Ella" vs "Ella Southgate", "Jonathan Trickey" vs
+ * "Jonathon Trickey"). Email is present and consistent on both
+ * sides, so match on normalised email first and only fall back
+ * to normalised name when either side has no email recorded.
+ */
+function normaliseIdentifier(
+    value: string | null | undefined
+): string {
+
+    return String(value ?? "")
+        .trim()
+        .toLowerCase();
+
+}
+
+function rosterMatchKey(
+    email: string | null | undefined,
+    name: string | null | undefined
+): string {
+
+    const normalisedEmail =
+        normaliseIdentifier(email);
+
+    if (normalisedEmail) {
+        return normalisedEmail;
+    }
+
+    return normaliseIdentifier(name);
+
+}
+
+
 function formatDateKey(
     date: Date
 ) {
@@ -766,7 +803,7 @@ export default function SchedulePage() {
                 ) {
 
                     const key =
-                        `${shift.employee_name}|${shift.shift_date}`;
+                        `${rosterMatchKey(shift.email, shift.employee_name)}|${shift.shift_date}`;
 
                     const existing =
                         map.get(
@@ -923,7 +960,7 @@ export default function SchedulePage() {
 
         const shifts =
             rosterByAnalystAndDay.get(
-                `${analyst.name}|${dayKey}`
+                `${rosterMatchKey(analyst.email, analyst.name)}|${dayKey}`
             ) ??
             [];
 
@@ -1076,8 +1113,8 @@ export default function SchedulePage() {
                                 const hasRosterLocation =
                                     roster.some(
                                         shift =>
-                                            shift.employee_name ===
-                                            analyst.name &&
+                                            rosterMatchKey(shift.email, shift.employee_name) ===
+                                            rosterMatchKey(analyst.email, analyst.name) &&
                                             shift.location ===
                                             locationFilter
                                     );
@@ -2116,7 +2153,7 @@ export default function SchedulePage() {
 
                                             const shifts =
                                                 rosterByAnalystAndDay.get(
-                                                    `${analyst.name}|${day.key}`
+                                                    `${rosterMatchKey(analyst.email, analyst.name)}|${day.key}`
                                                 ) ??
                                                 [];
 
