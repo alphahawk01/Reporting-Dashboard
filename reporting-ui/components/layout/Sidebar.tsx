@@ -16,6 +16,7 @@ import {
   Settings,
   Trophy,
   GitCompare,
+  Globe,
 } from "lucide-react";
 
 const sections = [
@@ -63,6 +64,11 @@ const sections = [
       title: "Fixtures",
       href: "/fixtures",
       icon: CalendarDays,
+    },
+    {
+      title: "Competitions",
+      href: "/competitions",
+      icon: Globe,
     },
     {
       title: "Schedule",
