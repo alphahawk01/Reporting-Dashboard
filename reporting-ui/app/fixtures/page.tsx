@@ -632,41 +632,36 @@ export default function FixturesPage() {
 
     const mergedFixtures = useMemo(() => {
 
-        // Build lookups keyed by game_key first (a stable identifier
-        // derived from date+teams), falling back to a home/away/
-        // competition/round composite only when a row has no game_key
-        // (older synced rows). Matching on the composite alone used to
-        // be the only strategy here, which silently collapsed distinct
-        // fixtures onto one map entry whenever the API ended up with
-        // duplicate rows for the same game (a past sync bug created a
-        // second row whenever the league-name formatting drifted, e.g.
-        // "APS" vs "APS 2026" — now fixed at the source, but keying by
-        // game_key here as well keeps this page correct even if that
-        // ever recurs).
+        // Match API fixtures to Supabase TT_Games rows on a
+        // home/away/competition/round composite key — NOT on game_key.
+        // The two systems assign completely different game_key formats
+        // (verified: zero overlap between TT_Games.game_key and the
+        // API's GameKey), so keying by game_key here matches nothing and
+        // leaves file size / status / assignment unmerged — every row
+        // then shows "Checking..." even though the API already has the
+        // size. The composite is the only identifier consistent across
+        // both systems.
         //
         // `autoFixtures` is built as a 1:1, index-aligned .map() over
-        // `fixtures` (see load()/refreshFixtures() above), so we still
-        // pair them by index while building the lookups rather than
-        // re-resolving via .find() — with duplicate rows removed at the
-        // source this is now mostly a defensive measure, but keeping it
-        // avoids reintroducing the same last-wins collision if a
-        // duplicate ever reappears.
+        // `fixtures` (see load()/refreshFixtures() above), so we pair
+        // them by index while building the lookups rather than
+        // re-resolving via .find(). When two API rows collapse onto the
+        // same composite key (rare now that the DB is de-duplicated and
+        // has a unique GameKey constraint) we keep whichever row has
+        // actually progressed (non-Pending status or an assigned
+        // analyst) instead of last-wins, so a blank duplicate can't
+        // clobber the real one.
         const autoByKey = new Map<string, AutoDownloadFixture>();
         const fixtureByKey = new Map<string, TTGame>();
 
         function keyFor(f: {
-            game_key?: string | null;
             home_team?: string | null;
             away_team?: string | null;
             Competition?: string | null;
             Round?: string | null;
         }): string {
 
-            const gameKey = f.game_key?.trim();
-
-            if (gameKey) return `gk:${gameKey}`;
-
-            return `composite:${(f.home_team ?? "").toLowerCase()}|${(f.away_team ?? "").toLowerCase()}|${(f.Competition ?? "").toLowerCase()}|${(f.Round ?? "").toLowerCase()}`;
+            return `${(f.home_team ?? "").trim().toLowerCase()}|${(f.away_team ?? "").trim().toLowerCase()}|${(f.Competition ?? "").trim().toLowerCase()}|${(f.Round ?? "").trim().toLowerCase()}`;
 
         }
 
