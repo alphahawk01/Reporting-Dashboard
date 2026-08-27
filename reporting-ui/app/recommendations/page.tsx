@@ -1491,11 +1491,54 @@ export default function RecommendationPage() {
 
                       <div className="mt-1 rounded bg-sky-500/15 px-2 py-1 text-center">
                         <div className="text-[9px] uppercase tracking-wider text-sky-300">
-                          Expected
+                          Expected Day
                         </div>
-                        <div className="text-sm font-semibold text-sky-200">
-                          {selectedFixture.expected_day}
-                        </div>
+                        <select
+                          value={selectedFixture.expected_day ?? ""}
+                          onChange={async (e) => {
+                            const newDay = e.target.value || null;
+                            const gameKey = selectedFixture.game_key;
+
+                            // Optimistic update — update both fixtures
+                            // (week-filtered) and historicalGames (all games)
+                            // so the day-based exclusion logic re-evaluates.
+                            setFixtures(prev =>
+                              prev.map(g =>
+                                g.game_key === gameKey
+                                  ? { ...g, expected_day: newDay }
+                                  : g
+                              )
+                            );
+                            setHistoricalGames(prev =>
+                              prev.map(g =>
+                                g.game_key === gameKey
+                                  ? { ...g, expected_day: newDay }
+                                  : g
+                              )
+                            );
+
+                            // Persist to Supabase
+                            const { error } = await supabase
+                              .from("TT_Games")
+                              .update({ expected_day: newDay })
+                              .eq("game_key", gameKey);
+
+                            if (error) {
+                              console.error("Failed updating expected_day:", error);
+                              alert("Failed to update expected day.");
+                            }
+                          }}
+                          className="mt-0.5 w-full rounded border border-sky-500/30 bg-slate-900 px-1.5 py-0.5 text-sm font-semibold text-sky-200 focus:border-sky-400 focus:outline-none cursor-pointer"
+                        >
+                          <option value="">Not set</option>
+                          <option value="Monday">Monday</option>
+                          <option value="Tuesday">Tuesday</option>
+                          <option value="Wednesday">Wednesday</option>
+                          <option value="Thursday">Thursday</option>
+                          <option value="Friday">Friday</option>
+                          <option value="Saturday">Saturday</option>
+                          <option value="Sunday">Sunday</option>
+                        </select>
                       </div>
 
                     </div>
