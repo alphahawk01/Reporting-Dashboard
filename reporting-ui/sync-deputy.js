@@ -247,9 +247,37 @@ function parseTTData(buffer) {
     .filter(r => r && r.length)
     .map(r => {
 
+      // Trim + strip zero-width chars from every string field so
+      // TT_Games is stored clean. Trailing/leading whitespace (or a
+      // stray zero-width char) on home_team/away_team/Competition/Round
+      // breaks the composite-key match against the AutoDownload API in
+      // the fixtures UI: the fixture is treated as "unmatched", so it
+      // never gets its file size checked and the download never starts.
+      const clean = v => {
+        if (v == null) return null;
+        const s = String(v)
+          .replace(/[\u200B-\u200D\uFEFF]/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        return s === "" ? null : s;
+      };
+
+      // Video URLs in the source contain literal spaces in the path
+      // (e.g. ".../Champions IGA Seniors/..."). Left raw, the download
+      // agent and the Cloudflare HEAD size-check can't resolve them, so
+      // the fixture stays on "Checking..." and the download never
+      // starts. Percent-encode ONLY the spaces (and trim/strip
+      // zero-width) so the stored URL is valid without disturbing the
+      // rest of the URL structure or double-encoding existing %xx.
+      const cleanUrl = v => {
+        const s = clean(v);
+        if (s == null) return null;
+        return s.replace(/ /g, "%20");
+      };
+
       const date = excelDateToJS(r[0]);
-      const home_team = r[3] || null;
-      const away_team = r[4] || null;
+      const home_team = clean(r[3]);
+      const away_team = clean(r[4]);
 
       return {
 
@@ -257,28 +285,28 @@ function parseTTData(buffer) {
 
         Date: date,
 
-        Competition: r[1] || null,
-        Round: r[2] || null,
+        Competition: clean(r[1]),
+        Round: clean(r[2]),
 
         home_team,
         away_team,
 
-        home_allocated: r[5] || null,
-        away_allocated: r[6] || null,
+        home_allocated: clean(r[5]),
+        away_allocated: clean(r[6]),
 
-        Location: r[7] || null,
-        Additional: r[8] || null,
+        Location: clean(r[7]),
+        Additional: clean(r[8]),
 
         Week:
           r[9] == null || r[9] === ""
             ? 0
             : Number(r[9]),
 
-        Column11: r[10] || null,      // Month
+        Column11: clean(r[10]),      // Month
 
-        expected_day: r[11] || null,  // Completion day
+        expected_day: clean(r[11]),  // Completion day
 
-        videoURL: r[12] || null,
+        videoURL: cleanUrl(r[12]),
 
       };
     })

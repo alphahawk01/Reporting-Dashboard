@@ -5,6 +5,7 @@ import { Fragment, useMemo, useState } from "react";
 import type { Recommendation } from "@/lib/recommendations/recommendationEngine";
 import type { TTGame } from "@/types/ttgame";
 import type { DownloadJob } from "@/lib/api/downloadJobs";
+import type { AutoDownloadAnalyst } from "@/lib/api/analysts";
 import RecommendationDetails from "./RecommendationDetails";
 
 const weekDays = [
@@ -21,6 +22,7 @@ interface Props {
   fixture: TTGame;
   recommendations: Recommendation[];
   downloadJob?: DownloadJob | null;
+  autoAnalysts?: AutoDownloadAnalyst[];
 
   onAssign: (
     recommendation: Recommendation
@@ -38,6 +40,7 @@ export default function RecommendationTable({
   fixture,
   recommendations,
   downloadJob,
+  autoAnalysts = [],
   onAssign,
   onAssignDay,
   onAssignOther,
@@ -45,6 +48,29 @@ export default function RecommendationTable({
 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [dayFilter, setDayFilter] = useState<string[]>([]);
+
+  // Build a normalised lookup for device status from the AutoDownload
+  // analyst list. An analyst "has a device" if they have either a home
+  // or office computer assigned.
+  const deviceStatus = useMemo(() => {
+    const map = new Map<string, { hasDevice: boolean; location: string }>();
+
+    for (const a of autoAnalysts) {
+      const key = a.name.trim().toLowerCase();
+      const hasHome = !!a.homeComputer;
+      const hasOffice = !!a.officeComputer;
+      const hasDevice = hasHome || hasOffice;
+
+      let location = "";
+      if (hasHome && hasOffice) location = "Home + Office";
+      else if (hasOffice) location = "Office";
+      else if (hasHome) location = "Home";
+
+      map.set(key, { hasDevice, location });
+    }
+
+    return map;
+  }, [autoAnalysts]);
 
   const toggleDay = (day: string) => {
     setDayFilter(prev =>
@@ -161,11 +187,38 @@ export default function RecommendationTable({
 
                       <div className="min-w-0 flex-1">
 
-                        <div
-                          className="truncate font-semibold text-white"
-                          title={r.analyst.name}
-                        >
-                          {r.analyst.name}
+                        <div className="flex items-center gap-1.5">
+                          <div
+                            className="truncate font-semibold text-white"
+                            title={r.analyst.name}
+                          >
+                            {r.analyst.name}
+                          </div>
+
+                          {/* DEVICE INDICATOR */}
+                          {(() => {
+                            const status = deviceStatus.get(
+                              r.analyst.name.trim().toLowerCase()
+                            );
+                            if (!status || !status.hasDevice) {
+                              return (
+                                <span
+                                  className="shrink-0 rounded bg-red-500/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-red-400"
+                                  title="No registered device"
+                                >
+                                  No PC
+                                </span>
+                              );
+                            }
+                            return (
+                              <span
+                                className="shrink-0 rounded bg-green-500/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-green-400"
+                                title={status.location}
+                              >
+                                {status.location}
+                              </span>
+                            );
+                          })()}
                         </div>
 
                         {r.evidence.affiliatedTeams &&

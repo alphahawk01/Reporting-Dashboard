@@ -98,7 +98,7 @@ export default function RecommendationDetails({
                     <tr className="border-b border-slate-800">
 
                         <td className="py-3">
-                            Times coded {fixture.home_team}
+                            Times coded {fixture.home_team} (last 5 weeks)
                         </td>
 
                         <td className="py-3 text-right">
@@ -112,7 +112,7 @@ export default function RecommendationDetails({
                     <tr className="border-b border-slate-800">
 
                         <td className="py-3">
-                            Times coded {fixture.away_team}
+                            Times coded {fixture.away_team} (last 5 weeks)
                         </td>
 
                         <td className="py-3 text-right">

@@ -134,19 +134,19 @@ export const overallGrades = [
       "A highly capable analyst demonstrating excellent performance, strong productivity and dependable results.",
   },
   {
-    min: 80,
+    min: 75,
     label: "Strong",
     description:
       "A reliable contributor who performs above expectations across most performance areas.",
   },
   {
-    min: 75,
+    min: 65,
     label: "Reliable",
     description:
       "Consistently meets expectations and delivers dependable results while continuing to develop.",
   },
   {
-    min: 60,
+    min: 50,
     label: "Developing",
     description:
       "Building experience and consistency. Continued improvement across key performance areas will increase overall performance.",

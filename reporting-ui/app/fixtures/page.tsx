@@ -16,7 +16,10 @@ import {
 } from "@/lib/api/analysts";
 
 import { assignFixture } from "@/lib/api/assignFixture";
-import { createDownloadJob } from "@/lib/api/downloadJobs";
+import {
+    createDownloadJob,
+    retryFailedDownloadJobs,
+} from "@/lib/api/downloadJobs";
 
 import {
     getHubConnection,
@@ -35,6 +38,45 @@ import { syncGamesToApi } from "@/lib/api/fixtures";
 import { supabase } from "@/lib/supabase";
 
 import type { TTGame } from "@/types/ttgame";
+
+
+/*
+ * Single source of truth for the composite key used to match a
+ * TT_Games row to an AutoDownload API fixture. Both systems assign
+ * unrelated game_key formats, so home/away/competition/round is the
+ * only identifier consistent across both.
+ *
+ * This MUST be used everywhere a composite is built (the unmatched-game
+ * sync effect AND the mergedFixtures merge). If two call sites normalise
+ * differently — e.g. one trims and the other doesn't — a row with a
+ * trailing space matches in one place and not the other, so it gets
+ * re-synced forever and stays stuck on "Checking..." while the download
+ * never advances past Pending.
+ *
+ * Normalisation: strip zero-width chars, collapse whitespace, trim,
+ * lowercase.
+ */
+function normaliseKeyPart(value: string | null | undefined): string {
+    return (value ?? "")
+        .replace(/[\u200B-\u200D\uFEFF]/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+}
+
+function keyFor(f: {
+    home_team?: string | null;
+    away_team?: string | null;
+    Competition?: string | null;
+    Round?: string | null;
+}): string {
+    return [
+        normaliseKeyPart(f.home_team),
+        normaliseKeyPart(f.away_team),
+        normaliseKeyPart(f.Competition),
+        normaliseKeyPart(f.Round),
+    ].join("|");
+}
 
 
 export default function FixturesPage() {
@@ -91,6 +133,12 @@ export default function FixturesPage() {
         updating,
         setUpdating,
     ] = useState<number | null>(null);
+
+
+    const [
+        retrying,
+        setRetrying,
+    ] = useState(false);
 
 
     const [
@@ -577,18 +625,22 @@ export default function FixturesPage() {
         let cancelled = false;
 
         async function syncUnmatchedGames() {
-            // Build a set of composites that already exist in the API
+            // Build a set of composites that already exist in the API.
+            // Use the SAME normalisation as keyFor() in mergedFixtures
+            // (trim + lowercase + strip zero-width chars). If this differs
+            // from keyFor(), a game that IS already in the API but has a
+            // trailing space on one side gets mis-classified as "unmatched"
+            // and re-synced forever, while the merged view (which trims)
+            // disagrees — leaving fixtures stuck on "Checking..." and the
+            // download never advancing past Pending.
             const apiComposites = new Set(
-                fixtures.map(f =>
-                    `${(f.home_team ?? "").toLowerCase()}|${(f.away_team ?? "").toLowerCase()}|${(f.Competition ?? "").toLowerCase()}|${(f.Round ?? "").toLowerCase()}`
-                )
+                fixtures.map(f => keyFor(f))
             );
 
             // Find TT_Games with videoURL that aren't in the API
             const unmatched = allGames.filter(g => {
                 if (!g.videoURL || g.videoURL.trim() === "") return false;
-                const key = `${(g.home_team ?? "").toLowerCase()}|${(g.away_team ?? "").toLowerCase()}|${(g.Competition ?? "").toLowerCase()}|${(g.Round ?? "").toLowerCase()}`;
-                return !apiComposites.has(key);
+                return !apiComposites.has(keyFor(g));
             });
 
             if (unmatched.length === 0 || cancelled) return;
@@ -653,17 +705,6 @@ export default function FixturesPage() {
         // clobber the real one.
         const autoByKey = new Map<string, AutoDownloadFixture>();
         const fixtureByKey = new Map<string, TTGame>();
-
-        function keyFor(f: {
-            home_team?: string | null;
-            away_team?: string | null;
-            Competition?: string | null;
-            Round?: string | null;
-        }): string {
-
-            return `${(f.home_team ?? "").trim().toLowerCase()}|${(f.away_team ?? "").trim().toLowerCase()}|${(f.Competition ?? "").trim().toLowerCase()}|${(f.Round ?? "").trim().toLowerCase()}`;
-
-        }
 
         fixtures.forEach((f, index) => {
 
@@ -1168,6 +1209,57 @@ export default function FixturesPage() {
 
 
     /*
+     * RETRY FAILED DOWNLOADS
+     *
+     * A failed download job sits at status "Failed" and the desktop
+     * agent only ever polls for "Queued" jobs, so it never retries on
+     * its own. This asks the API to flip every failed job back to
+     * "Queued" (clearing the old error/progress); the agent then picks
+     * them up on its next poll. We refresh afterwards so the UI reflects
+     * the requeued state.
+     */
+    async function handleRetryFailed() {
+
+        try {
+
+            setRetrying(true);
+
+            const result = await retryFailedDownloadJobs();
+
+            await refreshFixtures();
+
+            if (result.requeued === 0) {
+                alert("No failed downloads to retry.");
+            } else {
+                alert(
+                    `Requeued ${result.requeued} failed download` +
+                    `${result.requeued === 1 ? "" : "s"}. ` +
+                    `The agent will retry ${result.requeued === 1 ? "it" : "them"} shortly.`
+                );
+            }
+
+        }
+        catch (err) {
+
+            console.error("Retry failed downloads failed:", err);
+
+            alert(
+                err instanceof Error
+                    ? err.message
+                    : "Retry failed."
+            );
+
+        }
+        finally {
+
+            setRetrying(false);
+
+        }
+
+    }
+
+
+    /*
      * LOADING
      */
 
@@ -1215,6 +1307,14 @@ export default function FixturesPage() {
             ({ autoFixture }) =>
                 autoFixture?.status ===
                 "Downloading"
+        ).length;
+
+
+    const failedCount =
+        filteredFixtures.filter(
+            ({ autoFixture }) =>
+                autoFixture?.status ===
+                "Failed"
         ).length;
 
 
@@ -1471,7 +1571,7 @@ export default function FixturesPage() {
                 grid
                 grid-cols-1
                 gap-4
-                md:grid-cols-4
+                md:grid-cols-5
                 "
             >
 
@@ -1508,6 +1608,64 @@ export default function FixturesPage() {
                     }
                     colour="text-green-600"
                 />
+
+
+                {/* FAILED + RETRY */}
+                <div
+                    className="
+                    rounded-2xl
+                    border
+                    border-slate-200
+                    bg-white
+                    p-5
+                    shadow-sm
+                    flex
+                    flex-col
+                    justify-between
+                    "
+                >
+                    <div>
+                        <div className="text-sm font-medium text-slate-500">
+                            Failed
+                        </div>
+                        <div
+                            className={`mt-1 text-3xl font-bold ${
+                                failedCount > 0
+                                    ? "text-red-600"
+                                    : "text-slate-900"
+                            }`}
+                        >
+                            {failedCount}
+                        </div>
+                    </div>
+
+                    <button
+                        onClick={handleRetryFailed}
+                        disabled={retrying || failedCount === 0}
+                        className="
+                            mt-3
+                            w-full
+                            rounded-lg
+                            bg-red-600
+                            px-3
+                            py-2
+                            text-sm
+                            font-semibold
+                            text-white
+                            transition
+                            hover:bg-red-500
+                            disabled:cursor-not-allowed
+                            disabled:bg-slate-300
+                        "
+                        title={
+                            failedCount === 0
+                                ? "No failed downloads"
+                                : "Requeue all failed downloads"
+                        }
+                    >
+                        {retrying ? "Retrying..." : "Retry failed"}
+                    </button>
+                </div>
 
             </div>
 

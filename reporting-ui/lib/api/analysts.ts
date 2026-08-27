@@ -103,6 +103,35 @@ export async function deleteAnalyst(
 
     return true;
 }
+
+
+export async function renameAnalyst(
+    id: number,
+    firstName?: string,
+    lastName?: string
+): Promise<{ id: number; name: string; firstName: string; lastName: string }> {
+
+    const res = await fetch(
+        `${API_URL}/api/analysts/${id}/name`,
+        {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                ...(firstName ? { firstName } : {}),
+                ...(lastName ? { lastName } : {}),
+            }),
+        }
+    );
+
+    if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(
+            `Failed renaming analyst (${res.status}): ${errorText}`
+        );
+    }
+
+    return res.json();
+}
 export async function updateHomeComputer(
     analystId: number,
     computerId: number | null,

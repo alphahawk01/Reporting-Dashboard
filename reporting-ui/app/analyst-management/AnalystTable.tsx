@@ -42,6 +42,11 @@ type Props = {
     onDelete: (
         analystId: number
     ) => void;
+
+    onRename: (
+        analystId: number,
+        currentName: string
+    ) => void;
 };
 
 export default function AnalystTable({
@@ -51,6 +56,7 @@ export default function AnalystTable({
     onHomeComputerChange,
     onOfficeComputerChange,
     onDelete,
+    onRename,
 }: Props) {
 
     const assignedHomeComputerIds =
@@ -419,6 +425,24 @@ export default function AnalystTable({
                                     <td className="
                                         text-center
                                     ">
+
+                                        <button
+                                            onClick={() =>
+                                                onRename(
+                                                    analyst.id,
+                                                    analyst.name
+                                                )
+                                            }
+                                            className="
+                                                rounded-lg
+                                                p-2
+                                                text-blue-600
+                                                hover:bg-blue-50
+                                            "
+                                            title="Rename Analyst"
+                                        >
+                                            ✏️
+                                        </button>
 
                                         <button
                                             onClick={() =>

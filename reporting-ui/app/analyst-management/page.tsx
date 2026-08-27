@@ -7,6 +7,7 @@ import {
     getAnalysts,
     updateHomeComputer,
     updateOfficeComputer,
+    renameAnalyst,
     type Analyst,
 } from "@/lib/api/analysts";
 
@@ -64,6 +65,19 @@ export default function AnalystsPage() {
             currentAnalyst: "",
             newAnalyst: "",
             computerName: "",
+        });
+
+    const [renameModal, setRenameModal] =
+        useState<{
+            open: boolean;
+            analystId: number;
+            firstName: string;
+            lastName: string;
+        }>({
+            open: false,
+            analystId: 0,
+            firstName: "",
+            lastName: "",
         });
 
 
@@ -596,6 +610,42 @@ export default function AnalystsPage() {
 
 
     // ==================================================
+    // RENAME ANALYST
+    // ==================================================
+
+    function openRenameModal(
+        analystId: number,
+        currentName: string
+    ) {
+        const parts = currentName.trim().split(/\s+/);
+        const firstName = parts[0] ?? "";
+        const lastName = parts.slice(1).join(" ") ?? "";
+
+        setRenameModal({
+            open: true,
+            analystId,
+            firstName,
+            lastName,
+        });
+    }
+
+    async function confirmRename() {
+        try {
+            await renameAnalyst(
+                renameModal.analystId,
+                renameModal.firstName.trim() || undefined,
+                renameModal.lastName.trim() || undefined
+            );
+
+            setRenameModal(curr => ({ ...curr, open: false }));
+            await load();
+        } catch (err: any) {
+            alert(err?.message || "Failed renaming analyst");
+        }
+    }
+
+
+    // ==================================================
     // LOADING
     // ==================================================
 
@@ -714,6 +764,7 @@ export default function AnalystsPage() {
 
                     }
                 }
+                onRename={openRenameModal}
             />
 
 
@@ -742,6 +793,77 @@ export default function AnalystsPage() {
                     confirmReassign
                 }
             />
+
+            {/* RENAME MODAL */}
+            {renameModal.open && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+                    onClick={() => setRenameModal(c => ({ ...c, open: false }))}
+                >
+                    <div
+                        className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <h3 className="mb-4 text-lg font-bold text-gray-900">
+                            Rename Analyst
+                        </h3>
+
+                        <div className="mb-3">
+                            <label className="mb-1 block text-sm font-medium text-gray-700">
+                                First Name
+                            </label>
+                            <input
+                                type="text"
+                                value={renameModal.firstName}
+                                onChange={e =>
+                                    setRenameModal(c => ({
+                                        ...c,
+                                        firstName: e.target.value,
+                                    }))
+                                }
+                                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none"
+                                autoFocus
+                            />
+                        </div>
+
+                        <div className="mb-5">
+                            <label className="mb-1 block text-sm font-medium text-gray-700">
+                                Last Name
+                            </label>
+                            <input
+                                type="text"
+                                value={renameModal.lastName}
+                                onChange={e =>
+                                    setRenameModal(c => ({
+                                        ...c,
+                                        lastName: e.target.value,
+                                    }))
+                                }
+                                className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none"
+                            />
+                        </div>
+
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setRenameModal(c => ({ ...c, open: false }))}
+                                className="flex-1 rounded-lg border border-gray-300 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmRename}
+                                disabled={
+                                    !renameModal.firstName.trim() &&
+                                    !renameModal.lastName.trim()
+                                }
+                                className="flex-1 rounded-lg bg-blue-600 py-2.5 text-sm font-semibold text-white hover:bg-blue-500 disabled:bg-gray-300"
+                            >
+                                Save
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
         </div>
 

@@ -82,6 +82,54 @@ function normaliseTeamName(
 }
 
 // ------------------------------------------------
+// RECENT TEAM EXPERIENCE (LAST 5 WEEKS)
+// ------------------------------------------------
+// Counts how many times an analyst coded a given team in the 5 weeks
+// leading up to (but not including) the fixture week. Uses the same
+// window as the "matches coded in the last 5 weeks" recent-experience
+// metric so the two stay consistent. Matches the team on either the
+// home OR away side (the analyst may have coded that team in either
+// role) and confirms the analyst actually coded that specific side.
+const RECENT_WEEKS_WINDOW = 5;
+
+function countRecentTeamGames(
+    historicalGames: TTGame[],
+    analystName: string,
+    teamName: string | null | undefined,
+    fixtureWeek: number
+): number {
+    const team = normaliseTeamName(teamName);
+
+    if (!team || Number.isNaN(fixtureWeek)) {
+        return 0;
+    }
+
+    const analyst = normaliseTeamName(analystName);
+
+    return historicalGames.filter((game) => {
+        const gameWeek = Number(game.Week);
+
+        const inWindow =
+            gameWeek >= fixtureWeek - RECENT_WEEKS_WINDOW &&
+            gameWeek < fixtureWeek;
+
+        if (!inWindow) {
+            return false;
+        }
+
+        const codedHome =
+            normaliseTeamName(game.home_team) === team &&
+            normaliseTeamName(game.home_allocated) === analyst;
+
+        const codedAway =
+            normaliseTeamName(game.away_team) === team &&
+            normaliseTeamName(game.away_allocated) === analyst;
+
+        return codedHome || codedAway;
+    }).length;
+}
+
+// ------------------------------------------------
 // BUILD RECOMMENDATIONS
 // ------------------------------------------------
 
@@ -308,15 +356,26 @@ const score =
                         fixture.Competition ?? ""
                     ] ?? 0,
 
+                // Count how many times this analyst has coded the
+                // home/away team in the LAST 5 WEEKS only, not all-time.
+                // A team coded 3 times 15 weeks ago isn't relevant to
+                // who should code them now, so recency matters more than
+                // lifetime totals for this allocation decision.
                 homeTeamGames:
-                    context.analyst.teams[
-                        fixture.home_team ?? ""
-                    ]?.count ?? 0,
+                    countRecentTeamGames(
+                        historicalGames,
+                        analyst.name,
+                        fixture.home_team,
+                        Number(fixture.Week)
+                    ),
 
                 awayTeamGames:
-                    context.analyst.teams[
-                        fixture.away_team ?? ""
-                    ]?.count ?? 0,
+                    countRecentTeamGames(
+                        historicalGames,
+                        analyst.name,
+                        fixture.away_team,
+                        Number(fixture.Week)
+                    ),
 
                 recentGames:
                     historicalGames.filter(

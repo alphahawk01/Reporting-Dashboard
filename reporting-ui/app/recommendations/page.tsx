@@ -105,6 +105,8 @@ export default function RecommendationPage() {
 
   const [selectedWeek, setSelectedWeek] = useState(1);
 
+  const [fixtureSearch, setFixtureSearch] = useState("");
+
   const [loading, setLoading] = useState(true);
 
   const [analysts, setAnalysts] = useState<AnalystMetrics[]>([]);
@@ -468,6 +470,29 @@ export default function RecommendationPage() {
     return sorted;
   }, [fixtures, sortField, sortDirection]);
 
+  // Search filter for the Fixtures card — matches home/away team,
+  // competition, round or game_key. Applied after sorting so the list
+  // stays in the user's chosen order while narrowed to matches.
+  const visibleFixtures = useMemo(() => {
+    const term = fixtureSearch.trim().toLowerCase();
+
+    if (!term) return sortedFixtures;
+
+    return sortedFixtures.filter(f => {
+      const haystack = [
+        f.home_team,
+        f.away_team,
+        f.Competition,
+        f.Round,
+        f.game_key,
+      ]
+        .map(v => (v ?? "").toString().toLowerCase())
+        .join(" ");
+
+      return haystack.includes(term);
+    });
+  }, [sortedFixtures, fixtureSearch]);
+
   const fixturesWithDownloads = useMemo(() => {
 
     if (!Array.isArray(autoFixtures)) {
@@ -637,6 +662,142 @@ export default function RecommendationPage() {
     analystAffiliations,
   ]);
 
+  // --------------------------------------------------
+  // ALREADY-ALLOCATED IN THIS COMPETITION + ROUND
+  // --------------------------------------------------
+  // Once an analyst has been given a game in a competition round, they
+  // shouldn't keep appearing as a recommendation for every other fixture
+  // in the same round — otherwise whoever is allocating just sees the
+  // same top names on every fixture. We derive who's already been
+  // allocated within the selected fixture's Competition+Round (from the
+  // AutoDownload API assignments) and (a) hide them from the
+  // recommendation list and (b) surface them in a summary section so the
+  // allocator can see the coverage so far.
+  const allocatedInRound = useMemo(() => {
+    if (!selectedFixture) return [];
+
+    const comp = (selectedFixture.Competition ?? "").trim().toLowerCase();
+    const round = (selectedFixture.Round ?? "").trim().toLowerCase();
+    const selectedKey = selectedFixture.game_key;
+
+    // All TT_Games in the same competition + round.
+    const roundGames = historicalGames.filter(
+      g =>
+        (g.Competition ?? "").trim().toLowerCase() === comp &&
+        (g.Round ?? "").trim().toLowerCase() === round
+    );
+
+    const results: {
+      analystName: string;
+      analystKey: string;
+      home_team: string;
+      away_team: string;
+      isSelected: boolean;
+    }[] = [];
+
+    // De-dupe by analyst — an analyst assigned to more than one game in
+    // the round only needs to show once (we keep their first fixture).
+    const seen = new Set<string>();
+
+    for (const game of roundGames) {
+      const auto = findAutoFixture(autoFixtures, game);
+      const analystName = (auto as any)?.analyst as string | null | undefined;
+
+      if (!analystName || !analystName.trim()) continue;
+      if (isExcludedAnalystName(analystName)) continue;
+
+      const analystKey = analystName.trim().toLowerCase();
+      if (seen.has(analystKey)) continue;
+      seen.add(analystKey);
+
+      results.push({
+        analystName,
+        analystKey,
+        home_team: game.home_team,
+        away_team: game.away_team,
+        isSelected: game.game_key === selectedKey,
+      });
+    }
+
+    return results.sort((a, b) =>
+      a.analystName.localeCompare(b.analystName)
+    );
+  }, [selectedFixture, historicalGames, autoFixtures]);
+
+  // Normalised set of analysts already allocated to OTHER fixtures in
+  // this round (excludes whoever is on the currently selected fixture so
+  // the current allocation still displays correctly).
+  const allocatedElsewhereInRound = useMemo(() => {
+    const set = new Set<string>();
+    for (const entry of allocatedInRound) {
+      if (!entry.isSelected) {
+        set.add(entry.analystKey);
+      }
+    }
+    return set;
+  }, [allocatedInRound]);
+
+  // --------------------------------------------------
+  // DAY-BASED EXCLUSION
+  // --------------------------------------------------
+  // If an analyst already has a fixture assigned for the same working
+  // day as the selected fixture (based on the analyst's availability,
+  // NOT the fixture's match date), they shouldn't appear in the
+  // recommendations. This stops the same person always topping the list
+  // when they're already booked on that day.
+  //
+  // The "day" is the expected_day on the TT_Games row — it represents
+  // which day of the week the work is scheduled for (e.g. "Tuesday").
+  // We look at ALL fixtures in the same week that already have an
+  // analyst assigned and share the same expected_day as the selected
+  // fixture.
+  const busyOnSameDay = useMemo(() => {
+    const set = new Set<string>();
+
+    if (!selectedFixture || !selectedFixture.expected_day) return set;
+
+    const targetDay = (selectedFixture.expected_day ?? "")
+      .trim()
+      .toLowerCase();
+
+    if (!targetDay) return set;
+
+    const targetWeek = Number(selectedFixture.Week);
+
+    // Find all TT_Games in the same week with the same expected_day
+    // that already have an analyst assigned (via the API).
+    for (const game of historicalGames) {
+      if (game.game_key === selectedFixture.game_key) continue;
+      if (Number(game.Week) !== targetWeek) continue;
+
+      const gameDay = (game.expected_day ?? "").trim().toLowerCase();
+      if (gameDay !== targetDay) continue;
+
+      const auto = findAutoFixture(autoFixtures, game);
+      const analystName = (auto as any)?.analyst as string | null | undefined;
+
+      if (!analystName || !analystName.trim()) continue;
+      if (isExcludedAnalystName(analystName)) continue;
+
+      set.add(analystName.trim().toLowerCase());
+    }
+
+    return set;
+  }, [selectedFixture, historicalGames, autoFixtures]);
+
+  // Recommendations with analysts already allocated elsewhere in the
+  // round OR already booked on the same day removed.
+  const visibleRecommendations = useMemo(() => {
+    return selectedRecommendation.filter(
+      r => {
+        const key = r.analyst.name.trim().toLowerCase();
+        if (allocatedElsewhereInRound.has(key)) return false;
+        if (busyOnSameDay.has(key)) return false;
+        return true;
+      }
+    );
+  }, [selectedRecommendation, allocatedElsewhereInRound, busyOnSameDay]);
+
   async function handleAssign(
     recommendation: Recommendation
   ) {
@@ -645,14 +806,49 @@ export default function RecommendationPage() {
 
     try {
 
-      const autoAnalyst = autoAnalysts.find(
-        a =>
-          a.name.trim().toLowerCase() ===
-          recommendation.analyst.name.trim().toLowerCase()
+      const recName = recommendation.analyst.name.trim().toLowerCase();
+
+      // Try exact match first, then normalised (collapse whitespace,
+      // strip zero-width chars), then "starts with" / "contains" as a
+      // last-resort fuzzy match.  The recommendation names come from
+      // Supabase (TT_Games / Deputy) while the AutoDownload API has its
+      // own analyst table — tiny spelling differences (hyphens, middle
+      // initials, trailing spaces) can break exact matching.
+      let autoAnalyst = autoAnalysts.find(
+        a => a.name.trim().toLowerCase() === recName
       );
 
       if (!autoAnalyst) {
-        alert("Analyst not found in AutoDownload.");
+        const norm = (s: string) =>
+          s.replace(/[\u200B-\u200D\uFEFF]/g, "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase();
+
+        const recNorm = norm(recommendation.analyst.name);
+
+        autoAnalyst = autoAnalysts.find(
+          a => norm(a.name) === recNorm
+        );
+      }
+
+      if (!autoAnalyst) {
+        // Partial: check if either name starts with the other (handles
+        // "Jimmy Dwyer" vs "Jimmy Dwyer (NEW)" etc.)
+        autoAnalyst = autoAnalysts.find(
+          a => {
+            const apiName = a.name.trim().toLowerCase();
+            return apiName.startsWith(recName) || recName.startsWith(apiName);
+          }
+        );
+      }
+
+      if (!autoAnalyst) {
+        alert(
+          `Analyst "${recommendation.analyst.name}" not found in AutoDownload.\n\n` +
+          `Make sure this analyst has been added to the AutoDownload system ` +
+          `(Computers > Analysts) with the same name as they appear in the roster.`
+        );
         return;
       }
 
@@ -745,14 +941,41 @@ export default function RecommendationPage() {
     const { recommendation, day: dayName, date: scheduledDateStr } = dayAssignConfirm;
 
     try {
-      const autoAnalyst = autoAnalysts.find(
-        a =>
-          a.name.trim().toLowerCase() ===
-          recommendation.analyst.name.trim().toLowerCase()
+      const recName = recommendation.analyst.name.trim().toLowerCase();
+
+      let autoAnalyst = autoAnalysts.find(
+        a => a.name.trim().toLowerCase() === recName
       );
 
       if (!autoAnalyst) {
-        alert("Analyst not found in AutoDownload.");
+        const norm = (s: string) =>
+          s.replace(/[\u200B-\u200D\uFEFF]/g, "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase();
+
+        const recNorm = norm(recommendation.analyst.name);
+
+        autoAnalyst = autoAnalysts.find(
+          a => norm(a.name) === recNorm
+        );
+      }
+
+      if (!autoAnalyst) {
+        autoAnalyst = autoAnalysts.find(
+          a => {
+            const apiName = a.name.trim().toLowerCase();
+            return apiName.startsWith(recName) || recName.startsWith(apiName);
+          }
+        );
+      }
+
+      if (!autoAnalyst) {
+        alert(
+          `Analyst "${recommendation.analyst.name}" not found in AutoDownload.\n\n` +
+          `Make sure this analyst has been added to the AutoDownload system ` +
+          `(Computers > Analysts) with the same name as they appear in the roster.`
+        );
         setDayAssignConfirm(null);
         return;
       }
@@ -1015,6 +1238,25 @@ export default function RecommendationPage() {
               ))}
             </select>
 
+            <div className="relative mb-3 shrink-0">
+              <input
+                type="text"
+                value={fixtureSearch}
+                onChange={(e) => setFixtureSearch(e.target.value)}
+                placeholder="Search team, competition or round..."
+                className="w-full rounded border border-slate-700 bg-slate-900 py-2 pl-3 pr-8 text-sm placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+              />
+              {fixtureSearch && (
+                <button
+                  onClick={() => setFixtureSearch("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                  title="Clear search"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+
             {loading ? (
               <div>Loading...</div>
             ) : (
@@ -1115,7 +1357,14 @@ export default function RecommendationPage() {
                 {/* ROWS */}
 
                 <div className="flex-1 overflow-y-auto">
-                  {sortedFixtures.map((fixture, index) => {
+                  {visibleFixtures.length === 0 && (
+                    <div className="px-3 py-6 text-center text-xs text-slate-500">
+                      {fixtureSearch
+                        ? "No fixtures match your search."
+                        : "No fixtures for this week."}
+                    </div>
+                  )}
+                  {visibleFixtures.map((fixture, index) => {
                     const autoFixture =
                       (fixture.game_key
                         ? autoFixturesByGameKey.get(fixture.game_key)
@@ -1333,16 +1582,64 @@ export default function RecommendationPage() {
 
                 <RecommendationTable
                   fixture={selectedFixture}
-                  recommendations={selectedRecommendation}
+                  recommendations={visibleRecommendations}
                   downloadJob={
                     downloadJobs.find(
                       job => job.gameKey === selectedFixture.game_key
                     ) ?? null
                   }
+                  autoAnalysts={autoAnalysts}
                   onAssign={handleAssign}
                   onAssignDay={handleAssignDay}
                   onAssignOther={() => setManualAssignOpen(true)}
                 />
+
+                {/* ALLOCATED IN THIS COMPETITION + ROUND */}
+                <div className="mt-4 rounded-xl border border-slate-700 bg-slate-900 p-4">
+
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-white">
+                      Allocated this round
+                    </h3>
+                    <span className="text-[11px] text-slate-400">
+                      {selectedFixture.Competition} • Round {selectedFixture.Round}
+                    </span>
+                  </div>
+
+                  {allocatedInRound.length === 0 ? (
+                    <div className="text-xs text-slate-500">
+                      No analysts allocated in this round yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {allocatedInRound.map((entry) => (
+                        <div
+                          key={entry.analystKey}
+                          className={`flex items-center justify-between rounded-md border px-3 py-2 text-sm ${
+                            entry.isSelected
+                              ? "border-sky-500/40 bg-sky-500/10"
+                              : "border-slate-700 bg-slate-800/50"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="font-medium text-white truncate">
+                              {entry.analystName}
+                            </span>
+                            {entry.isSelected && (
+                              <span className="shrink-0 rounded bg-sky-500/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-sky-300">
+                                This fixture
+                              </span>
+                            )}
+                          </div>
+                          <div className="ml-3 shrink-0 truncate text-xs text-slate-400">
+                            {entry.home_team} v {entry.away_team}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                </div>
 
               </>
             ) : (
