@@ -1,0 +1,45 @@
+name: Auto-merge platform-ui to main
+
+# Whenever you push to platform-ui, this fast-forwards main to match,
+# which then triggers deploy.yml (deploy to GitHub Pages). So a plain
+# `git push` on platform-ui publishes your UI changes automatically.
+
+on:
+  push:
+    branches:
+      - platform-ui
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-main
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge platform-ui into main
+        run: |
+          git checkout main
+          # Fast-forward when possible; fall back to a merge commit if the
+          # branches have diverged so the push never silently fails.
+          if git merge --ff-only origin/platform-ui; then
+            echo "Fast-forwarded main to platform-ui."
+          else
+            echo "Branches diverged; creating a merge commit."
+            git merge --no-edit origin/platform-ui
+          fi
+          git push origin main
