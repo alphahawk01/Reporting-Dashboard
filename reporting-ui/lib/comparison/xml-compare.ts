@@ -14,6 +14,13 @@ export type Instance = {
   id: string;
   start: number;
   end: number;
+  /**
+   * The "code time" — the midpoint between start and end. Coders apply a
+   * lead/lag window around the actual event (start = lead, end = lag), so
+   * the true moment of the coded action is halfway between them. This is
+   * what's shown on the timeline and used for matching.
+   */
+  mid: number;
   team: string;
   /** jersey number parsed from the code label, e.g. 10 */
   playerNumber: number | null;
@@ -115,6 +122,50 @@ function parseNumber(...candidates: string[]): number | null {
 }
 
 /**
+ * Stat-specific fixed offsets (seconds after start) for the code time.
+ * Some stats are coded with a consistent lead-in rather than sitting at
+ * the midpoint of the window. For these, code time = start + offset.
+ * Everything not listed here uses the midpoint of start/end.
+ */
+// Order matters: codeTime() uses the FIRST keyword the stat text
+// includes, so list more specific phrases before broader ones (e.g.
+// "around ground bounce" before any generic "bounce").
+const STAT_START_OFFSETS: { keyword: string; offset: number }[] = [
+  { keyword: "uncontested mark", offset: 5 },
+
+  // Around-the-ground bounce (sometimes coded as "Ball Up") — 9s.
+  // Must come before centre-bounce so "bounce" phrasing resolves here.
+  { keyword: "around the ground bounce", offset: 9 },
+  { keyword: "around ground bounce", offset: 9 },
+  { keyword: "ball up", offset: 9 },
+
+  // Centre bounce — 6s.
+  { keyword: "centre bounce", offset: 6 },
+  { keyword: "center bounce", offset: 6 },
+
+  // Throw ins (aka boundary throws) — 7s.
+  { keyword: "throw in", offset: 7 },
+  { keyword: "throw-in", offset: 7 },
+  { keyword: "boundary throw", offset: 7 },
+];
+
+/**
+ * The "code time" for an instance — the moment the action actually
+ * happened within the lead/lag window.
+ *   - Stats with a fixed offset (see STAT_START_OFFSETS): start + offset,
+ *     clamped so it never runs past the window end.
+ *   - Everything else: the midpoint of start and end.
+ */
+function codeTime(stat: string, start: number, end: number): number {
+  const s = normStat(stat);
+  const rule = STAT_START_OFFSETS.find((r) => s.includes(r.keyword));
+  if (rule) {
+    return Math.min(start + rule.offset, end);
+  }
+  return (start + end) / 2;
+}
+
+/**
  * Parse a SportsCode XML string into instances.
  * Robust to leading junk, missing groups, and multiple stat labels
  * (first non Team/Player label wins as the stat).
@@ -165,20 +216,32 @@ export function parseInstances(xml: string): Instance[] {
 
     if (Number.isNaN(start)) continue;
 
+    const safeEnd = Number.isNaN(end) ? start : end;
+    const cleanStat = stat.trim();
+
+    // Code time = the actual moment of the coded action within the
+    // lead/lag window. Most stats sit at the midpoint, but some stats
+    // are coded with a consistent fixed offset from the start instead
+    // (see codeTime()).
+    const mid = codeTime(cleanStat, start, safeEnd);
+
     instances.push({
       id,
       start,
-      end: Number.isNaN(end) ? start : end,
+      end: safeEnd,
+      mid,
       team: team.trim(),
       playerNumber,
       playerRaw,
-      stat: stat.trim(),
+      stat: cleanStat,
       category: category.trim(),
       code,
     });
   }
 
-  instances.sort((a, b) => a.start - b.start);
+  // Sort by code time (midpoint) so the timeline reflects the actual
+  // coded moment rather than the lead-in point.
+  instances.sort((a, b) => a.mid - b.mid);
   return instances;
 }
 
@@ -270,7 +333,7 @@ export function canonicaliseTeams(
   const coOccur = new Map<string, number>(); // key: `${mTeam}|||${aTeam}`
   for (const m of master) {
     for (const a of analyst) {
-      if (Math.abs(a.start - m.start) > tolerance) continue;
+      if (Math.abs(a.mid - m.mid) > tolerance) continue;
       const statOk = normStat(m.stat) === normStat(a.stat);
       const playerOk =
         m.playerNumber != null &&
@@ -362,10 +425,20 @@ export function compareInstances(
       return { teamOk: true, playerOk: true, statOk: true, event: true };
     }
     const teamOk = normTeam(m.team) === normTeam(a.team);
-    const playerOk =
-      m.playerNumber != null &&
-      a.playerNumber != null &&
-      m.playerNumber === a.playerNumber;
+
+    // Team-level stats (e.g. "Rushed Behinds") are attributed to a team but
+    // NOT a specific player, so neither file records a jersey number. When
+    // BOTH sides have no player number, player attribution doesn't apply —
+    // treat it as agreeing so a correct team + stat + time counts as exact
+    // rather than being downgraded to "wrong player".
+    const noPlayerEitherSide =
+      m.playerNumber == null && a.playerNumber == null;
+    const playerOk = noPlayerEitherSide
+      ? true
+      : m.playerNumber != null &&
+        a.playerNumber != null &&
+        m.playerNumber === a.playerNumber;
+
     return { teamOk, playerOk, statOk, event: false };
   };
 
@@ -408,7 +481,7 @@ export function compareInstances(
     const m = master[mi];
     for (let ai = 0; ai < analyst.length; ai++) {
       const a = analyst[ai];
-      const delta = Math.abs(a.start - m.start);
+      const delta = Math.abs(a.mid - m.mid);
       if (delta > tolerance) continue;
       const q = quality(m, a);
       if (q === 0) continue; // not a plausible match — skip
@@ -467,10 +540,11 @@ export function compareInstances(
     });
   }
 
-  // Sort rows by the timeline (use whichever instance is present).
+  // Sort rows by the timeline (code time / midpoint of whichever
+  // instance is present).
   rows.sort((r1, r2) => {
-    const t1 = r1.master?.start ?? r1.analyst?.start ?? 0;
-    const t2 = r2.master?.start ?? r2.analyst?.start ?? 0;
+    const t1 = r1.master?.mid ?? r1.analyst?.mid ?? 0;
+    const t2 = r2.master?.mid ?? r2.analyst?.mid ?? 0;
     return t1 - t2;
   });
 

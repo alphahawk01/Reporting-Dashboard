@@ -457,11 +457,10 @@ export default function AccuracyComparePage() {
     const smaller = files.reduce((a, b) =>
       b.instances.length < a.instances.length ? b : a
     );
-    const starts = smaller.instances.map((i) => i.start);
-    const ends = smaller.instances.map((i) => i.end);
+    const mids = smaller.instances.map((i) => i.mid);
     return {
-      start: Math.min(...starts),
-      end: Math.max(...ends),
+      start: Math.min(...mids),
+      end: Math.max(...mids),
       source: smaller.name,
     };
   }, [master, analyst]);
@@ -479,7 +478,7 @@ export default function AccuracyComparePage() {
   }, [rangeMode, manualStart, manualEnd, analystWindow]);
 
   const inRange = (i: Instance) =>
-    i.start >= effectiveRange.start && i.start <= effectiveRange.end;
+    i.mid >= effectiveRange.start && i.mid <= effectiveRange.end;
 
   // Canonicalise team names to Home/Away ONCE, so team filtering and the
   // player breakdown use the same labels the comparison produces. Without
@@ -1601,11 +1600,24 @@ function TimelineCell({
       </div>
     );
   }
+
+  // Colour the whole cell by team: Home = green, Away = orange (teams
+  // are canonicalised to Home/Away). Anything else (Unknown /
+  // unattributed events) stays neutral.
+  const teamKey = instance.team.trim().toLowerCase();
+  const isHome = teamKey === "home";
+  const isAway = teamKey === "away";
+  const cellBg = isHome
+    ? "bg-emerald-50 border-emerald-200"
+    : isAway
+      ? "bg-orange-50 border-orange-200"
+      : "border-slate-200";
+
   return (
-    <div className="border-l border-slate-200 p-3">
+    <div className={`border-l p-3 ${cellBg}`}>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <span className="font-mono text-xs font-semibold text-slate-500">
-          {formatTime(instance.start)}
+          {formatTime(instance.mid)}
         </span>
         {delta != null && delta > 0 && (
           <span className="text-[10px] text-slate-400">
@@ -1616,10 +1628,10 @@ function TimelineCell({
           {instance.stat || instance.category || "—"}
         </span>
       </div>
-      <p className="text-xs text-slate-500">
+      <p className="text-xs font-medium text-slate-500">
         {instance.team}
         {instance.playerNumber != null && (
-          <span className="font-medium text-slate-700">
+          <span>
             {" "}
             · #{instance.playerNumber}
           </span>
