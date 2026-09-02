@@ -18,6 +18,7 @@ import {
   GitCompare,
   Globe,
   FileCheck2,
+  History,
 } from "lucide-react";
 
 const sections = [
@@ -127,6 +128,11 @@ const sections = [
         title: "Accuracy Comparison",
         href: "/accuracy-compare",
         icon: FileCheck2,
+      },
+      {
+        title: "Accuracy History",
+        href: "/accuracy-checks",
+        icon: History,
       },
     ],
   },

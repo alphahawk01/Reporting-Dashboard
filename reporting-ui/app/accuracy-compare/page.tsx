@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import {
   Upload,
@@ -14,10 +14,14 @@ import {
   ArrowRightLeft,
   Clock,
   Download,
+  Save,
 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { saveAccuracyCheck } from "@/lib/api/accuracyChecks";
 import {
   parseInstances,
   compareInstances,
+  canonicaliseTeams,
   formatTime,
   parseTime,
   type Instance,
@@ -395,6 +399,56 @@ export default function AccuracyComparePage() {
   const [manualStart, setManualStart] = useState("");
   const [manualEnd, setManualEnd] = useState("");
 
+  // Analyst allocation + save
+  const [analystNames, setAnalystNames] = useState<string[]>([]);
+  const [masterAnalyst, setMasterAnalyst] = useState("");
+  const [gradedAnalyst, setGradedAnalyst] = useState("");
+  const [matchLabel, setMatchLabel] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+
+  // Load the distinct analyst names (from Deputy roster) for the
+  // allocation dropdowns.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadNames() {
+      const names = new Set<string>();
+      const pageSize = 1000;
+      let from = 0;
+
+      while (true) {
+        const { data, error } = await supabase
+          .from("deputy_shifts")
+          .select("employee_name")
+          .range(from, from + pageSize - 1);
+
+        if (error) {
+          console.error("Failed loading analyst names:", error);
+          break;
+        }
+        if (!data || data.length === 0) break;
+
+        for (const r of data) {
+          const n = (r as any).employee_name?.trim();
+          if (n) names.add(n);
+        }
+
+        from += pageSize;
+        if (data.length < pageSize) break;
+      }
+
+      if (!cancelled) {
+        setAnalystNames(Array.from(names).sort((a, b) => a.localeCompare(b)));
+      }
+    }
+
+    loadNames();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const analystWindow = useMemo(() => {
     const files = [master, analyst].filter(
       (f): f is LoadedFile => !!f && f.instances.length > 0
@@ -427,29 +481,38 @@ export default function AccuracyComparePage() {
   const inRange = (i: Instance) =>
     i.start >= effectiveRange.start && i.start <= effectiveRange.end;
 
-  const result = useMemo(() => {
+  // Canonicalise team names to Home/Away ONCE, so team filtering and the
+  // player breakdown use the same labels the comparison produces. Without
+  // this, clicking a "Home"/"Away" filter would match none of the raw
+  // instances (which still carry the original club names).
+  const canonical = useMemo(() => {
     if (!master || !analyst) return null;
-    const m = master.instances.filter(inRange);
-    const a = analyst.instances.filter(inRange);
+    return canonicaliseTeams(master.instances, analyst.instances, tolerance);
+  }, [master, analyst, tolerance]);
+
+  const result = useMemo(() => {
+    if (!canonical) return null;
+    const m = canonical.master.filter(inRange);
+    const a = canonical.analyst.filter(inRange);
     return compareInstances(m, a, tolerance);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [master, analyst, tolerance, effectiveRange]);
+  }, [canonical, tolerance, effectiveRange]);
 
   const scopedResult = useMemo(() => {
-    if (!master || !analyst) return null;
+    if (!canonical) return null;
     const matchTeam = (i: Instance) =>
       teamFilter === "all" || i.team === teamFilter;
     const matchCat = (i: Instance) =>
       categoryFilter === "all" || i.category === categoryFilter;
-    const m = master.instances.filter(
+    const m = canonical.master.filter(
       (i) => inRange(i) && matchTeam(i) && matchCat(i)
     );
-    const a = analyst.instances.filter(
+    const a = canonical.analyst.filter(
       (i) => inRange(i) && matchTeam(i) && matchCat(i)
     );
     return compareInstances(m, a, tolerance);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [master, analyst, tolerance, effectiveRange, teamFilter, categoryFilter]);
+  }, [canonical, tolerance, effectiveRange, teamFilter, categoryFilter]);
 
   const insights = useMemo(
     () => (scopedResult ? generateInsights(scopedResult) : []),
@@ -509,7 +572,7 @@ export default function AccuracyComparePage() {
   // that only appear in the analyst are added but flagged as incorrect.
   // Respects the active time-range + team + category filters.
   const playerTable = useMemo(() => {
-    if (!master || !analyst) return [];
+    if (!canonical) return [];
 
     const inScope = (i: Instance) =>
       inRange(i) && (teamFilter === "all" || i.team === teamFilter);
@@ -570,13 +633,13 @@ export default function AccuracyComparePage() {
       return r;
     };
 
-    for (const i of master.instances) {
+    for (const i of canonical.master) {
       if (!inScope(i)) continue;
       const r = ensure(i);
       r.inMaster = true;
       bump(r.master, i.stat);
     }
-    for (const i of analyst.instances) {
+    for (const i of canonical.analyst) {
       if (!inScope(i)) continue;
       const r = ensure(i);
       r.inAnalyst = true;
@@ -614,7 +677,7 @@ export default function AccuracyComparePage() {
         return (a.number ?? 999) - (b.number ?? 999);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [master, analyst, effectiveRange, teamFilter]);
+  }, [canonical, effectiveRange, teamFilter]);
 
   // Real comparison teams have master instances and a proper name. Teams with
   // no master instances (analyst-only extras from a name mismatch, or an
@@ -642,6 +705,49 @@ export default function AccuracyComparePage() {
     const m = master;
     setMaster(analyst);
     setAnalyst(m);
+    // Keep allocations aligned with the files they describe.
+    const ma = masterAnalyst;
+    setMasterAnalyst(gradedAnalyst);
+    setGradedAnalyst(ma);
+  }
+
+  async function handleSaveCheck() {
+    if (!result) return;
+
+    if (!gradedAnalyst) {
+      setSaveMsg("Select the analyst being graded first.");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setSaveMsg(null);
+
+      await saveAccuracyCheck({
+        analystName: gradedAnalyst,
+        masterAnalystName: masterAnalyst || null,
+        matchLabel: matchLabel || null,
+        fileNameMaster: master?.name ?? null,
+        fileNameAnalyst: analyst?.name ?? null,
+        tolerance,
+        // Save the full-window result (not the team/category-scoped one)
+        // so the stored summary reflects the whole check.
+        result,
+      });
+
+      setSaveMsg(
+        `Saved to ${gradedAnalyst}'s profile` +
+          (masterAnalyst ? ` (master by ${masterAnalyst})` : "") +
+          "."
+      );
+    } catch (err) {
+      console.error(err);
+      setSaveMsg(
+        err instanceof Error ? err.message : "Failed to save accuracy check."
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -683,6 +789,23 @@ export default function AccuracyComparePage() {
               onLoad={setMaster}
               onClear={() => setMaster(null)}
             />
+            <div className="mt-2">
+              <label className="mb-1 block text-xs font-medium text-slate-500">
+                Coded by (master)
+              </label>
+              <select
+                value={masterAnalyst}
+                onChange={(e) => setMasterAnalyst(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none"
+              >
+                <option value="">Select analyst...</option>
+                {analystNames.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="flex items-end justify-center pb-6">
@@ -708,6 +831,23 @@ export default function AccuracyComparePage() {
               onLoad={setAnalyst}
               onClear={() => setAnalyst(null)}
             />
+            <div className="mt-2">
+              <label className="mb-1 block text-xs font-medium text-slate-500">
+                Coded by (analyst being graded)
+              </label>
+              <select
+                value={gradedAnalyst}
+                onChange={(e) => setGradedAnalyst(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none"
+              >
+                <option value="">Select analyst...</option>
+                {analystNames.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 
@@ -902,6 +1042,47 @@ export default function AccuracyComparePage() {
                   {analyst?.instances.filter(inRange).length} analyst
                 </span>
               </span>
+            </div>
+
+            {/* Save allocation bar */}
+            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="text-sm font-semibold text-slate-700">
+                Save this check
+              </div>
+              <input
+                type="text"
+                value={matchLabel}
+                onChange={(e) => setMatchLabel(e.target.value)}
+                placeholder="Match label (e.g. Round 20 — Home v Away)"
+                className="min-w-[240px] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none"
+              />
+              <div className="text-xs text-slate-500">
+                Graded:{" "}
+                <span className="font-semibold text-slate-700">
+                  {gradedAnalyst || "— select above —"}
+                </span>
+                {masterAnalyst && (
+                  <>
+                    {"  ·  Master: "}
+                    <span className="font-semibold text-slate-700">
+                      {masterAnalyst}
+                    </span>
+                  </>
+                )}
+              </div>
+              <button
+                onClick={handleSaveCheck}
+                disabled={saving || !gradedAnalyst}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition ${ACCENT_BG} hover:opacity-90 disabled:cursor-not-allowed disabled:bg-slate-300`}
+              >
+                <Save size={14} />
+                {saving ? "Saving..." : "Save accuracy check"}
+              </button>
+              {saveMsg && (
+                <span className="text-xs font-medium text-slate-600">
+                  {saveMsg}
+                </span>
+              )}
             </div>
 
             {/* Summary cards */}

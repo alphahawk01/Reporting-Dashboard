@@ -215,16 +215,141 @@ function isEventStat(stat: string): boolean {
 }
 
 /**
+ * Team-name canonicalisation.
+ *
+ * The master and analyst files often name the same club differently
+ * (e.g. "Eastern Lion" vs "Eastern Lions U15Bs"), which used to flag
+ * genuinely-correct events as "wrong team". A game only ever has two
+ * sides, so we relabel BOTH files' teams to canonical "Home"/"Away"
+ * before comparing — team correctness then no longer depends on the
+ * names lining up.
+ *
+ * How the two sides are aligned across files, WITHOUT trusting names:
+ *   1. Take the (up to) two most common team names in each file.
+ *   2. For every time-aligned pair (within tolerance) that agrees on
+ *      stat and player, tally which analyst team co-occurs with which
+ *      master team.
+ *   3. Pick the mapping (of the two possible pairings) with the most
+ *      co-occurrences. This infers the sides from the actual matched
+ *      events rather than the club names.
+ *
+ * Falls back gracefully: if a file has only one team, or the evidence
+ * is empty, we map by frequency order (most common -> Home).
+ */
+const CANON_HOME = "Home";
+const CANON_AWAY = "Away";
+
+function topTwoTeams(instances: Instance[]): string[] {
+  const counts = new Map<string, number>();
+  for (const i of instances) {
+    const t = normTeam(i.team);
+    if (!t) continue;
+    counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2)
+    .map(([t]) => t);
+}
+
+export function canonicaliseTeams(
+  master: Instance[],
+  analyst: Instance[],
+  tolerance: number
+): { master: Instance[]; analyst: Instance[]; mapped: boolean } {
+  const mTeams = topTwoTeams(master);
+  const aTeams = topTwoTeams(analyst);
+
+  // Nothing to align if either side has no team info.
+  if (mTeams.length === 0 || aTeams.length === 0) {
+    return { master, analyst, mapped: false };
+  }
+
+  // Tally analyst-team co-occurrence with master-team over time-aligned,
+  // stat+player-agreeing pairs.
+  const coOccur = new Map<string, number>(); // key: `${mTeam}|||${aTeam}`
+  for (const m of master) {
+    for (const a of analyst) {
+      if (Math.abs(a.start - m.start) > tolerance) continue;
+      const statOk = normStat(m.stat) === normStat(a.stat);
+      const playerOk =
+        m.playerNumber != null &&
+        a.playerNumber != null &&
+        m.playerNumber === a.playerNumber;
+      if (!statOk && !playerOk) continue;
+      const key = `${normTeam(m.team)}|||${normTeam(a.team)}`;
+      coOccur.set(key, (coOccur.get(key) ?? 0) + 1);
+    }
+  }
+
+  // Decide the master-team -> analyst-team mapping.
+  const mapMasterToAnalyst = new Map<string, string>();
+
+  if (mTeams.length === 2 && aTeams.length === 2) {
+    const score = (mt: string, at: string) =>
+      coOccur.get(`${mt}|||${at}`) ?? 0;
+    // Pairing 1: m0->a0, m1->a1   vs   Pairing 2: m0->a1, m1->a0
+    const p1 = score(mTeams[0], aTeams[0]) + score(mTeams[1], aTeams[1]);
+    const p2 = score(mTeams[0], aTeams[1]) + score(mTeams[1], aTeams[0]);
+    if (p2 > p1) {
+      mapMasterToAnalyst.set(mTeams[0], aTeams[1]);
+      mapMasterToAnalyst.set(mTeams[1], aTeams[0]);
+    } else {
+      // Ties fall back to frequency order.
+      mapMasterToAnalyst.set(mTeams[0], aTeams[0]);
+      mapMasterToAnalyst.set(mTeams[1], aTeams[1]);
+    }
+  } else {
+    // One side has a single team; map by order.
+    mapMasterToAnalyst.set(mTeams[0], aTeams[0]);
+  }
+
+  // Assign canonical labels: master's most-common team = Home.
+  const masterCanon = new Map<string, string>();
+  masterCanon.set(mTeams[0], CANON_HOME);
+  if (mTeams[1]) masterCanon.set(mTeams[1], CANON_AWAY);
+
+  const analystCanon = new Map<string, string>();
+  for (const [mt, at] of mapMasterToAnalyst.entries()) {
+    const canon = masterCanon.get(mt);
+    if (canon && at) analystCanon.set(at, canon);
+  }
+
+  const relabelMaster = (i: Instance): Instance => ({
+    ...i,
+    team: masterCanon.get(normTeam(i.team)) ?? i.team,
+  });
+  const relabelAnalyst = (i: Instance): Instance => ({
+    ...i,
+    team: analystCanon.get(normTeam(i.team)) ?? i.team,
+  });
+
+  return {
+    master: master.map(relabelMaster),
+    analyst: analyst.map(relabelAnalyst),
+    mapped: true,
+  };
+}
+
+/**
  * Compare master vs analyst instances.
  * Matching: for each master instance, find the best analyst instance whose
  * start time is within `tolerance` seconds that hasn't been consumed yet.
  * "Best" = the one that agrees on the most fields, then closest in time.
+ *
+ * Team names are canonicalised to Home/Away first (see canonicaliseTeams)
+ * so mismatched club naming between files doesn't cause false "wrong team".
  */
 export function compareInstances(
-  master: Instance[],
-  analyst: Instance[],
+  masterRaw: Instance[],
+  analystRaw: Instance[],
   tolerance: number
 ): ComparisonResult {
+  const { master, analyst } = canonicaliseTeams(
+    masterRaw,
+    analystRaw,
+    tolerance
+  );
   const rows: ComparisonRow[] = [];
   const usedAnalyst = new Set<number>();
   const usedMaster = new Set<number>();
