@@ -17,6 +17,7 @@ import {
   Trophy,
   GitCompare,
   Globe,
+  FileCheck2,
 } from "lucide-react";
 
 const sections = [
@@ -121,6 +122,11 @@ const sections = [
         title: "Analyst Comparison",
         href: "/analyst-compare",
         icon: GitCompare,
+      },
+      {
+        title: "Accuracy Comparison",
+        href: "/accuracy-compare",
+        icon: FileCheck2,
       },
     ],
   },
