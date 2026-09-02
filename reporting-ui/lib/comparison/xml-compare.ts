@@ -475,29 +475,46 @@ export function compareInstances(
         a.playerNumber != null &&
         m.playerNumber === a.playerNumber;
 
-    return { teamOk, playerOk, statOk, event: false };
+    // Same stat category (XML <group>), e.g. both "Hard Ball Gets" and
+    // "Loose Ball Gets" live under a contested-possession group. Used to
+    // prefer a same-category wrong-stat pairing over an unrelated one.
+    const categoryOk =
+      !!m.category &&
+      !!a.category &&
+      normStat(m.category) === normStat(a.category);
+
+    return { teamOk, playerOk, statOk, categoryOk, event: false };
   };
 
   // Match-quality tier (higher = better). The key change: player + stat
   // agreement matters far more than team alone, so a same-team-but-otherwise-
   // wrong pair can't steal an analyst instance from a genuine match.
-  //   5 = exact (team + player + stat)
-  //   4 = stat + player, wrong team   (same action & player, opposing team)
-  //   3 = stat + team,   wrong player (same action, right team, wrong #)
-  //   2 = stat only,     wrong team & player (same action, opposing team)
-  //   1 = player + team, wrong stat   (same player, different action)
+  //   6 = exact (team + player + stat)
+  //   5 = stat + player, wrong team   (same action & player, opposing team)
+  //   4 = stat + team,   wrong player (same action, right team, wrong #)
+  //   3 = stat only,     wrong team & player (same action, opposing team)
+  //   2 = player + team + SAME CATEGORY, wrong stat
+  //         (same player, same stat family — e.g. Hard Ball vs Loose Ball)
+  //   1 = player + team, wrong stat, different category
+  //         (same player but an unrelated action — weaker "wrong stat")
   //   0 = not a plausible match (neither stat nor player agree)
   //
   // A pair is only eligible to match if the STAT matches OR the PLAYER matches.
   // Sharing only the team (e.g. Loose Ball Get vs Ineffective Kick, same team)
   // is NOT the same event, so those aren't paired — the master is "missed" and
   // the analyst is "extra".
+  //
+  // The category split fixes cases like: master "Hard Ball Gets #4" with two
+  // nearby analyst rows — "Loose Ball Gets #4" (same category) and
+  // "Shallow I50 #4" (different category). Both are wrong-stat, but the
+  // same-category one is the intended pairing, leaving Shallow I50 as extra.
   const quality = (m: Instance, a: Instance): number => {
-    const { teamOk, playerOk, statOk } = fieldsOk(m, a);
-    if (statOk && playerOk && teamOk) return 5;
-    if (statOk && playerOk) return 4;
-    if (statOk && teamOk) return 3;
-    if (statOk) return 2;
+    const { teamOk, playerOk, statOk, categoryOk } = fieldsOk(m, a);
+    if (statOk && playerOk && teamOk) return 6;
+    if (statOk && playerOk) return 5;
+    if (statOk && teamOk) return 4;
+    if (statOk) return 3;
+    if (playerOk && teamOk && categoryOk) return 2;
     if (playerOk && teamOk) return 1;
     return 0; // ineligible
   };
