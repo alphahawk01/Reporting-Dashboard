@@ -130,7 +130,14 @@ function parseNumber(...candidates: string[]): number | null {
 // Order matters: codeTime() uses the FIRST keyword the stat text
 // includes, so list more specific phrases before broader ones (e.g.
 // "around ground bounce" before any generic "bounce").
-const STAT_START_OFFSETS: { keyword: string; offset: number }[] = [
+// `exact: true` matches the whole (normalised) stat name, so short words
+// like "goal"/"behind" don't accidentally catch "Goal Assist" etc.
+// `exact` omitted = substring match (for phrase variants like bounces).
+const STAT_START_OFFSETS: {
+  keyword: string;
+  offset: number;
+  exact?: boolean;
+}[] = [
   { keyword: "uncontested mark", offset: 5 },
 
   // Around-the-ground bounce (sometimes coded as "Ball Up") — 9s.
@@ -147,6 +154,24 @@ const STAT_START_OFFSETS: { keyword: string; offset: number }[] = [
   { keyword: "throw in", offset: 7 },
   { keyword: "throw-in", offset: 7 },
   { keyword: "boundary throw", offset: 7 },
+
+  // Kick ins — 6s.
+  { keyword: "kick in", offset: 6 },
+  { keyword: "kick-in", offset: 6 },
+
+  // Turnovers — 7s.
+  { keyword: "turnover", offset: 7 },
+
+  // Scoring shots. "rushed behind" MUST be listed before "behind" so a
+  // rushed behind resolves to 6s, not the plain-behind 30s rule.
+  // "goal"/"behind" use exact matching so they don't catch things like
+  // "Goal Assist" or "Behind Assist".
+  { keyword: "rushed behind", offset: 6, exact: true },
+  { keyword: "rushed behinds", offset: 6, exact: true },
+  { keyword: "behind", offset: 30, exact: true },
+  { keyword: "behinds", offset: 30, exact: true },
+  { keyword: "goal", offset: 45, exact: true },
+  { keyword: "goals", offset: 45, exact: true },
 ];
 
 /**
@@ -158,9 +183,14 @@ const STAT_START_OFFSETS: { keyword: string; offset: number }[] = [
  */
 function codeTime(stat: string, start: number, end: number): number {
   const s = normStat(stat);
-  const rule = STAT_START_OFFSETS.find((r) => s.includes(r.keyword));
+  const rule = STAT_START_OFFSETS.find((r) =>
+    r.exact ? s === r.keyword : s.includes(r.keyword)
+  );
   if (rule) {
-    return Math.min(start + rule.offset, end);
+    // Honour the configured offset exactly (these are deliberate fixed
+    // lead-ins, e.g. a goal is coded 45s after the start marker, so the
+    // window is expected to be long enough — don't clamp to end).
+    return start + rule.offset;
   }
   return (start + end) / 2;
 }
