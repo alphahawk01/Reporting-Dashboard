@@ -162,6 +162,12 @@ const STAT_START_OFFSETS: {
   // Turnovers — 7s.
   { keyword: "turnover", offset: 7 },
 
+  // Effective & ineffective kicks — 5s. "ineffective kick" is listed
+  // first; order doesn't matter here since both map to 5s, but keeping
+  // the more specific phrase first is safe practice.
+  { keyword: "ineffective kick", offset: 5 },
+  { keyword: "effective kick", offset: 5 },
+
   // Scoring shots. "rushed behind" MUST be listed before "behind" so a
   // rushed behind resolves to 6s, not the plain-behind 30s rule.
   // "goal"/"behind" use exact matching so they don't catch things like
