@@ -39,6 +39,25 @@ function formatDate(iso: string) {
   });
 }
 
+// Pull the Home / Away accuracy out of a check's stored team breakdown.
+// Teams are canonicalised to "Home"/"Away" at comparison time, so we can
+// read them straight off team_breakdown without touching the schema.
+function homeAwayAccuracy(check: AccuracyCheck): {
+  home: number | null;
+  away: number | null;
+} {
+  const find = (name: string) =>
+    check.team_breakdown?.find(
+      (t) => t.team.trim().toLowerCase() === name && t.masterTotal > 0
+    ) ?? null;
+  const home = find("home");
+  const away = find("away");
+  return {
+    home: home ? home.accuracy : null,
+    away: away ? away.accuracy : null,
+  };
+}
+
 export default function AccuracyChecksPage() {
   const router = useRouter();
   const [checks, setChecks] = useState<AccuracyCheck[]>([]);
@@ -139,7 +158,7 @@ export default function AccuracyChecksPage() {
 
   return (
     <div className="min-h-full bg-slate-100 text-slate-900">
-      <div className="mx-auto max-w-7xl p-6 lg:p-8">
+      <div className="mx-auto max-w-[1600px] p-6 lg:p-8">
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
             <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
@@ -170,7 +189,7 @@ export default function AccuracyChecksPage() {
             history here.
           </div>
         ) : (
-          <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+          <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
             {/* LEFT: per-analyst history */}
             <div className="space-y-6">
               {/* Analyst picker */}
@@ -191,7 +210,7 @@ export default function AccuracyChecksPage() {
                 </select>
 
                 {analystRollup && (
-                  <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-6">
                     <Stat label="Checks" value={`${analystRollup.checks}`} />
                     <Stat
                       label="Avg accuracy"
@@ -202,6 +221,32 @@ export default function AccuracyChecksPage() {
                       label="Latest"
                       value={pct(analystRollup.latestAccuracy)}
                       color={accColor(analystRollup.latestAccuracy)}
+                    />
+                    <Stat
+                      label="Avg home"
+                      value={
+                        analystRollup.avgHomeAccuracy != null
+                          ? pct(analystRollup.avgHomeAccuracy)
+                          : "—"
+                      }
+                      color={
+                        analystRollup.avgHomeAccuracy != null
+                          ? accColor(analystRollup.avgHomeAccuracy)
+                          : undefined
+                      }
+                    />
+                    <Stat
+                      label="Avg away"
+                      value={
+                        analystRollup.avgAwayAccuracy != null
+                          ? pct(analystRollup.avgAwayAccuracy)
+                          : "—"
+                      }
+                      color={
+                        analystRollup.avgAwayAccuracy != null
+                          ? accColor(analystRollup.avgAwayAccuracy)
+                          : undefined
+                      }
                     />
                     <Stat
                       label="Exact / Master"
@@ -217,7 +262,7 @@ export default function AccuracyChecksPage() {
                   Accuracy trend
                 </h2>
                 {trendData.length < 2 ? (
-                  <p className="py-8 text-center text-sm text-slate-400">
+                  <p className="text-sm text-slate-400">
                     Need at least 2 saved checks to show a trend.
                   </p>
                 ) : (
@@ -249,9 +294,10 @@ export default function AccuracyChecksPage() {
                       <tr>
                         <th className="px-4 py-2.5">Date</th>
                         <th className="px-4 py-2.5">Match</th>
-                        <th className="px-4 py-2.5">Analyst</th>
                         <th className="px-4 py-2.5">Master by</th>
-                        <th className="px-4 py-2.5 text-right">Accuracy</th>
+                        <th className="px-4 py-2.5 text-right">Overall</th>
+                        <th className="px-4 py-2.5 text-right">Home</th>
+                        <th className="px-4 py-2.5 text-right">Away</th>
                         <th className="px-4 py-2.5 text-right">Exact/Master</th>
                         <th className="px-4 py-2.5"></th>
                       </tr>
@@ -260,29 +306,39 @@ export default function AccuracyChecksPage() {
                       {analystChecks
                         .slice()
                         .reverse()
-                        .map((c) => (
+                        .map((c) => {
+                          const { home, away } = homeAwayAccuracy(c);
+                          return (
                           <tr
                             key={c.id}
                             onClick={() => openCheck(c.id)}
                             className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
                             title="Open full accuracy check in Accuracy Comparison"
                           >
-                            <td className="px-4 py-2.5 text-slate-600">
+                            <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
                               {formatDate(c.created_at)}
                             </td>
                             <td className="px-4 py-2.5 text-slate-700">
-                              {c.match_label || "—"}
+                              <span
+                                className="block max-w-[420px] truncate"
+                                title={c.match_label || undefined}
+                              >
+                                {c.match_label || "—"}
+                              </span>
                             </td>
-                            <td className="px-4 py-2.5 font-medium text-slate-700">
-                              {c.analyst_name || "—"}
-                            </td>
-                            <td className="px-4 py-2.5 text-slate-600">
+                            <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
                               {c.master_analyst_name || "—"}
                             </td>
                             <td className={`px-4 py-2.5 text-right font-semibold ${accColor(c.accuracy)}`}>
                               {pct(c.accuracy)}
                             </td>
-                            <td className="px-4 py-2.5 text-right text-slate-600">
+                            <td className={`px-4 py-2.5 text-right font-medium ${home != null ? accColor(home) : "text-slate-300"}`}>
+                              {home != null ? pct(home) : "—"}
+                            </td>
+                            <td className={`px-4 py-2.5 text-right font-medium ${away != null ? accColor(away) : "text-slate-300"}`}>
+                              {away != null ? pct(away) : "—"}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-2.5 text-right text-slate-600">
                               {c.exact}/{c.master_total}
                             </td>
                             <td className="px-4 py-2.5 text-right">
@@ -298,7 +354,8 @@ export default function AccuracyChecksPage() {
                               </button>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                     </tbody>
                   </table>
                 </div>

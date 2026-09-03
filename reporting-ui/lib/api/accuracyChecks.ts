@@ -272,6 +272,24 @@ export interface AnalystAccuracySummary {
     latestAccuracy: number;
     totalMaster: number;
     totalExact: number;
+    /** Average of per-check Home accuracy (null if no check has Home data). */
+    avgHomeAccuracy: number | null;
+    /** Average of per-check Away accuracy (null if no check has Away data). */
+    avgAwayAccuracy: number | null;
+}
+
+/**
+ * Read a canonical team's accuracy ("home" / "away") off a check's stored
+ * team_breakdown. Teams are canonicalised to Home/Away at comparison time.
+ */
+function teamAccuracy(
+    check: AccuracyCheck,
+    team: "home" | "away"
+): number | null {
+    const t = check.team_breakdown?.find(
+        (b) => b.team.trim().toLowerCase() === team && b.masterTotal > 0
+    );
+    return t ? t.accuracy : null;
 }
 
 /**
@@ -301,6 +319,17 @@ export function summariseByAnalyst(
             const totalMaster = list.reduce((sum, c) => sum + c.master_total, 0);
             const totalExact = list.reduce((sum, c) => sum + c.exact, 0);
 
+            const avg = (vals: number[]) =>
+                vals.length > 0
+                    ? vals.reduce((sum, v) => sum + v, 0) / vals.length
+                    : null;
+            const homeVals = list
+                .map((c) => teamAccuracy(c, "home"))
+                .filter((v): v is number => v != null);
+            const awayVals = list
+                .map((c) => teamAccuracy(c, "away"))
+                .filter((v): v is number => v != null);
+
             return {
                 analystName,
                 checks: list.length,
@@ -309,6 +338,8 @@ export function summariseByAnalyst(
                 latestAccuracy: sorted[0]?.accuracy ?? 0,
                 totalMaster,
                 totalExact,
+                avgHomeAccuracy: avg(homeVals),
+                avgAwayAccuracy: avg(awayVals),
             };
         })
         .sort((a, b) => b.checks - a.checks);
