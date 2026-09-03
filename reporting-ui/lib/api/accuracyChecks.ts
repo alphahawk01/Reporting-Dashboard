@@ -37,6 +37,13 @@ export interface AccuracyCheck {
     // Raw source XML so a saved check can be fully re-opened.
     xml_master: string | null;
     xml_analyst: string | null;
+
+    // Game video URL so it doesn't need to be re-found on re-open.
+    video_url: string | null;
+
+    // Sport the check was graded under ("afl" | "football"), so it
+    // re-opens with the right player-stats table.
+    sport: string | null;
 }
 
 export interface SaveAccuracyCheckInput {
@@ -44,6 +51,8 @@ export interface SaveAccuracyCheckInput {
     masterAnalystName?: string | null;
     xmlMaster?: string | null;
     xmlAnalyst?: string | null;
+    videoUrl?: string | null;
+    sport?: string | null;
     matchLabel?: string | null;
     fileNameMaster?: string | null;
     fileNameAnalyst?: string | null;
@@ -84,6 +93,8 @@ export async function saveAccuracyCheck(
 
         xml_master: input.xmlMaster ?? null,
         xml_analyst: input.xmlAnalyst ?? null,
+        video_url: input.videoUrl?.trim() || null,
+        sport: input.sport ?? null,
     };
 
     const { data, error } = await supabase

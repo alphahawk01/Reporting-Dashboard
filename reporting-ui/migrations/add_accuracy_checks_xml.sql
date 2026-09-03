@@ -6,4 +6,6 @@
 
 alter table public.accuracy_checks
     add column if not exists xml_master  text,
-    add column if not exists xml_analyst text;
+    add column if not exists xml_analyst text,
+    add column if not exists video_url   text,
+    add column if not exists sport       text;

@@ -731,6 +731,9 @@ export default function AccuracyComparePage() {
       if (check.master_analyst_name) setMasterAnalyst(check.master_analyst_name);
       setGradedAnalyst(check.analyst_name);
       if (check.match_label) setMatchLabel(check.match_label);
+      if (check.video_url) setVideoUrl(check.video_url);
+      if (check.sport === "afl" || check.sport === "football")
+        setSport(check.sport);
     })();
 
     return () => {
@@ -1017,6 +1020,10 @@ export default function AccuracyComparePage() {
         // Store the raw XML so the check can be fully re-opened later.
         xmlMaster: master?.raw ?? null,
         xmlAnalyst: analyst?.raw ?? null,
+        // Store the game video URL so it doesn't need re-finding.
+        videoUrl: videoUrl || null,
+        // Store the sport so it re-opens with the right stats table.
+        sport,
       });
 
       setSaveMsg(
@@ -1123,18 +1130,11 @@ export default function AccuracyComparePage() {
               <label className="mb-1 block text-xs font-medium text-slate-500">
                 Coded by (master)
               </label>
-              <select
+              <AnalystCombobox
                 value={masterAnalyst}
-                onChange={(e) => setMasterAnalyst(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none"
-              >
-                <option value="">Select analyst...</option>
-                {analystNames.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
+                onChange={setMasterAnalyst}
+                options={analystNames}
+              />
             </div>
           </div>
 
@@ -1165,18 +1165,11 @@ export default function AccuracyComparePage() {
               <label className="mb-1 block text-xs font-medium text-slate-500">
                 Coded by (analyst being graded)
               </label>
-              <select
+              <AnalystCombobox
                 value={gradedAnalyst}
-                onChange={(e) => setGradedAnalyst(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none"
-              >
-                <option value="">Select analyst...</option>
-                {analystNames.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
+                onChange={setGradedAnalyst}
+                options={analystNames}
+              />
             </div>
           </div>
         </div>
@@ -2024,6 +2017,94 @@ export default function AccuracyComparePage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Searchable analyst picker: type to filter, scrollable list, click to
+// select. Replaces the native <select> (which scroll-jumps and can't be
+// typed into).
+function AnalystCombobox({
+  value,
+  onChange,
+  options,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const boxRef = useRef<HTMLDivElement | null>(null);
+
+  // Close on outside click.
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((o) => o.toLowerCase().includes(q));
+  }, [options, query]);
+
+  return (
+    <div ref={boxRef} className="relative">
+      <input
+        type="text"
+        value={open ? query : value}
+        placeholder="Type to search analyst..."
+        onFocus={() => {
+          setOpen(true);
+          setQuery("");
+        }}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          if (!open) setOpen(true);
+        }}
+        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none"
+      />
+      {value && !open && (
+        <button
+          onClick={() => onChange("")}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+          title="Clear"
+          type="button"
+        >
+          <XIcon size={14} />
+        </button>
+      )}
+      {open && (
+        <div className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+          {filtered.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-slate-400">No matches</div>
+          ) : (
+            filtered.map((o) => (
+              <button
+                key={o}
+                type="button"
+                onClick={() => {
+                  onChange(o);
+                  setOpen(false);
+                  setQuery("");
+                }}
+                className={`block w-full px-3 py-2 text-left text-sm hover:bg-slate-100 ${
+                  o === value ? "bg-slate-50 font-semibold text-slate-900" : "text-slate-700"
+                }`}
+              >
+                {o}
+              </button>
+            ))
+          )}
         </div>
       )}
     </div>
