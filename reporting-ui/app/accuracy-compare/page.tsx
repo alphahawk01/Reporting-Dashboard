@@ -882,6 +882,31 @@ export default function AccuracyComparePage() {
     return statScopedRows.filter((r) => r.status === statusFilter);
   }, [statScopedRows, statusFilter]);
 
+  // Video review has its own stat filter so it can show every instance of a
+  // selected stat without inheriting the page's team/category/stat/status
+  // filters. Keep the original comparison rows so missed and extra entries
+  // remain available in the review.
+  const [videoStatFilter, setVideoStatFilter] = useState<string | "all">("all");
+  const videoStatOptions = useMemo(() => {
+    if (!result) return [];
+    const stats = new Set<string>();
+    for (const row of result.rows) {
+      if (row.master?.stat.trim()) stats.add(row.master.stat.trim());
+      if (row.analyst?.stat.trim()) stats.add(row.analyst.stat.trim());
+    }
+    return Array.from(stats).sort((a, b) => a.localeCompare(b));
+  }, [result]);
+
+  const videoRows: ComparisonRow[] = useMemo(() => {
+    if (!result) return [];
+    if (videoStatFilter === "all") return result.rows;
+    return result.rows.filter(
+      (row) =>
+        row.master?.stat.trim() === videoStatFilter ||
+        row.analyst?.stat.trim() === videoStatFilter
+    );
+  }, [result, videoStatFilter]);
+
   // Summary that reflects the active team/category/stat filters (NOT the
   // status filter, so the cards show the full breakdown of the scope).
   const scopedSummary = useMemo(() => {
@@ -2075,20 +2100,38 @@ export default function AccuracyComparePage() {
         <div className="fixed inset-0 z-50 flex flex-col bg-slate-900/80 p-4 backdrop-blur-sm">
           <div className="mx-auto flex h-full w-full max-w-[1600px] flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
             {/* Header */}
-            <div className="flex items-center justify-between gap-2 border-b border-slate-700 px-4 py-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700 px-4 py-2.5">
               <span className="flex items-center gap-2 text-sm font-semibold text-slate-100">
                 <Video size={15} /> Video review
                 <span className="text-xs font-normal text-slate-400">
                   · click any stat to jump to that moment
                 </span>
               </span>
-              <button
-                onClick={() => setVideoOpen(false)}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
-                title="Close"
-              >
-                <XIcon size={18} />
-              </button>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-400">
+                  <span>Show stat</span>
+                  <select
+                    value={videoStatFilter}
+                    onChange={(e) => setVideoStatFilter(e.target.value)}
+                    className="max-w-[240px] rounded-md border border-slate-600 bg-slate-800 px-2 py-1.5 text-xs font-medium normal-case text-slate-100 outline-none focus:border-sky-400"
+                    aria-label="Select a stat to show in video review"
+                  >
+                    <option value="all">All stats</option>
+                    {videoStatOptions.map((stat) => (
+                      <option key={stat} value={stat}>
+                        {stat}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  onClick={() => setVideoOpen(false)}
+                  className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
+                  title="Close"
+                >
+                  <XIcon size={18} />
+                </button>
+              </div>
             </div>
 
             {/* Body: video (left) + timelines (right) */}
@@ -2118,23 +2161,34 @@ export default function AccuracyComparePage() {
                   </div>
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto bg-white">
-                  {filteredRows.map((row, i) => {
+                  {videoRows.map((row, i) => {
                     const meta = STATUS_META[row.status];
+                    // A selected stat can exist on only one side of a
+                    // wrong-stat row. Keep each side independent so every
+                    // matching instance remains visible.
+                    const masterInstance =
+                      videoStatFilter === "all" ||
+                      row.master?.stat.trim() === videoStatFilter
+                        ? row.master
+                        : null;
+                    const analystInstance =
+                      videoStatFilter === "all" ||
+                      row.analyst?.stat.trim() === videoStatFilter
+                        ? row.analyst
+                        : null;
                     const masterActive =
-                      !!row.master &&
-                      videoTime >= row.master.start &&
-                      videoTime <= row.master.end;
+                      !!masterInstance &&
+                      videoTime >= masterInstance.start &&
+                      videoTime <= masterInstance.end;
                     const analystActive =
-                      !!row.analyst &&
-                      videoTime >= row.analyst.start &&
-                      videoTime <= row.analyst.end;
+                      !!analystInstance &&
+                      videoTime >= analystInstance.start &&
+                      videoTime <= analystInstance.end;
                     const rowActive = masterActive || analystActive;
                     return (
                       <div
                         key={i}
-                        ref={
-                          rowActive ? activeRowRef : undefined
-                        }
+                        ref={rowActive ? activeRowRef : undefined}
                         className={`grid grid-cols-[90px_1fr_1fr] border-b text-sm last:border-b-0 ${
                           rowActive
                             ? "border-sky-300 bg-sky-50"
@@ -2149,22 +2203,22 @@ export default function AccuracyComparePage() {
                           </span>
                         </div>
                         <TimelineCell
-                          instance={row.master}
+                          instance={masterInstance}
                           onSeek={seekVideo}
                           active={masterActive}
                         />
                         <TimelineCell
-                          instance={row.analyst}
-                          delta={row.timeDelta}
+                          instance={analystInstance}
+                          delta={masterInstance && analystInstance ? row.timeDelta : null}
                           onSeek={seekVideo}
                           active={analystActive}
                         />
                       </div>
                     );
                   })}
-                  {filteredRows.length === 0 && (
+                  {videoRows.length === 0 && (
                     <div className="p-8 text-center text-sm text-slate-400">
-                      No rows for this filter.
+                      No instances for this stat.
                     </div>
                   )}
                 </div>
