@@ -34,7 +34,6 @@ import {
   type Instance,
   type ComparisonRow,
   type MatchStatus,
-  type TeamBreakdown,
   type StatBreakdown,
 } from "@/lib/comparison/xml-compare";
 import {
@@ -513,66 +512,6 @@ function exportPlayerCsv(rows: PlayerRow[], cols: PlayerCol[], fileName: string)
   a.download = fileName;
   a.click();
   URL.revokeObjectURL(url);
-}
-
-function TeamCard({ team }: { team: TeamBreakdown }) {
-  const accColor =
-    team.accuracy >= 0.9
-      ? "text-emerald-600"
-      : team.accuracy >= 0.75
-        ? "text-amber-600"
-        : "text-red-600";
-  const barColor =
-    team.accuracy >= 0.9
-      ? "bg-emerald-500"
-      : team.accuracy >= 0.75
-        ? "bg-amber-500"
-        : "bg-red-500";
-
-  const chips: { label: string; value: number; cls: string }[] = [
-    { label: "Exact", value: team.exact, cls: "text-emerald-600" },
-    { label: "Wrong stat", value: team.wrongStat, cls: "text-amber-600" },
-    { label: "Wrong player", value: team.wrongPlayer, cls: "text-orange-600" },
-    { label: "Wrong team", value: team.wrongTeam, cls: "text-red-600" },
-    { label: "Missed", value: team.missed, cls: "text-slate-600" },
-    { label: "Extra", value: team.extra, cls: "text-purple-600" },
-  ];
-
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <h3 className="truncate text-sm font-bold text-slate-900">
-          {team.team}
-        </h3>
-        <span className={`text-lg font-bold ${accColor}`}>
-          {(team.accuracy * 100).toFixed(1)}%
-        </span>
-      </div>
-      <div className="mb-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
-        <div
-          className={`h-full rounded-full ${barColor}`}
-          style={{ width: `${team.accuracy * 100}%` }}
-        />
-      </div>
-      <p className="mb-3 text-xs text-slate-500">
-        {team.exact}/{team.masterTotal} master instances exact · avg drift{" "}
-        {team.avgTimeDrift.toFixed(1)}s
-      </p>
-      <div className="grid grid-cols-3 gap-2">
-        {chips.map((c) => (
-          <div
-            key={c.label}
-            className="rounded-lg bg-slate-50 px-2 py-1.5 text-center"
-          >
-            <p className={`text-base font-bold ${c.cls}`}>{c.value}</p>
-            <p className="text-[10px] uppercase tracking-wide text-slate-400">
-              {c.label}
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 function StatCard({
@@ -1307,10 +1246,12 @@ export default function AccuracyComparePage() {
           </div>
         </div>
 
+        {/* Tolerance + time range controls (same row) */}
+        <div className="mt-5 grid gap-3 lg:grid-cols-2">
         {/* Tolerance control */}
-        <div className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <span className="text-sm font-semibold text-slate-700">
-            Timestamp tolerance
+            Tolerance
           </span>
           <div className="flex gap-1">
             {[2, 3, 5].map((t) => (
@@ -1328,27 +1269,27 @@ export default function AccuracyComparePage() {
             ))}
           </div>
           <span className="text-xs text-slate-500">
-            Events within this window are matched; the stat still has to agree
-            to count as exact.
+            Match window; stat still must agree for exact.
           </span>
         </div>
 
         {/* Time range control */}
-        <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-center gap-3">
             <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
-              <Clock size={15} /> Time range
+              <Clock size={15} /> Range
             </span>
             <div className="flex gap-1">
               <button
                 onClick={() => setRangeMode("auto")}
+                title="Overlapping section"
                 className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
                   rangeMode === "auto"
                     ? `${ACCENT_BG} text-white`
                     : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                 }`}
               >
-                Overlapping section
+                Overlap
               </button>
               <button
                 onClick={() => setRangeMode("manual")}
@@ -1416,6 +1357,7 @@ export default function AccuracyComparePage() {
               )}
             </p>
           )}
+        </div>
         </div>
 
         {!result && (
@@ -1531,9 +1473,11 @@ export default function AccuracyComparePage() {
               <StatCard label="Extra" value={`${scopedSummary.extra}`} accent="text-purple-600" />
             </div>
 
+            {/* Category breakdown + per-stat breakdown (same row) */}
+            <div className="mt-4 grid items-stretch gap-4 lg:grid-cols-2">
             {/* Category breakdown */}
             {scopedCategoryBreakdown.length > 0 && (
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                   <h2 className="text-sm font-semibold text-slate-700">
                     Accuracy by stat category
@@ -1557,7 +1501,7 @@ export default function AccuracyComparePage() {
                 <p className="mb-3 text-xs text-slate-400">
                   Click a category to filter the breakdown table and timeline.
                 </p>
-                <div className="space-y-1">
+                <div className="max-h-80 flex-1 space-y-1 overflow-y-auto">
                   {scopedCategoryBreakdown.map((c) => {
                     const active = categoryFilter === c.category;
                     return (
@@ -1605,7 +1549,7 @@ export default function AccuracyComparePage() {
 
             {/* Per-stat breakdown table */}
             {result.byStat.length > 0 && (
-              <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <div className="flex items-center justify-between gap-3 border-b border-slate-200 p-4">
                   <h2 className="text-sm font-semibold text-slate-700">
                     Statistic breakdown
@@ -1622,7 +1566,7 @@ export default function AccuracyComparePage() {
                     <Download size={13} /> Export CSV
                   </button>
                 </div>
-                <div className="max-h-80 overflow-y-auto">
+                <div className="max-h-80 flex-1 overflow-y-auto">
                   <table className="w-full text-sm">
                     <thead className="sticky top-0 z-10">
                       <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
@@ -1704,6 +1648,7 @@ export default function AccuracyComparePage() {
                 </div>
               </div>
             )}
+            </div>
 
             {/* Per-player disposals & marks table */}
             {playerTable.length > 0 && (
@@ -1832,20 +1777,6 @@ export default function AccuracyComparePage() {
               </div>
             )}
 
-            {/* Per-team breakdown */}
-            {realTeams.length > 0 && (
-              <div className="mt-4">
-                <h2 className="mb-3 text-sm font-semibold text-slate-700">
-                  Accuracy by team
-                </h2>
-                <div className="grid gap-3 md:grid-cols-2">
-                  {realTeams.map((t) => (
-                    <TeamCard key={t.team} team={t} />
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Unmatched teams warning (name mismatch or one-team analyst) */}
             {unmatchedExtra > 0 && (
               <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-800">
@@ -1889,7 +1820,7 @@ export default function AccuracyComparePage() {
                     {categoryFilter !== "all" ? ` · ${categoryFilter}` : ""}
                   </span>
                 </div>
-                <div className="space-y-2.5">
+                <div className="max-h-[340px] space-y-2.5 overflow-y-auto pr-1">
                   {insights.map((ins, i) => {
                     const meta = TONE_META[ins.tone];
                     const Icon = meta.icon;
