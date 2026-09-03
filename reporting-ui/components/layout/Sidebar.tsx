@@ -161,10 +161,10 @@ export default function Sidebar() {
         <Image
           src="/Premier Data_Logo.png"
           alt="Premier Data logo"
-          width={480}
-          height={270}
+          width={543}
+          height={242}
           priority
-          className="mx-auto h-auto w-full max-w-[220px] object-contain"
+          className="mx-auto h-auto w-full max-w-[240px] object-contain"
         />
 
         <p className="mt-3 text-center text-sm font-medium tracking-wide text-slate-400">
