@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -155,13 +156,18 @@ export default function Sidebar() {
   return (
     <aside className="flex w-72 flex-col border-r border-slate-800 bg-[#0B1220]">
 
-      <div className="border-b border-slate-800 p-6">
+      <div className="border-b border-slate-800 px-6 py-6">
 
-        <h1 className="text-2xl font-bold text-white">
-          Premier Data
-        </h1>
+        <Image
+          src="/Premier Data_Logo.png"
+          alt="Premier Data logo"
+          width={480}
+          height={270}
+          priority
+          className="mx-auto h-auto w-full max-w-[220px] object-contain"
+        />
 
-        <p className="mt-1 text-sm text-slate-400">
+        <p className="mt-3 text-center text-sm font-medium tracking-wide text-slate-400">
           Operations Platform
         </p>
 
