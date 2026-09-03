@@ -248,7 +248,11 @@ export function parseInstances(xml: string): Instance[] {
     // Fall back to team from code if the Team label was absent.
     if (!team && code.includes(" - #")) team = code.split(" - #")[0].trim();
 
-    const playerNumber = parseNumber(playerRaw, code);
+    // Prefer the number from the CODE (e.g. "... - #42. Mino") — it's the
+    // reliable jersey number. The Player label sometimes reads "00 Mino"
+    // (a placeholder 0), which would otherwise collapse many players onto
+    // a bogus "#0" row.
+    const playerNumber = parseNumber(code, playerRaw);
 
     if (Number.isNaN(start)) continue;
 
