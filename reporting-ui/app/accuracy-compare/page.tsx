@@ -22,6 +22,8 @@ import { supabase } from "@/lib/supabase";
 import {
   saveAccuracyCheck,
   getAccuracyCheckById,
+  getSavedMasters,
+  type SavedMaster,
 } from "@/lib/api/accuracyChecks";
 import {
   parseInstances,
@@ -596,6 +598,7 @@ export default function AccuracyComparePage() {
   const [statusFilter, setStatusFilter] = useState<MatchStatus | "all">("all");
   const [teamFilter, setTeamFilter] = useState<string | "all">("all");
   const [categoryFilter, setCategoryFilter] = useState<string | "all">("all");
+  const [statFilter, setStatFilter] = useState<string | "all">("all");
 
   const [rangeMode, setRangeMode] = useState<"auto" | "full" | "manual">(
     "auto"
@@ -647,6 +650,9 @@ export default function AccuracyComparePage() {
     requestAnimationFrame(trySeek);
   };
 
+  // Previously-saved master XMLs, for the "reuse master" dropdown.
+  const [savedMasters, setSavedMasters] = useState<SavedMaster[]>([]);
+
   // Analyst allocation + save
   const [analystNames, setAnalystNames] = useState<string[]>([]);
   const [masterAnalyst, setMasterAnalyst] = useState("");
@@ -695,6 +701,17 @@ export default function AccuracyComparePage() {
     }
 
     loadNames();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Load previously-saved master XMLs for the reuse dropdown.
+  useEffect(() => {
+    let cancelled = false;
+    getSavedMasters().then((m) => {
+      if (!cancelled) setSavedMasters(m);
+    });
     return () => {
       cancelled = true;
     };
@@ -839,6 +856,11 @@ export default function AccuracyComparePage() {
   const rowCategory = (r: ComparisonRow) =>
     r.master?.category ?? r.analyst?.category ?? "Uncategorised";
 
+  const rowStat = (r: ComparisonRow) =>
+    r.master?.stat ?? r.analyst?.stat ?? "Uncategorised";
+
+  // Team + category scope. Drives the stat breakdown table (so every
+  // stat stays listed and clickable, regardless of statFilter).
   const teamScopedRows: ComparisonRow[] = useMemo(() => {
     if (!result) return [];
     return result.rows.filter(
@@ -848,10 +870,36 @@ export default function AccuracyComparePage() {
     );
   }, [result, teamFilter, categoryFilter]);
 
+  // Adds the selected-stat scope on top of team + category. Used for the
+  // top summary cards and (with status) the timeline.
+  const statScopedRows: ComparisonRow[] = useMemo(() => {
+    if (statFilter === "all") return teamScopedRows;
+    return teamScopedRows.filter((r) => rowStat(r) === statFilter);
+  }, [teamScopedRows, statFilter]);
+
   const filteredRows: ComparisonRow[] = useMemo(() => {
-    if (statusFilter === "all") return teamScopedRows;
-    return teamScopedRows.filter((r) => r.status === statusFilter);
-  }, [teamScopedRows, statusFilter]);
+    if (statusFilter === "all") return statScopedRows;
+    return statScopedRows.filter((r) => r.status === statusFilter);
+  }, [statScopedRows, statusFilter]);
+
+  // Summary that reflects the active team/category/stat filters (NOT the
+  // status filter, so the cards show the full breakdown of the scope).
+  const scopedSummary = useMemo(() => {
+    const count = (s: MatchStatus) =>
+      statScopedRows.filter((r) => r.status === s).length;
+    const exact = count("exact");
+    const masterTotal = statScopedRows.filter((r) => r.master).length;
+    return {
+      accuracy: masterTotal > 0 ? exact / masterTotal : 0,
+      exact,
+      masterTotal,
+      wrongStat: count("wrong_stat"),
+      wrongPlayer: count("wrong_player"),
+      wrongTeam: count("wrong_team"),
+      missed: count("missed"),
+      extra: count("extra"),
+    };
+  }, [statScopedRows]);
 
   const scopedStatBreakdown = useMemo(() => {
     const map = new Map<string, { total: number; exact: number }>();
@@ -1146,6 +1194,38 @@ export default function AccuracyComparePage() {
               onLoad={setMaster}
               onClear={() => setMaster(null)}
             />
+            {savedMasters.length > 0 && (
+              <div className="mt-2">
+                <label className="mb-1 block text-xs font-medium text-slate-500">
+                  ...or reuse a saved master
+                </label>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const sm = savedMasters.find(
+                      (m) => m.fileName === e.target.value
+                    );
+                    if (!sm) return;
+                    setMaster({
+                      name: sm.fileName,
+                      instances: parseInstances(sm.xml),
+                      raw: sm.xml,
+                    });
+                    // If this master had a video and none is set yet,
+                    // prefill it too.
+                    if (sm.videoUrl && !videoUrl) setVideoUrl(sm.videoUrl);
+                  }}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none"
+                >
+                  <option value="">Select a saved master...</option>
+                  {savedMasters.map((m) => (
+                    <option key={m.fileName} value={m.fileName}>
+                      {m.fileName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="mt-2">
               <label className="mb-1 block text-xs font-medium text-slate-500">
                 Coded by (master)
@@ -1431,26 +1511,62 @@ export default function AccuracyComparePage() {
               )}
             </div>
 
-            {/* Summary cards */}
+            {/* Active-filter chips */}
+            {(statFilter !== "all" ||
+              categoryFilter !== "all" ||
+              teamFilter !== "all") && (
+              <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+                <span className="font-semibold uppercase tracking-wide text-slate-500">
+                  Showing:
+                </span>
+                {teamFilter !== "all" && (
+                  <span className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
+                    {teamFilter}
+                  </span>
+                )}
+                {categoryFilter !== "all" && (
+                  <span className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
+                    {categoryFilter}
+                  </span>
+                )}
+                {statFilter !== "all" && (
+                  <span className="rounded-md bg-red-100 px-2 py-0.5 font-medium text-red-700">
+                    {statFilter}
+                  </span>
+                )}
+                <button
+                  onClick={() => {
+                    setStatFilter("all");
+                    setCategoryFilter("all");
+                    setTeamFilter("all");
+                  }}
+                  className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-800"
+                >
+                  <X size={12} /> Clear all
+                </button>
+              </div>
+            )}
+
+            {/* Summary cards — reflect the active team/category/stat filter */}
             <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
               <StatCard
                 label="Accuracy"
-                value={`${(result.summary.accuracy * 100).toFixed(1)}%`}
+                value={`${(scopedSummary.accuracy * 100).toFixed(1)}%`}
                 accent={
-                  result.summary.accuracy >= 0.9
+                  scopedSummary.accuracy >= 0.9
                     ? "text-emerald-600"
-                    : result.summary.accuracy >= 0.75
+                    : scopedSummary.accuracy >= 0.75
                       ? "text-amber-600"
                       : "text-red-600"
                 }
-                sub={`${result.summary.exact}/${result.summary.masterTotal} exact`}
+                sub={`${scopedSummary.exact}/${scopedSummary.masterTotal} exact`}
               />
-              <StatCard label="Exact" value={`${result.summary.exact}`} accent="text-emerald-600" />
-              <StatCard label="Wrong stat" value={`${result.summary.wrongStat}`} accent="text-amber-600" />
-              <StatCard label="Wrong player" value={`${result.summary.wrongPlayer}`} accent="text-orange-600" />
-              <StatCard label="Wrong team" value={`${result.summary.wrongTeam}`} accent="text-red-600" />
-              <StatCard label="Missed" value={`${result.summary.missed}`} accent="text-slate-600" />
-              <StatCard label="Extra" value={`${result.summary.extra}`} accent="text-purple-600" />
+              <StatCard label="Exact" value={`${scopedSummary.exact}`} accent="text-emerald-600" />
+              <StatCard label="Wrong stat" value={`${scopedSummary.wrongStat}`} accent="text-amber-600" />
+              <StatCard label="Wrong player" value={`${scopedSummary.wrongPlayer}`} accent="text-orange-600" />
+              <StatCard label="Wrong team" value={`${scopedSummary.wrongTeam}`} accent="text-red-600" />
+              <StatCard label="Missed" value={`${scopedSummary.missed}`} accent="text-slate-600" />
+              <StatCard label="Extra" value={`${scopedSummary.extra}`} accent="text-purple-600" />
             </div>
 
             {/* Category breakdown */}
@@ -1555,12 +1671,26 @@ export default function AccuracyComparePage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {scopedStatBreakdown.map((s) => (
+                      {scopedStatBreakdown.map((s) => {
+                        const active = statFilter === s.stat;
+                        return (
                         <tr
                           key={s.stat}
-                          className="border-b border-slate-100 last:border-b-0 hover:bg-slate-50/60"
+                          onClick={() =>
+                            setStatFilter(active ? "all" : s.stat)
+                          }
+                          className={`cursor-pointer border-b border-slate-100 last:border-b-0 ${
+                            active
+                              ? "bg-red-50 ring-1 ring-inset ring-red-200"
+                              : "hover:bg-slate-50/60"
+                          }`}
+                          title="Click to filter the timeline by this stat"
                         >
-                          <td className="px-4 py-2 font-medium text-slate-800">
+                          <td
+                            className={`px-4 py-2 font-medium ${
+                              active ? ACCENT_TEXT : "text-slate-800"
+                            }`}
+                          >
                             {s.stat}
                           </td>
                           <td className="px-4 py-2 text-right tabular-nums text-slate-600">
@@ -1581,7 +1711,8 @@ export default function AccuracyComparePage() {
                             {(s.accuracy * 100).toFixed(0)}%
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                       {scopedStatBreakdown.length === 0 && (
                         <tr>
                           <td
@@ -1865,10 +1996,10 @@ export default function AccuracyComparePage() {
                     : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                 }`}
               >
-                All ({teamScopedRows.length})
+                All ({statScopedRows.length})
               </button>
               {(Object.keys(STATUS_META) as MatchStatus[]).map((s) => {
-                const n = teamScopedRows.filter((r) => r.status === s).length;
+                const n = statScopedRows.filter((r) => r.status === s).length;
                 if (n === 0) return null;
                 return (
                   <button

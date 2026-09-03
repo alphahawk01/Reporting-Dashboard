@@ -111,6 +111,47 @@ export async function saveAccuracyCheck(
     return data as AccuracyCheck;
 }
 
+export interface SavedMaster {
+    fileName: string;
+    xml: string;
+    videoUrl: string | null;
+}
+
+/**
+ * Distinct master XMLs already stored across saved checks, so a master
+ * can be re-selected from a dropdown instead of re-uploaded each time.
+ * De-duplicated by master file name (most recent wins).
+ */
+export async function getSavedMasters(): Promise<SavedMaster[]> {
+    const { data, error } = await supabase
+        .from("accuracy_checks")
+        .select("file_name_master, xml_master, video_url, created_at")
+        .not("xml_master", "is", null)
+        .order("created_at", { ascending: false });
+
+    if (error) {
+        console.error("Failed loading saved masters:", error);
+        return [];
+    }
+
+    const seen = new Set<string>();
+    const masters: SavedMaster[] = [];
+    for (const row of data ?? []) {
+        const fileName = (row as any).file_name_master as string | null;
+        const xml = (row as any).xml_master as string | null;
+        if (!fileName || !xml) continue;
+        const key = fileName.trim().toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        masters.push({
+            fileName,
+            xml,
+            videoUrl: (row as any).video_url ?? null,
+        });
+    }
+    return masters;
+}
+
 /**
  * Fetch a single accuracy check by id (used to re-open a saved check in
  * the Accuracy Comparison tab).
