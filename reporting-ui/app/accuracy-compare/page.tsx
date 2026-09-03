@@ -19,7 +19,10 @@ import {
   X as XIcon,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { saveAccuracyCheck } from "@/lib/api/accuracyChecks";
+import {
+  saveAccuracyCheck,
+  getAccuracyCheckById,
+} from "@/lib/api/accuracyChecks";
 import {
   parseInstances,
   compareInstances,
@@ -43,7 +46,7 @@ const ACCENT = "red-600"; // was pd-red
 const ACCENT_BG = "bg-red-600";
 const ACCENT_TEXT = "text-red-600";
 
-type LoadedFile = { name: string; instances: Instance[] };
+type LoadedFile = { name: string; instances: Instance[]; raw: string };
 
 const STATUS_META: Record<
   MatchStatus,
@@ -130,7 +133,7 @@ function Dropzone({
         setError("No <instance> entries found in this file.");
         return;
       }
-      onLoad({ name: f.name, instances });
+      onLoad({ name: f.name, instances, raw: text });
     } catch {
       setError("Could not read that file.");
     }
@@ -694,6 +697,47 @@ export default function AccuracyComparePage() {
     };
   }, []);
 
+  // Re-open a saved check: if the URL has ?check=<id>, load that check
+  // from Supabase, parse its stored XML back into master/analyst, and
+  // restore the allocation/label so the full comparison is rebuilt.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const checkId = params.get("check");
+    if (!checkId) return;
+
+    let cancelled = false;
+
+    (async () => {
+      const check = await getAccuracyCheckById(Number(checkId));
+      if (!check || cancelled) return;
+
+      if (check.xml_master) {
+        const instances = parseInstances(check.xml_master);
+        setMaster({
+          name: check.file_name_master ?? "master.xml",
+          instances,
+          raw: check.xml_master,
+        });
+      }
+      if (check.xml_analyst) {
+        const instances = parseInstances(check.xml_analyst);
+        setAnalyst({
+          name: check.file_name_analyst ?? "analyst.xml",
+          instances,
+          raw: check.xml_analyst,
+        });
+      }
+      if (check.tolerance != null) setTolerance(check.tolerance);
+      if (check.master_analyst_name) setMasterAnalyst(check.master_analyst_name);
+      setGradedAnalyst(check.analyst_name);
+      if (check.match_label) setMatchLabel(check.match_label);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const analystWindow = useMemo(() => {
     const files = [master, analyst].filter(
       (f): f is LoadedFile => !!f && f.instances.length > 0
@@ -970,6 +1014,9 @@ export default function AccuracyComparePage() {
         // Save the full-window result (not the team/category-scoped one)
         // so the stored summary reflects the whole check.
         result,
+        // Store the raw XML so the check can be fully re-opened later.
+        xmlMaster: master?.raw ?? null,
+        xmlAnalyst: analyst?.raw ?? null,
       });
 
       setSaveMsg(

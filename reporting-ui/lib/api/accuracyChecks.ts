@@ -33,11 +33,17 @@ export interface AccuracyCheck {
 
     category_breakdown: CategoryBreakdown[] | null;
     team_breakdown: TeamBreakdown[] | null;
+
+    // Raw source XML so a saved check can be fully re-opened.
+    xml_master: string | null;
+    xml_analyst: string | null;
 }
 
 export interface SaveAccuracyCheckInput {
     analystName: string;
     masterAnalystName?: string | null;
+    xmlMaster?: string | null;
+    xmlAnalyst?: string | null;
     matchLabel?: string | null;
     fileNameMaster?: string | null;
     fileNameAnalyst?: string | null;
@@ -75,6 +81,9 @@ export async function saveAccuracyCheck(
 
         category_breakdown: input.result.byCategory ?? null,
         team_breakdown: input.result.byTeam ?? null,
+
+        xml_master: input.xmlMaster ?? null,
+        xml_analyst: input.xmlAnalyst ?? null,
     };
 
     const { data, error } = await supabase
@@ -86,6 +95,27 @@ export async function saveAccuracyCheck(
     if (error) {
         console.error("Failed saving accuracy check:", error);
         throw new Error(error.message || "Failed saving accuracy check");
+    }
+
+    return data as AccuracyCheck;
+}
+
+/**
+ * Fetch a single accuracy check by id (used to re-open a saved check in
+ * the Accuracy Comparison tab).
+ */
+export async function getAccuracyCheckById(
+    id: number
+): Promise<AccuracyCheck | null> {
+    const { data, error } = await supabase
+        .from("accuracy_checks")
+        .select("*")
+        .eq("id", id)
+        .single();
+
+    if (error) {
+        console.error("Failed loading accuracy check:", error);
+        return null;
     }
 
     return data as AccuracyCheck;
