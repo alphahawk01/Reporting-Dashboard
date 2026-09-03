@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
   Upload,
@@ -15,6 +15,8 @@ import {
   Clock,
   Download,
   Save,
+  Video,
+  X as XIcon,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { saveAccuracyCheck } from "@/lib/api/accuracyChecks";
@@ -602,6 +604,46 @@ export default function AccuracyComparePage() {
   const [sport, setSport] = useState<Sport>("afl");
   const sportConfig = SPORT_CONFIGS[sport];
 
+  // Video review: paste a URL, open a player, click any stat to seek.
+  const [videoUrl, setVideoUrl] = useState("");
+  const [videoOpen, setVideoOpen] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Current playback position (seconds), used to highlight the stat(s)
+  // whose [start, end] window is on screen right now.
+  const [videoTime, setVideoTime] = useState(0);
+
+  // Ref to the currently-active timeline row so we can keep it in view
+  // as the video plays.
+  const activeRowRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    activeRowRef.current?.scrollIntoView({
+      block: "nearest",
+      behavior: "smooth",
+    });
+  }, [videoTime]);
+
+  // Seek the (open) video to a given second. Clicking a timeline row
+  // jumps to the instance's START time (the lead-in of the coded
+  // window) so you see the build-up to the action. If the player isn't
+  // mounted yet (first click opens it), retry briefly until the <video>
+  // element exists.
+  const seekVideo = (seconds: number) => {
+    setVideoOpen(true);
+    const target = Math.max(0, seconds);
+    let attempts = 0;
+    const trySeek = () => {
+      const v = videoRef.current;
+      if (v) {
+        v.currentTime = target;
+        v.play().catch(() => {});
+        return;
+      }
+      if (attempts++ < 30) requestAnimationFrame(trySeek);
+    };
+    requestAnimationFrame(trySeek);
+  };
+
   // Analyst allocation + save
   const [analystNames, setAnalystNames] = useState<string[]>([]);
   const [masterAnalyst, setMasterAnalyst] = useState("");
@@ -986,6 +1028,32 @@ export default function AccuracyComparePage() {
               {sc.label}
             </button>
           ))}
+        </div>
+
+        {/* Video URL + Watch */}
+        <div className="mb-5 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Game video
+          </span>
+          <input
+            type="text"
+            value={videoUrl}
+            onChange={(e) => setVideoUrl(e.target.value)}
+            placeholder="Paste the game video URL (mp4 / direct link)"
+            className="min-w-[280px] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none"
+          />
+          <button
+            onClick={() => videoUrl.trim() && setVideoOpen(true)}
+            disabled={!videoUrl.trim()}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition ${ACCENT_BG} hover:opacity-90 disabled:cursor-not-allowed disabled:bg-slate-300`}
+          >
+            <Video size={14} /> Watch
+          </button>
+          {videoUrl.trim() && (
+            <span className="text-xs text-slate-400">
+              Click any stat in the timeline to jump to that moment.
+            </span>
+          )}
         </div>
 
         {/* Upload row */}
@@ -1784,10 +1852,14 @@ export default function AccuracyComparePage() {
                           {meta.label}
                         </span>
                       </div>
-                      <TimelineCell instance={row.master} />
+                      <TimelineCell
+                        instance={row.master}
+                        onSeek={videoUrl.trim() ? seekVideo : undefined}
+                      />
                       <TimelineCell
                         instance={row.analyst}
                         delta={row.timeDelta}
+                        onSeek={videoUrl.trim() ? seekVideo : undefined}
                       />
                     </div>
                   );
@@ -1802,6 +1874,111 @@ export default function AccuracyComparePage() {
           </>
         )}
       </div>
+
+      {/* Split-screen review pop-up: video on the left half, both
+          timelines (clickable) on the right half. */}
+      {videoOpen && videoUrl.trim() && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-slate-900/80 p-4 backdrop-blur-sm">
+          <div className="mx-auto flex h-full w-full max-w-[1600px] flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+            {/* Header */}
+            <div className="flex items-center justify-between gap-2 border-b border-slate-700 px-4 py-2.5">
+              <span className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+                <Video size={15} /> Video review
+                <span className="text-xs font-normal text-slate-400">
+                  · click any stat to jump to that moment
+                </span>
+              </span>
+              <button
+                onClick={() => setVideoOpen(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
+                title="Close"
+              >
+                <XIcon size={18} />
+              </button>
+            </div>
+
+            {/* Body: video (left) + timelines (right) */}
+            <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-2">
+              {/* Left: video */}
+              <div className="flex min-h-0 items-center justify-center bg-black p-2">
+                <video
+                  ref={videoRef}
+                  src={videoUrl.trim()}
+                  controls
+                  onTimeUpdate={(e) =>
+                    setVideoTime(e.currentTarget.currentTime)
+                  }
+                  className="max-h-full max-w-full"
+                />
+              </div>
+
+              {/* Right: timelines */}
+              <div className="flex min-h-0 flex-col border-t border-slate-700 lg:border-l lg:border-t-0">
+                <div className="grid grid-cols-[90px_1fr_1fr] border-b border-slate-700 bg-slate-800 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  <div className="p-2.5">Status</div>
+                  <div className="border-l border-slate-700 p-2.5">
+                    Master
+                  </div>
+                  <div className="border-l border-slate-700 p-2.5">
+                    Analyst
+                  </div>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto bg-white">
+                  {filteredRows.map((row, i) => {
+                    const meta = STATUS_META[row.status];
+                    const masterActive =
+                      !!row.master &&
+                      videoTime >= row.master.start &&
+                      videoTime <= row.master.end;
+                    const analystActive =
+                      !!row.analyst &&
+                      videoTime >= row.analyst.start &&
+                      videoTime <= row.analyst.end;
+                    const rowActive = masterActive || analystActive;
+                    return (
+                      <div
+                        key={i}
+                        ref={
+                          rowActive ? activeRowRef : undefined
+                        }
+                        className={`grid grid-cols-[90px_1fr_1fr] border-b text-sm last:border-b-0 ${
+                          rowActive
+                            ? "border-sky-300 bg-sky-50"
+                            : "border-slate-100"
+                        }`}
+                      >
+                        <div className="flex items-center p-2.5">
+                          <span
+                            className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ${meta.badge}`}
+                          >
+                            {meta.label}
+                          </span>
+                        </div>
+                        <TimelineCell
+                          instance={row.master}
+                          onSeek={seekVideo}
+                          active={masterActive}
+                        />
+                        <TimelineCell
+                          instance={row.analyst}
+                          delta={row.timeDelta}
+                          onSeek={seekVideo}
+                          active={analystActive}
+                        />
+                      </div>
+                    );
+                  })}
+                  {filteredRows.length === 0 && (
+                    <div className="p-8 text-center text-sm text-slate-400">
+                      No rows for this filter.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1846,9 +2023,13 @@ function TeamToggle({
 function TimelineCell({
   instance,
   delta,
+  onSeek,
+  active,
 }: {
   instance: Instance | null;
   delta?: number | null;
+  onSeek?: (seconds: number) => void;
+  active?: boolean;
 }) {
   if (!instance) {
     return (
@@ -1870,12 +2051,29 @@ function TimelineCell({
       ? "bg-orange-50 border-orange-200"
       : "border-slate-200";
 
+  const clickable = !!onSeek;
+
   return (
-    <div className={`border-l p-3 ${cellBg}`}>
+    <div
+      className={`border-l p-3 ${cellBg} ${
+        clickable ? "cursor-pointer hover:brightness-95" : ""
+      } ${
+        active ? "ring-2 ring-inset ring-sky-500" : ""
+      }`}
+      onClick={
+        clickable
+          ? () => onSeek!(instance.start)
+          : undefined
+      }
+      title={clickable ? "Jump to this moment in the video" : undefined}
+    >
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <span className="font-mono text-xs font-semibold text-slate-500">
           {formatTime(instance.mid)}
         </span>
+        {clickable && (
+          <Video size={11} className="text-slate-400" />
+        )}
         {delta != null && delta > 0 && (
           <span className="text-[10px] text-slate-400">
             (+{delta.toFixed(1)}s)
