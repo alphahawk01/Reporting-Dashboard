@@ -652,6 +652,9 @@ export default function AccuracyComparePage() {
   const [masterAnalyst, setMasterAnalyst] = useState("");
   const [gradedAnalyst, setGradedAnalyst] = useState("");
   const [matchLabel, setMatchLabel] = useState("");
+  // Whether the user has typed their own label. Until they do, the
+  // label auto-defaults to AnalystName_AnalystFilename.
+  const [labelEdited, setLabelEdited] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
@@ -730,7 +733,10 @@ export default function AccuracyComparePage() {
       if (check.tolerance != null) setTolerance(check.tolerance);
       if (check.master_analyst_name) setMasterAnalyst(check.master_analyst_name);
       setGradedAnalyst(check.analyst_name);
-      if (check.match_label) setMatchLabel(check.match_label);
+      if (check.match_label) {
+        setMatchLabel(check.match_label);
+        setLabelEdited(true);
+      }
       if (check.video_url) setVideoUrl(check.video_url);
       if (check.sport === "afl" || check.sport === "football")
         setSport(check.sport);
@@ -740,6 +746,20 @@ export default function AccuracyComparePage() {
       cancelled = true;
     };
   }, []);
+
+  // Default the save label to AnalystName_AnalystFilename (analyst name
+  // with spaces stripped + underscore + analyst file name minus .xml),
+  // until the user types their own label.
+  useEffect(() => {
+    if (labelEdited) return;
+    if (!gradedAnalyst || !analyst?.name) {
+      setMatchLabel("");
+      return;
+    }
+    const analystNoSpaces = gradedAnalyst.replace(/\s+/g, "");
+    const fileNoExt = analyst.name.replace(/\.xml$/i, "");
+    setMatchLabel(`${analystNoSpaces}_${fileNoExt}`);
+  }, [gradedAnalyst, analyst, labelEdited]);
 
   const analystWindow = useMemo(() => {
     const files = [master, analyst].filter(
@@ -1375,8 +1395,11 @@ export default function AccuracyComparePage() {
               <input
                 type="text"
                 value={matchLabel}
-                onChange={(e) => setMatchLabel(e.target.value)}
-                placeholder="Match label (e.g. Round 20 — Home v Away)"
+                onChange={(e) => {
+                  setLabelEdited(true);
+                  setMatchLabel(e.target.value);
+                }}
+                placeholder="Match label (auto: AnalystName_FileName)"
                 className="min-w-[240px] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none"
               />
               <div className="text-xs text-slate-500">

@@ -249,6 +249,7 @@ export default function AccuracyChecksPage() {
                       <tr>
                         <th className="px-4 py-2.5">Date</th>
                         <th className="px-4 py-2.5">Match</th>
+                        <th className="px-4 py-2.5">Analyst</th>
                         <th className="px-4 py-2.5">Master by</th>
                         <th className="px-4 py-2.5 text-right">Accuracy</th>
                         <th className="px-4 py-2.5 text-right">Exact/Master</th>
@@ -271,6 +272,9 @@ export default function AccuracyChecksPage() {
                             </td>
                             <td className="px-4 py-2.5 text-slate-700">
                               {c.match_label || "—"}
+                            </td>
+                            <td className="px-4 py-2.5 font-medium text-slate-700">
+                              {c.analyst_name || "—"}
                             </td>
                             <td className="px-4 py-2.5 text-slate-600">
                               {c.master_analyst_name || "—"}
