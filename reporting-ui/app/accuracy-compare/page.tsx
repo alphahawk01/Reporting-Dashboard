@@ -149,7 +149,7 @@ function Dropzone({
           e.preventDefault();
           handleFiles(e.dataTransfer.files);
         }}
-        className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-6 text-center transition ${
+        className={`flex h-[68px] cursor-pointer items-center gap-3 rounded-xl border border-dashed px-4 transition ${
           file
             ? "border-emerald-300 bg-emerald-50/50"
             : "border-slate-300 bg-slate-50 hover:border-red-500 hover:bg-red-50/40"
@@ -163,17 +163,25 @@ function Dropzone({
         />
         {file ? (
           <>
-            <FileText className="mb-2 text-emerald-600" size={28} />
-            <p className="text-sm font-semibold text-slate-900">{file.name}</p>
-            <p className="text-xs text-slate-500">
-              {file.instances.length} instances parsed
-            </p>
+            <FileText className="shrink-0 text-emerald-600" size={20} />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-900">
+                {file.name}
+              </p>
+              <p className="text-xs text-slate-500">
+                {file.instances.length} instances parsed
+              </p>
+            </div>
           </>
         ) : (
           <>
-            <Upload className="mb-2 text-slate-400" size={28} />
-            <p className="text-sm font-semibold text-slate-900">{title}</p>
-            <p className="text-xs text-slate-500">{subtitle}</p>
+            <Upload className="shrink-0 text-slate-400" size={20} />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-900">
+                {title}
+              </p>
+              <p className="text-xs text-slate-500">{subtitle}</p>
+            </div>
           </>
         )}
       </label>
@@ -1204,7 +1212,7 @@ export default function AccuracyComparePage() {
         </div>
 
         {/* Upload row */}
-        <div className="grid gap-4 md:grid-cols-[1fr_auto_1fr]">
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
           <div>
             <p className="mb-2 text-sm font-semibold text-slate-700">
               Master{" "}
@@ -1388,28 +1396,8 @@ export default function AccuracyComparePage() {
             )}
           </div>
 
-          <p className="mt-2.5 text-xs text-slate-500">
-            {rangeMode === "auto" && analystWindow && (
-              <>
-                Comparing only the section covered by the smaller file
-                {analystWindow.source ? ` (${analystWindow.source})` : ""}:{" "}
-                <span className="font-semibold text-slate-700">
-                  {analystWindow.start.toFixed(2)} –{" "}
-                  {analystWindow.end.toFixed(2)}s
-                </span>{" "}
-                ({formatTime(analystWindow.start)} –{" "}
-                {formatTime(analystWindow.end)}). Instances outside this window
-                are ignored so a partial file isn&apos;t penalised.
-              </>
-            )}
-            {rangeMode === "full" &&
-              "Comparing the entire game. A partial analyst file will show many missed events."}
-            {rangeMode === "manual" &&
-              "Enter start and end in seconds (matching the XML, e.g. 2082 – 3976). Leave a box blank for open-ended."}
-          </p>
-
           {result && master && analyst && (
-            <p className="mt-1 text-xs text-slate-500">
+            <p className="mt-2.5 text-xs text-slate-500">
               In window:{" "}
               <span className="font-semibold text-slate-700">
                 {master.instances.filter(inRange).length}
@@ -1441,57 +1429,6 @@ export default function AccuracyComparePage() {
 
         {result && (
           <>
-            {/* Settings summary */}
-            <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs text-slate-600 shadow-sm">
-              <span>
-                <span className="text-slate-400">Master:</span>{" "}
-                <span className="font-semibold text-slate-800">
-                  {master?.name}
-                </span>
-              </span>
-              <span>
-                <span className="text-slate-400">Analyst:</span>{" "}
-                <span className="font-semibold text-slate-800">
-                  {analyst?.name}
-                </span>
-              </span>
-              <span>
-                <span className="text-slate-400">Tolerance:</span>{" "}
-                <span className="font-semibold text-slate-800">
-                  ±{tolerance}s
-                </span>
-              </span>
-              <span>
-                <span className="text-slate-400">Range:</span>{" "}
-                <span className="font-semibold text-slate-800">
-                  {rangeMode === "auto"
-                    ? "Overlapping section"
-                    : rangeMode === "manual"
-                      ? "Custom"
-                      : "Full game"}
-                  {effectiveRange.start > -Infinity ||
-                  effectiveRange.end < Infinity
-                    ? ` · ${
-                        effectiveRange.start > -Infinity
-                          ? effectiveRange.start.toFixed(0)
-                          : "start"
-                      }–${
-                        effectiveRange.end < Infinity
-                          ? effectiveRange.end.toFixed(0)
-                          : "end"
-                      }s`
-                    : ""}
-                </span>
-              </span>
-              <span>
-                <span className="text-slate-400">In window:</span>{" "}
-                <span className="font-semibold text-slate-800">
-                  {master?.instances.filter(inRange).length} master /{" "}
-                  {analyst?.instances.filter(inRange).length} analyst
-                </span>
-              </span>
-            </div>
-
             {/* Save allocation bar */}
             <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="text-sm font-semibold text-slate-700">
