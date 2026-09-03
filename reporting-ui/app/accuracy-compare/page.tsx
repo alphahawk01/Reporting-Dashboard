@@ -40,7 +40,6 @@ import {
 const ACCENT = "red-600"; // was pd-red
 const ACCENT_BG = "bg-red-600";
 const ACCENT_TEXT = "text-red-600";
-const NAVY_BG = "bg-slate-900"; // was pd-navy
 
 type LoadedFile = { name: string; instances: Instance[] };
 
@@ -206,17 +205,22 @@ function exportStatCsv(stats: StatBreakdown[]) {
   URL.revokeObjectURL(url);
 }
 
-// Derived per-player counts shape (master or analyst side).
-type PlayerCounts = {
-  effKick: number;
-  ineffKick: number;
-  effHb: number;
-  ineffHb: number;
-  marks: number;
-  totalKicks: number;
-  totalHb: number;
-  disposals: number;
-};
+// ------------------------------------------------------------------
+// SPORTS
+// ------------------------------------------------------------------
+// The per-player stats table is sport-specific. Each sport defines:
+//   - init():   the zeroed counts object
+//   - bump():   classify a stat label into the counts
+//   - derive(): compute any totals from the raw counts
+//   - columns:  which counts to show (label + accessor)
+//   - relevant(): whether a player row has any data worth showing
+// This keeps the table generic so new sports just add a config entry.
+
+type Sport = "afl" | "football";
+
+// A counts object is an open string->number map so each sport can use
+// its own keys.
+type PlayerCounts = Record<string, number>;
 
 type PlayerRow = {
   key: string;
@@ -227,20 +231,215 @@ type PlayerRow = {
   analystOnly: boolean;
 };
 
-const PLAYER_COLS: {
+type PlayerCol = {
   key: string;
   label: string;
   get: (c: PlayerCounts) => number;
-}[] = [
-  { key: "disposals", label: "Total Disposals", get: (c) => c.disposals },
-  { key: "effKick", label: "Eff Kicks", get: (c) => c.effKick },
-  { key: "ineffKick", label: "Ineff Kicks", get: (c) => c.ineffKick },
-  { key: "totalKicks", label: "Total Kicks", get: (c) => c.totalKicks },
-  { key: "effHb", label: "Eff Handballs", get: (c) => c.effHb },
-  { key: "ineffHb", label: "Ineff Handballs", get: (c) => c.ineffHb },
-  { key: "totalHb", label: "Total Handballs", get: (c) => c.totalHb },
-  { key: "marks", label: "Marks", get: (c) => c.marks },
-];
+};
+
+type SportConfig = {
+  id: Sport;
+  label: string;
+  init: () => PlayerCounts;
+  bump: (c: PlayerCounts, statLower: string) => void;
+  derive: (c: PlayerCounts) => PlayerCounts;
+  columns: PlayerCol[];
+  relevant: (master: PlayerCounts, analyst: PlayerCounts) => boolean;
+  csvName: string;
+};
+
+// ---- Aussie Rules ------------------------------------------------
+const AFL_CONFIG: SportConfig = {
+  id: "afl",
+  label: "Aussie Rules",
+  init: () => ({ effKick: 0, ineffKick: 0, effHb: 0, ineffHb: 0, marks: 0 }),
+  bump: (c, s) => {
+    const isKick = s.includes("kick");
+    const isHb = s.includes("handball");
+    const isEff = s.includes("effective") && !s.includes("ineffective");
+    const isIneff = s.includes("ineffective");
+    if (isKick && isEff) c.effKick += 1;
+    else if (isKick && isIneff) c.ineffKick += 1;
+    else if (isHb && isEff) c.effHb += 1;
+    else if (isHb && isIneff) c.ineffHb += 1;
+    else if (
+      s.includes("mark") &&
+      (s.includes("contested") || s.includes("uncontested"))
+    )
+      c.marks += 1;
+  },
+  derive: (c) => ({
+    ...c,
+    totalKicks: c.effKick + c.ineffKick,
+    totalHb: c.effHb + c.ineffHb,
+    disposals: c.effKick + c.ineffKick + c.effHb + c.ineffHb,
+  }),
+  columns: [
+    { key: "disposals", label: "Total Disposals", get: (c) => c.disposals },
+    { key: "effKick", label: "Eff Kicks", get: (c) => c.effKick },
+    { key: "ineffKick", label: "Ineff Kicks", get: (c) => c.ineffKick },
+    { key: "totalKicks", label: "Total Kicks", get: (c) => c.totalKicks },
+    { key: "effHb", label: "Eff Handballs", get: (c) => c.effHb },
+    { key: "ineffHb", label: "Ineff Handballs", get: (c) => c.ineffHb },
+    { key: "totalHb", label: "Total Handballs", get: (c) => c.totalHb },
+    { key: "marks", label: "Marks", get: (c) => c.marks },
+  ],
+  relevant: (m, a) =>
+    m.disposals + m.marks + a.disposals + a.marks > 0,
+  csvName: "player-disposals-marks.csv",
+};
+
+// ---- Football (Soccer) -------------------------------------------
+// Stat keywords match the actual labels used in the football XML, e.g.
+// "Short Passes Successful", "Crosses Unsuccesful" (note the source's
+// misspelling), "Ground Duels Won", "Shots Off Target", etc.
+const FOOTBALL_CONFIG: SportConfig = {
+  id: "football",
+  label: "Football",
+  init: () => ({
+    shortPassSucc: 0,
+    shortPassUnsucc: 0,
+    longPassSucc: 0,
+    longPassUnsucc: 0,
+    throughSucc: 0,
+    throughUnsucc: 0,
+    crossSucc: 0,
+    crossUnsucc: 0,
+    touches: 0,
+    carries: 0,
+    shots: 0,
+    goals: 0,
+    tacklesSucc: 0,
+    tacklesUnsucc: 0,
+    dribblesSucc: 0,
+    dribblesUnsucc: 0,
+    interceptions: 0,
+    clearances: 0,
+    ballRecoveries: 0,
+    groundDuelsWon: 0,
+    groundDuelsLost: 0,
+    aerialWon: 0,
+    aerialLost: 0,
+    headers: 0,
+    fouls: 0,
+    foulsDrawn: 0,
+  }),
+  bump: (c, s) => {
+    // Shots & goals first (before generic pass/cross checks).
+    if (s.includes("goal") && !s.includes("goal kick")) c.goals += 1;
+    else if (s.includes("shot")) c.shots += 1; // off target / saved / free kick shots
+    // Passing
+    else if (s.includes("short pass") && s.includes("unsuccessful"))
+      c.shortPassUnsucc += 1;
+    else if (s.includes("short pass") && s.includes("successful"))
+      c.shortPassSucc += 1;
+    else if (s.includes("long pass") && s.includes("unsuccessful"))
+      c.longPassUnsucc += 1;
+    else if (s.includes("long pass") && s.includes("successful"))
+      c.longPassSucc += 1;
+    else if (s.includes("through ball") && s.includes("unsuccessful"))
+      c.throughUnsucc += 1;
+    else if (s.includes("through ball") && s.includes("successful"))
+      c.throughSucc += 1;
+    // Crosses — source misspells "Unsuccesful" (one 's'), so match both.
+    else if (
+      s.includes("cross") &&
+      (s.includes("unsuccessful") || s.includes("unsuccesful"))
+    )
+      c.crossUnsucc += 1;
+    else if (s.includes("cross") && s.includes("successful"))
+      c.crossSucc += 1;
+    // On-ball
+    else if (s.includes("touch")) c.touches += 1;
+    else if (s.includes("carr")) c.carries += 1; // Carries
+    // Defensive / duels
+    else if (s.includes("tackle") && s.includes("unsuccessful"))
+      c.tacklesUnsucc += 1;
+    else if (s.includes("tackle") && s.includes("successful"))
+      c.tacklesSucc += 1;
+    else if (s.includes("dribble") && s.includes("unsuccessful"))
+      c.dribblesUnsucc += 1;
+    else if (s.includes("dribble") && s.includes("successful"))
+      c.dribblesSucc += 1;
+    else if (s.includes("intercept")) c.interceptions += 1;
+    else if (s.includes("clearance")) c.clearances += 1;
+    else if (s.includes("ball recover")) c.ballRecoveries += 1;
+    else if (s.includes("ground duels won")) c.groundDuelsWon += 1;
+    else if (s.includes("ground duels lost")) c.groundDuelsLost += 1;
+    else if (s.includes("aerial win")) c.aerialWon += 1;
+    else if (s.includes("aerial loss")) c.aerialLost += 1;
+    else if (s.includes("header")) c.headers += 1;
+    else if (s.includes("fouls drawn")) c.foulsDrawn += 1;
+    else if (s.includes("foul")) c.fouls += 1;
+  },
+  derive: (c) => ({
+    ...c,
+    passSucc: c.shortPassSucc + c.longPassSucc + c.throughSucc,
+    passUnsucc: c.shortPassUnsucc + c.longPassUnsucc + c.throughUnsucc,
+    totalPasses:
+      c.shortPassSucc +
+      c.longPassSucc +
+      c.throughSucc +
+      c.shortPassUnsucc +
+      c.longPassUnsucc +
+      c.throughUnsucc,
+    crosses: c.crossSucc + c.crossUnsucc,
+    tackles: c.tacklesSucc + c.tacklesUnsucc,
+  }),
+  columns: [
+    { key: "touches", label: "Touches", get: (c) => c.touches },
+    { key: "totalPasses", label: "Passes", get: (c) => c.totalPasses },
+    { key: "passSucc", label: "Pass Succ", get: (c) => c.passSucc },
+    { key: "passUnsucc", label: "Pass Unsucc", get: (c) => c.passUnsucc },
+    { key: "carries", label: "Carries", get: (c) => c.carries },
+    { key: "crosses", label: "Crosses", get: (c) => c.crosses },
+    { key: "shots", label: "Shots", get: (c) => c.shots },
+    { key: "goals", label: "Goals", get: (c) => c.goals },
+    { key: "tackles", label: "Tackles", get: (c) => c.tackles },
+    {
+      key: "interceptions",
+      label: "Intercepts",
+      get: (c) => c.interceptions,
+    },
+    { key: "clearances", label: "Clearances", get: (c) => c.clearances },
+    {
+      key: "ballRecoveries",
+      label: "Ball Recov",
+      get: (c) => c.ballRecoveries,
+    },
+    {
+      key: "dribblesSucc",
+      label: "Dribbles",
+      get: (c) => c.dribblesSucc + c.dribblesUnsucc,
+    },
+    { key: "headers", label: "Headers", get: (c) => c.headers },
+    { key: "fouls", label: "Fouls", get: (c) => c.fouls },
+  ],
+  relevant: (m, a) => {
+    const sum = (c: PlayerCounts) =>
+      c.touches +
+      c.totalPasses +
+      c.carries +
+      c.crosses +
+      c.shots +
+      c.goals +
+      c.tackles +
+      c.interceptions +
+      c.clearances +
+      c.ballRecoveries +
+      c.dribblesSucc +
+      c.dribblesUnsucc +
+      c.headers +
+      c.fouls;
+    return sum(m) + sum(a) > 0;
+  },
+  csvName: "player-football-stats.csv",
+};
+
+const SPORT_CONFIGS: Record<Sport, SportConfig> = {
+  afl: AFL_CONFIG,
+  football: FOOTBALL_CONFIG,
+};
 
 function FragmentSubHead() {
   return (
@@ -280,13 +479,13 @@ function PlayerCells({
   );
 }
 
-function exportPlayerCsv(rows: PlayerRow[]) {
+function exportPlayerCsv(rows: PlayerRow[], cols: PlayerCol[], fileName: string) {
   const head = ["Player"];
-  for (const col of PLAYER_COLS) head.push(`${col.label} (M)`, `${col.label} (A)`);
+  for (const col of cols) head.push(`${col.label} (M)`, `${col.label} (A)`);
   head.push("Analyst only");
   const lines = rows.map((p) => {
     const cells: string[] = [JSON.stringify(p.key)];
-    for (const col of PLAYER_COLS)
+    for (const col of cols)
       cells.push(String(col.get(p.master)), String(col.get(p.analyst)));
     cells.push(p.analystOnly ? "yes" : "");
     return cells.join(",");
@@ -296,7 +495,7 @@ function exportPlayerCsv(rows: PlayerRow[]) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "player-disposals-marks.csv";
+  a.download = fileName;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -398,6 +597,10 @@ export default function AccuracyComparePage() {
   );
   const [manualStart, setManualStart] = useState("");
   const [manualEnd, setManualEnd] = useState("");
+
+  // Active sport — drives which per-player stats table is shown.
+  const [sport, setSport] = useState<Sport>("afl");
+  const sportConfig = SPORT_CONFIGS[sport];
 
   // Analyst allocation + save
   const [analystNames, setAnalystNames] = useState<string[]>([]);
@@ -567,40 +770,45 @@ export default function AccuracyComparePage() {
     return { total, exact, accuracy: total > 0 ? exact / total : 0 };
   }, [scopedStatBreakdown]);
 
-  // Per-player disposals & marks table. Master is the gold standard; players
-  // that only appear in the analyst are added but flagged as incorrect.
-  // Respects the active time-range + team + category filters.
+  // Category breakdown that reflects the TEAM filter (but not the category
+  // filter, so every category stays visible + clickable). This replaces
+  // the previously-static result.byCategory so the "Accuracy by stat
+  // category" chart updates when Both/Home/Away is toggled.
+  const scopedCategoryBreakdown = useMemo(() => {
+    if (!result) return [];
+    const rows = result.rows.filter(
+      (r) => teamFilter === "all" || rowTeam(r) === teamFilter
+    );
+    const map = new Map<string, { total: number; exact: number }>();
+    for (const r of rows) {
+      if (!r.master) continue;
+      const category = r.master.category || "Uncategorised";
+      const e = map.get(category) ?? { total: 0, exact: 0 };
+      e.total += 1;
+      if (r.status === "exact") e.exact += 1;
+      map.set(category, e);
+    }
+    return Array.from(map.entries())
+      .map(([category, v]) => ({
+        category,
+        total: v.total,
+        exact: v.exact,
+        accuracy: v.total > 0 ? v.exact / v.total : 0,
+      }))
+      .sort((a, b) => b.total - a.total);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result, teamFilter]);
+
+  // Per-player stats table. Driven by the active sport's config (see
+  // SPORT_CONFIGS): the same aggregation, with sport-specific stat
+  // classification, derived totals, columns and relevance filter.
+  // Master is the gold standard; players only in the analyst are flagged.
+  // Respects the active time-range + team filters.
   const playerTable = useMemo(() => {
     if (!canonical) return [];
 
     const inScope = (i: Instance) =>
       inRange(i) && (teamFilter === "all" || i.team === teamFilter);
-
-    const empty = () => ({
-      effKick: 0,
-      ineffKick: 0,
-      effHb: 0,
-      ineffHb: 0,
-      marks: 0,
-    });
-    type Counts = ReturnType<typeof empty>;
-
-    const bump = (c: Counts, statRaw: string) => {
-      const s = statRaw.toLowerCase();
-      const isKick = s.includes("kick");
-      const isHb = s.includes("handball");
-      const isEff = s.includes("effective") && !s.includes("ineffective");
-      const isIneff = s.includes("ineffective");
-      if (isKick && isEff) c.effKick += 1;
-      else if (isKick && isIneff) c.ineffKick += 1;
-      else if (isHb && isEff) c.effHb += 1;
-      else if (isHb && isIneff) c.ineffHb += 1;
-      else if (
-        s.includes("mark") &&
-        (s.includes("contested") || s.includes("uncontested"))
-      )
-        c.marks += 1; // only contested + uncontested marks
-    };
 
     // key = "team|number"; keep display name + which side(s) it appears in.
     const rows = new Map<
@@ -608,8 +816,8 @@ export default function AccuracyComparePage() {
       {
         team: string;
         number: number | null;
-        master: Counts;
-        analyst: Counts;
+        master: PlayerCounts;
+        analyst: PlayerCounts;
         inMaster: boolean;
         inAnalyst: boolean;
       }
@@ -622,8 +830,8 @@ export default function AccuracyComparePage() {
         r = {
           team: i.team,
           number: i.playerNumber,
-          master: empty(),
-          analyst: empty(),
+          master: sportConfig.init(),
+          analyst: sportConfig.init(),
           inMaster: false,
           inAnalyst: false,
         };
@@ -636,39 +844,27 @@ export default function AccuracyComparePage() {
       if (!inScope(i)) continue;
       const r = ensure(i);
       r.inMaster = true;
-      bump(r.master, i.stat);
+      sportConfig.bump(r.master, i.stat.toLowerCase());
     }
     for (const i of canonical.analyst) {
       if (!inScope(i)) continue;
       const r = ensure(i);
       r.inAnalyst = true;
-      bump(r.analyst, i.stat);
+      sportConfig.bump(r.analyst, i.stat.toLowerCase());
     }
-
-    const derive = (c: Counts) => ({
-      ...c,
-      totalKicks: c.effKick + c.ineffKick,
-      totalHb: c.effHb + c.ineffHb,
-      disposals: c.effKick + c.ineffKick + c.effHb + c.ineffHb,
-    });
 
     return Array.from(rows.values())
       .map((r) => ({
         key: `${r.team} - #${r.number ?? "?"}`,
         team: r.team,
         number: r.number,
-        master: derive(r.master),
-        analyst: derive(r.analyst),
+        master: sportConfig.derive(r.master),
+        analyst: sportConfig.derive(r.analyst),
         // A player only in the analyst (not in master) is incorrect.
         analystOnly: r.inAnalyst && !r.inMaster,
       }))
-      // Drop players with no disposals/marks on either side (e.g. only had
-      // tackles or stoppages — not relevant to this table).
-      .filter(
-        (r) =>
-          r.master.disposals + r.master.marks + r.analyst.disposals + r.analyst.marks >
-          0
-      )
+      // Drop players with no relevant stats on either side.
+      .filter((r) => sportConfig.relevant(r.master, r.analyst))
       .sort((a, b) => {
         // Master players first, then by team, then by number.
         if (a.analystOnly !== b.analystOnly) return a.analystOnly ? 1 : -1;
@@ -676,7 +872,7 @@ export default function AccuracyComparePage() {
         return (a.number ?? 999) - (b.number ?? 999);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canonical, effectiveRange, teamFilter]);
+  }, [canonical, effectiveRange, teamFilter, sportConfig]);
 
   // Real comparison teams have master instances and a proper name. Teams with
   // no master instances (analyst-only extras from a name mismatch, or an
@@ -770,6 +966,26 @@ export default function AccuracyComparePage() {
           >
             Home
           </Link>
+        </div>
+
+        {/* Sport toggle */}
+        <div className="mb-5 flex items-center gap-2">
+          <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Sport
+          </span>
+          {(Object.values(SPORT_CONFIGS) as SportConfig[]).map((sc) => (
+            <button
+              key={sc.id}
+              onClick={() => setSport(sc.id)}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                sport === sc.id
+                  ? "bg-slate-900 text-white"
+                  : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+              }`}
+            >
+              {sc.label}
+            </button>
+          ))}
         </div>
 
         {/* Upload row */}
@@ -1107,26 +1323,33 @@ export default function AccuracyComparePage() {
             </div>
 
             {/* Category breakdown */}
-            {result.byCategory.length > 0 && (
+            {scopedCategoryBreakdown.length > 0 && (
               <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                   <h2 className="text-sm font-semibold text-slate-700">
                     Accuracy by stat category
                   </h2>
-                  {categoryFilter !== "all" && (
-                    <button
-                      onClick={() => setCategoryFilter("all")}
-                      className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-200"
-                    >
-                      <X size={12} /> Clear filter
-                    </button>
-                  )}
+                  <div className="flex items-center gap-3">
+                    <TeamToggle
+                      teams={realTeams.map((t) => t.team)}
+                      value={teamFilter}
+                      onChange={setTeamFilter}
+                    />
+                    {categoryFilter !== "all" && (
+                      <button
+                        onClick={() => setCategoryFilter("all")}
+                        className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-200"
+                      >
+                        <X size={12} /> Clear category
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <p className="mb-3 text-xs text-slate-400">
                   Click a category to filter the breakdown table and timeline.
                 </p>
                 <div className="space-y-1">
-                  {result.byCategory.map((c) => {
+                  {scopedCategoryBreakdown.map((c) => {
                     const active = categoryFilter === c.category;
                     return (
                       <button
@@ -1261,20 +1484,34 @@ export default function AccuracyComparePage() {
             {/* Per-player disposals & marks table */}
             {playerTable.length > 0 && (
               <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div className="flex items-center justify-between gap-3 border-b border-slate-200 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4">
                   <h2 className="text-sm font-semibold text-slate-700">
-                    Player disposals &amp; marks{" "}
+                    {sport === "afl"
+                      ? "Player disposals & marks"
+                      : "Player stats"}{" "}
                     <span className="font-normal text-slate-400">
-                      {teamFilter === "all" ? "· Both teams" : `· ${teamFilter}`}{" "}
                       (Master / Analyst)
                     </span>
                   </h2>
-                  <button
-                    onClick={() => exportPlayerCsv(playerTable)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
-                  >
-                    <Download size={13} /> Export CSV
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <TeamToggle
+                      teams={realTeams.map((t) => t.team)}
+                      value={teamFilter}
+                      onChange={setTeamFilter}
+                    />
+                    <button
+                      onClick={() =>
+                        exportPlayerCsv(
+                          playerTable,
+                          sportConfig.columns,
+                          sportConfig.csvName
+                        )
+                      }
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                    >
+                      <Download size={13} /> Export CSV
+                    </button>
+                  </div>
                 </div>
                 <div className="max-h-[520px] overflow-auto">
                   <table className="w-full text-sm">
@@ -1286,7 +1523,7 @@ export default function AccuracyComparePage() {
                         >
                           Player
                         </th>
-                        {PLAYER_COLS.map((col) => (
+                        {sportConfig.columns.map((col) => (
                           <th
                             key={col.key}
                             colSpan={2}
@@ -1297,7 +1534,7 @@ export default function AccuracyComparePage() {
                         ))}
                       </tr>
                       <tr className="bg-slate-50 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                        {PLAYER_COLS.map((col) => (
+                        {sportConfig.columns.map((col) => (
                           <FragmentSubHead key={col.key} />
                         ))}
                       </tr>
@@ -1318,7 +1555,7 @@ export default function AccuracyComparePage() {
                               </span>
                             )}
                           </td>
-                          {PLAYER_COLS.map((col) => {
+                          {sportConfig.columns.map((col) => {
                             const m = col.get(p.master);
                             const a = col.get(p.analyst);
                             const mismatch = m !== a;
@@ -1339,7 +1576,7 @@ export default function AccuracyComparePage() {
                         <td className="whitespace-nowrap px-4 py-2.5 text-left">
                           Team totals
                         </td>
-                        {PLAYER_COLS.map((col) => {
+                        {sportConfig.columns.map((col) => {
                           const mTot = playerTable.reduce(
                             (sum, p) => sum + col.get(p.master),
                             0
@@ -1363,9 +1600,10 @@ export default function AccuracyComparePage() {
                   </table>
                 </div>
                 <p className="border-t border-slate-200 px-4 py-2 text-[11px] text-slate-400">
-                  Total Disposals = eff + ineff kicks &amp; handballs. Marks =
-                  contested + uncontested only. Analyst counts shown in red
-                  differ from the master.
+                  {sport === "afl"
+                    ? "Total Disposals = eff + ineff kicks & handballs. Marks = contested + uncontested only. "
+                    : "Total Passes = complete + incomplete. "}
+                  Analyst counts shown in red differ from the master.
                 </p>
               </div>
             )}
@@ -1478,29 +1716,11 @@ export default function AccuracyComparePage() {
                 <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
                   Team
                 </span>
-                <button
-                  onClick={() => setTeamFilter("all")}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                    teamFilter === "all"
-                      ? `${NAVY_BG} text-white`
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
-                >
-                  Both teams
-                </button>
-                {realTeams.map((t) => (
-                  <button
-                    key={t.team}
-                    onClick={() => setTeamFilter(t.team)}
-                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                      teamFilter === t.team
-                        ? `${NAVY_BG} text-white`
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                    }`}
-                  >
-                    {t.team}
-                  </button>
-                ))}
+                <TeamToggle
+                  teams={realTeams.map((t) => t.team)}
+                  value={teamFilter}
+                  onChange={setTeamFilter}
+                />
               </div>
             )}
 
@@ -1582,6 +1802,43 @@ export default function AccuracyComparePage() {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// Both teams / Home / Away toggle. Shared above the category breakdown
+// and the player table; changing it updates teamFilter, which every
+// team-aware table on the page reads from.
+function TeamToggle({
+  teams,
+  value,
+  onChange,
+}: {
+  teams: string[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const btn = (active: boolean) =>
+    `rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+      active
+        ? "bg-slate-900 text-white"
+        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+    }`;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <button onClick={() => onChange("all")} className={btn(value === "all")}>
+        Both teams
+      </button>
+      {teams.map((t) => (
+        <button
+          key={t}
+          onClick={() => onChange(t)}
+          className={btn(value === t)}
+        >
+          {t}
+        </button>
+      ))}
     </div>
   );
 }
