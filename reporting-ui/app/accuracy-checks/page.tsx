@@ -127,7 +127,20 @@ export default function AccuracyChecksPage() {
         getAllAccuracyChecks(),
         getOpenDisputeCounts().catch(() => ({}) as Record<number, number>),
       ]);
-      setChecks(data);
+
+      // Analysts see only checks saved against their own name; admins/super
+      // admins see everything.
+      const isAdmin =
+        user?.role === "admin" || user?.role === "super_admin";
+      const own = user?.analyst_name?.trim().toLowerCase();
+      const scoped =
+        isAdmin || !own
+          ? data
+          : data.filter(
+              (c) => c.analyst_name.trim().toLowerCase() === own
+            );
+
+      setChecks(scoped);
       setOpenCounts(counts);
       setError(null);
     } catch (err) {
@@ -140,9 +153,12 @@ export default function AccuracyChecksPage() {
     }
   }
 
+  // Reload when the user (role / analyst_name) becomes available so the
+  // analyst-scoping is applied correctly.
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role, user?.analyst_name]);
 
   const analystSummaries = useMemo(
     () => summariseByAnalyst(checks),

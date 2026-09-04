@@ -8,19 +8,19 @@ import { useAuth } from "@/components/auth/AuthContext";
 
 export default function LoginPage() {
     const router = useRouter();
-    const { user, ready, login, firstAccessiblePath } = useAuth();
+    const { user, ready, login, landingPath } = useAuth();
 
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Already logged in → go to the first page this account can access.
+    // Already logged in → go to the landing page (analysts -> their profile).
     useEffect(() => {
         if (ready && user) {
-            router.replace(firstAccessiblePath() ?? "/dashboard");
+            router.replace(landingPath() ?? "/dashboard");
         }
-    }, [ready, user, router, firstAccessiblePath]);
+    }, [ready, user, router, landingPath]);
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
@@ -28,13 +28,11 @@ export default function LoginPage() {
         setSubmitting(true);
         try {
             const ok = await login(username, password);
-            if (ok) {
-                // Land on the first page the account can access. The effect
-                // above also handles this once `user` updates.
-                router.replace(firstAccessiblePath() ?? "/dashboard");
-            } else {
+            if (!ok) {
                 setError("Incorrect username or password.");
             }
+            // On success the effect above redirects once `user` (and the
+            // permission map) have updated — avoids a stale-state race.
         } catch (err) {
             setError(
                 err instanceof Error ? err.message : "Login failed. Try again."

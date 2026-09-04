@@ -53,8 +53,24 @@ export default function DisputesPage() {
                 getAllDisputes(),
                 getAllAccuracyChecks().catch(() => [] as AccuracyCheck[]),
             ]);
-            setDisputes(d);
-            setChecks(c);
+
+            // Analysts only see disputes on checks saved against their own
+            // name; admins/super admins see everything.
+            const isAdmin =
+                user?.role === "admin" || user?.role === "super_admin";
+            const own = user?.analyst_name?.trim().toLowerCase();
+
+            if (isAdmin || !own) {
+                setChecks(c);
+                setDisputes(d);
+            } else {
+                const ownChecks = c.filter(
+                    (chk) => chk.analyst_name.trim().toLowerCase() === own
+                );
+                const ownIds = new Set(ownChecks.map((chk) => chk.id));
+                setChecks(ownChecks);
+                setDisputes(d.filter((dis) => ownIds.has(dis.check_id)));
+            }
         } catch (err) {
             console.error(err);
         } finally {
@@ -64,7 +80,8 @@ export default function DisputesPage() {
 
     useEffect(() => {
         load();
-    }, []);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.role, user?.analyst_name]);
 
     const checkById = useMemo(() => {
         const m = new Map<number, AccuracyCheck>();

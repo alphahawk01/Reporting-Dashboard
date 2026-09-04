@@ -30,6 +30,8 @@ interface AuthContextValue {
     hasAccess: (pageKey: string | null) => boolean;
     /** First route path the current user can access, or null if none. */
     firstAccessiblePath: () => string | null;
+    /** Where to send the user after login (analysts -> their profile). */
+    landingPath: () => string | null;
     reloadPermissions: () => Promise<void>;
 }
 
@@ -131,6 +133,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return null;
     }, [user, permissions]);
 
+    // After login: an allocated analyst lands on their own profile; everyone
+    // else on their first accessible page. Profile access is treated as
+    // allowed unless explicitly revoked, so this still works before the
+    // permission map has finished loading right after login.
+    const landingPath = useCallback((): string | null => {
+        if (!user) return null;
+        const profileDenied =
+            user.role !== "super_admin" &&
+            permissions[user.role]?.["analyst-profile"] === false;
+        if (
+            user.role === "analyst" &&
+            !!user.analyst_name &&
+            !!user.analyst_name.trim() &&
+            !profileDenied
+        ) {
+            return `/analyst-profile?analyst=${encodeURIComponent(
+                user.analyst_name.trim()
+            )}`;
+        }
+        return firstAccessiblePath();
+    }, [user, permissions, firstAccessiblePath]);
+
     return (
         <AuthContext.Provider
             value={{
@@ -142,6 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 logout,
                 hasAccess,
                 firstAccessiblePath,
+                landingPath,
                 reloadPermissions,
             }}
         >

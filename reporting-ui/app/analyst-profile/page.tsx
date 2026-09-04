@@ -18,6 +18,7 @@ import type { TTGame } from "@/types/ttgame";
 import { supabase } from "@/lib/supabase";
 import { buildAnalystMetrics } from "@/lib/analytics/buildAnalystMetrics";
 import type { AnalystMetrics } from "@/types/analyst";
+import { useAuth } from "@/components/auth/AuthContext";
 
 export default function AnalystProfilePage() {
   return (
@@ -29,8 +30,26 @@ export default function AnalystProfilePage() {
 
 function AnalystProfileContent() {
   const searchParams = useSearchParams();
+  const { user } = useAuth();
+  // Analyst-role users only see their own profile: hide the analyst switcher,
+  // compare and dashboard controls.
+  const isAnalystRole = user?.role === "analyst";
   const analystParam = searchParams.get("analyst");
-  const [selectedAnalyst, setSelectedAnalyst] = useState(analystParam ?? "All");
+  // Analyst-role users are locked to their own allocated name; admins use the
+  // ?analyst= param (or "All").
+  const initialAnalyst =
+    isAnalystRole && user?.analyst_name?.trim()
+      ? user.analyst_name.trim()
+      : analystParam ?? "All";
+  const [selectedAnalyst, setSelectedAnalyst] = useState(initialAnalyst);
+
+  // Keep an analyst-role user pinned to their own profile even if the URL
+  // param changes or auth loads after first render.
+  useEffect(() => {
+    if (isAnalystRole && user?.analyst_name?.trim()) {
+      setSelectedAnalyst(user.analyst_name.trim());
+    }
+  }, [isAnalystRole, user?.analyst_name]);
   const [analysts, setAnalysts] = useState<AnalystMetrics[]>([]);
   const [shifts, setShifts] = useState<DeputyShift[]>([]);
   const [games, setGames] = useState<TTGame[]>([]);
@@ -214,7 +233,8 @@ const filteredGames = useMemo(() => {
   return (
     <div className="min-h-screen bg-[#0b1220] p-6 text-slate-200">
 
-      {/* TOP FILTER */}
+      {/* TOP FILTER — hidden for analyst-role users (own profile only) */}
+      {!isAnalystRole && (
       <div className="max-w-7xl mx-auto mb-6 flex items-center justify-between">
         {/* BACK TO DASHBOARD */}
         <Link
@@ -292,6 +312,7 @@ const filteredGames = useMemo(() => {
           ))}
         </select>
       </div>
+      )}
 
       {/* CONTENT */}
       <div className="max-w-7xl mx-auto space-y-6">
