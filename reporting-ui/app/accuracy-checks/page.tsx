@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -12,7 +12,7 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
-import { Trophy, History, Trash2, X } from "lucide-react";
+import { Trophy, History, Trash2, X, Flag } from "lucide-react";
 import {
   getAllAccuracyChecks,
   countMasterChecks,
@@ -20,6 +20,14 @@ import {
   deleteAccuracyCheck,
   type AccuracyCheck,
 } from "@/lib/api/accuracyChecks";
+import {
+  getOpenDisputeCounts,
+  getDisputesForCheck,
+  resolveDispute,
+  type Dispute,
+} from "@/lib/api/disputes";
+import { useAuth } from "@/components/auth/AuthContext";
+import DisputesPanel from "@/components/DisputesPanel";
 
 function pct(v: number) {
   return `${(v * 100).toFixed(1)}%`;
@@ -60,21 +68,67 @@ function homeAwayAccuracy(check: AccuracyCheck): {
 
 export default function AccuracyChecksPage() {
   const router = useRouter();
+  const { user } = useAuth();
+  const canResolve =
+    user?.role === "admin" || user?.role === "super_admin";
+
   const [checks, setChecks] = useState<AccuracyCheck[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedAnalyst, setSelectedAnalyst] = useState<string>("");
+
+  // Open-dispute counts per check id (for the badge), and the currently
+  // expanded check's disputes panel.
+  const [openCounts, setOpenCounts] = useState<Record<number, number>>({});
+  const [expandedCheck, setExpandedCheck] = useState<number | null>(null);
+  const [panelDisputes, setPanelDisputes] = useState<Dispute[]>([]);
 
   // Open a saved check fully in the Accuracy Comparison tab.
   function openCheck(id: number) {
     router.push(`/accuracy-compare?check=${id}`);
   }
 
+  async function loadDisputePanel(checkId: number) {
+    try {
+      setPanelDisputes(await getDisputesForCheck(checkId));
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  function toggleDisputes(checkId: number) {
+    if (expandedCheck === checkId) {
+      setExpandedCheck(null);
+      setPanelDisputes([]);
+    } else {
+      setExpandedCheck(checkId);
+      loadDisputePanel(checkId);
+    }
+  }
+
+  async function handleResolve(
+    disputeId: number,
+    status: "confirmed" | "denied",
+    note: string | null
+  ) {
+    try {
+      await resolveDispute(disputeId, status, user?.username ?? null, note);
+      if (expandedCheck != null) await loadDisputePanel(expandedCheck);
+      setOpenCounts(await getOpenDisputeCounts());
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to resolve dispute.");
+    }
+  }
+
   async function load() {
     try {
       setLoading(true);
-      const data = await getAllAccuracyChecks();
+      const [data, counts] = await Promise.all([
+        getAllAccuracyChecks(),
+        getOpenDisputeCounts().catch(() => ({}) as Record<number, number>),
+      ]);
       setChecks(data);
+      setOpenCounts(counts);
       setError(null);
     } catch (err) {
       console.error(err);
@@ -299,6 +353,7 @@ export default function AccuracyChecksPage() {
                         <th className="px-4 py-2.5 text-right">Home</th>
                         <th className="px-4 py-2.5 text-right">Away</th>
                         <th className="px-4 py-2.5 text-right">Exact/Master</th>
+                        <th className="px-4 py-2.5 text-center">Disputes</th>
                         <th className="px-4 py-2.5"></th>
                       </tr>
                     </thead>
@@ -309,8 +364,8 @@ export default function AccuracyChecksPage() {
                         .map((c) => {
                           const { home, away } = homeAwayAccuracy(c);
                           return (
+                          <React.Fragment key={c.id}>
                           <tr
-                            key={c.id}
                             onClick={() => openCheck(c.id)}
                             className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
                             title="Open full accuracy check in Accuracy Comparison"
@@ -341,6 +396,31 @@ export default function AccuracyChecksPage() {
                             <td className="whitespace-nowrap px-4 py-2.5 text-right text-slate-600">
                               {c.exact}/{c.master_total}
                             </td>
+                            <td className="px-4 py-2.5 text-center">
+                              {(openCounts[c.id] ?? 0) > 0 ? (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleDisputes(c.id);
+                                  }}
+                                  className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 hover:bg-amber-200"
+                                  title="Review disputes"
+                                >
+                                  <Flag size={11} /> {openCounts[c.id]}
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleDisputes(c.id);
+                                  }}
+                                  className="text-xs text-slate-400 hover:text-slate-600"
+                                  title="View disputes"
+                                >
+                                  —
+                                </button>
+                              )}
+                            </td>
                             <td className="px-4 py-2.5 text-right">
                               <button
                                 onClick={(e) => {
@@ -354,6 +434,18 @@ export default function AccuracyChecksPage() {
                               </button>
                             </td>
                           </tr>
+                          {expandedCheck === c.id && (
+                            <tr className="border-t border-slate-100 bg-slate-50/60">
+                              <td colSpan={9} className="px-4 py-3">
+                                <DisputesPanel
+                                  disputes={panelDisputes}
+                                  canResolve={canResolve}
+                                  onResolve={handleResolve}
+                                />
+                              </td>
+                            </tr>
+                          )}
+                          </React.Fragment>
                           );
                         })}
                     </tbody>

@@ -17,6 +17,9 @@ import {
   Save,
   Video,
   X as XIcon,
+  ChevronLeft,
+  ChevronRight,
+  Flag,
 } from "lucide-react";
 import {
   saveAccuracyCheck,
@@ -25,6 +28,14 @@ import {
   type SavedMaster,
 } from "@/lib/api/accuracyChecks";
 import { getPlatformAnalystNames } from "@/lib/api/analysts";
+import { useAuth } from "@/components/auth/AuthContext";
+import {
+  createDispute,
+  getDisputesForCheck,
+  disputeKey,
+  type Dispute,
+  type DisputeSide,
+} from "@/lib/api/disputes";
 import {
   parseInstances,
   compareInstances,
@@ -455,6 +466,24 @@ const SPORT_CONFIGS: Record<Sport, SportConfig> = {
   football: FOOTBALL_CONFIG,
 };
 
+/**
+ * Does a single stat (lowercased) contribute to the given column for this
+ * sport? Reuses the config's own bump()+derive() so it always matches how
+ * the table is built: run the classifier on a fresh counts object holding
+ * just this stat, then check whether the column's accessor picked it up.
+ */
+function statMatchesColumn(
+  config: SportConfig,
+  columnKey: string,
+  statLower: string
+): boolean {
+  const col = config.columns.find((c) => c.key === columnKey);
+  if (!col) return false;
+  const counts = config.init();
+  config.bump(counts, statLower);
+  return col.get(config.derive(counts)) > 0;
+}
+
 function FragmentSubHead() {
   return (
     <>
@@ -472,20 +501,31 @@ function PlayerCells({
   master,
   analyst,
   mismatch,
+  onClick,
 }: {
   master: number;
   analyst: number;
   mismatch: boolean;
+  /** When set, the pair of cells is clickable to review this stat/player. */
+  onClick?: () => void;
 }) {
+  const clickable = !!onClick && master + analyst > 0;
+  const base = clickable ? "cursor-pointer hover:bg-sky-50" : "";
   return (
     <>
-      <td className="border-l border-slate-200 px-2 py-2 text-center tabular-nums text-slate-700">
+      <td
+        onClick={clickable ? onClick : undefined}
+        title={clickable ? "Review this stat for this player in video" : undefined}
+        className={`border-l border-slate-200 px-2 py-2 text-center tabular-nums text-slate-700 ${base}`}
+      >
         {master}
       </td>
       <td
+        onClick={clickable ? onClick : undefined}
+        title={clickable ? "Review this stat for this player in video" : undefined}
         className={`px-2 py-2 text-center tabular-nums font-semibold ${
           mismatch ? "text-red-600" : "text-emerald-600"
-        }`}
+        } ${base}`}
       >
         {analyst}
       </td>
@@ -562,6 +602,82 @@ export default function AccuracyComparePage() {
   const [videoOpen, setVideoOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
+  // Optional player+stat focus for the video review, set by clicking a cell
+  // in the player stats table. When set, the review timeline shows only that
+  // player's instances of that column's stat(s). Cleared to review by stat.
+  const [reviewPlayer, setReviewPlayer] = useState<{
+    team: string;
+    number: number | null;
+    columnKey: string;
+    columnLabel: string;
+  } | null>(null);
+
+  // Status filter inside the video review (Exact / Missed / Wrong stat …).
+  // Independent of the main page's status filter.
+  const [videoStatusFilter, setVideoStatusFilter] = useState<
+    MatchStatus | "all"
+  >("all");
+
+  // Disputes: which saved check is loaded (if any), so instances can be
+  // flagged and the flags reflected in both timelines.
+  const { user } = useAuth();
+  const [loadedCheckId, setLoadedCheckId] = useState<number | null>(null);
+  const [checkAnalystName, setCheckAnalystName] = useState<string | null>(null);
+  const [disputes, setDisputes] = useState<Dispute[]>([]);
+  // Right-click context menu target for flagging.
+  const [flagMenu, setFlagMenu] = useState<{
+    x: number;
+    y: number;
+    instance: Instance;
+    side: DisputeSide;
+  } | null>(null);
+
+  // Whether the current user may flag on the loaded check: an admin/super
+  // admin, or the analyst the check is saved to.
+  const canFlag =
+    loadedCheckId != null &&
+    !!user &&
+    (user.role === "admin" ||
+      user.role === "super_admin" ||
+      (!!user.analyst_name &&
+        !!checkAnalystName &&
+        user.analyst_name.trim().toLowerCase() ===
+          checkAnalystName.trim().toLowerCase()));
+
+  // Fast lookup of flagged instances by "instanceId|side".
+  const flaggedKeys = useMemo(() => {
+    const m = new Map<string, Dispute>();
+    for (const d of disputes) m.set(disputeKey(d.instance_id, d.side), d);
+    return m;
+  }, [disputes]);
+
+  const reloadDisputes = async (checkId: number) => {
+    try {
+      setDisputes(await getDisputesForCheck(checkId));
+    } catch (err) {
+      console.error("Failed loading disputes:", err);
+    }
+  };
+
+  // Index of the current clip within the filtered review rows, so Prev/Next
+  // can step (and seek) between instances instead of playing through gaps.
+  const [reviewIndex, setReviewIndex] = useState(0);
+
+  // Auto-skip: when on, playback jumps to the next instance as soon as the
+  // current instance's XML end time is reached (skipping the gaps).
+  const [autoSkip, setAutoSkip] = useState(true);
+  // Refs so the video's timeupdate handler reads fresh values without
+  // re-binding or capturing stale closures.
+  const reviewIndexRef = useRef(0);
+  const autoSkipRef = useRef(true);
+  const reviewClipsRef = useRef<{ start: number; end: number }[]>([]);
+  useEffect(() => {
+    reviewIndexRef.current = reviewIndex;
+  }, [reviewIndex]);
+  useEffect(() => {
+    autoSkipRef.current = autoSkip;
+  }, [autoSkip]);
+
   // Current playback position (seconds), used to highlight the stat(s)
   // whose [start, end] window is on screen right now.
   const [videoTime, setVideoTime] = useState(0);
@@ -596,6 +712,142 @@ export default function AccuracyComparePage() {
     };
     requestAnimationFrame(trySeek);
   };
+
+  // Step to a clip (filtered review row) by index and seek the video to it.
+  // Defined via ref-free closure over reviewSeekTimes at call sites below.
+  const goToClip = (index: number, times: number[]) => {
+    if (times.length === 0) return;
+    const clamped = Math.max(0, Math.min(index, times.length - 1));
+    setReviewIndex(clamped);
+    seekVideo(times[clamped]);
+  };
+
+  // Video time updates: track position for row highlighting, and (when
+  // auto-skip is on) jump to the next instance once the current instance's
+  // XML end time is reached, so playback skips the gaps between clips.
+  const handleVideoTimeUpdate = (
+    e: React.SyntheticEvent<HTMLVideoElement>
+  ) => {
+    const t = e.currentTarget.currentTime;
+    setVideoTime(t);
+
+    if (!autoSkipRef.current) return;
+    const clips = reviewClipsRef.current;
+    const idx = reviewIndexRef.current;
+    if (clips.length === 0 || idx >= clips.length) return;
+
+    const current = clips[idx];
+    // Small epsilon so we advance right at (not past) the end.
+    if (t >= current.end - 0.05) {
+      const nextIdx = idx + 1;
+      if (nextIdx < clips.length) {
+        const v = videoRef.current;
+        reviewIndexRef.current = nextIdx;
+        setReviewIndex(nextIdx);
+        if (v) {
+          v.currentTime = Math.max(0, clips[nextIdx].start);
+          v.play().catch(() => {});
+        }
+      } else {
+        // Last clip finished — stop so it doesn't run into the next game
+        // action that isn't part of this filter.
+        videoRef.current?.pause();
+      }
+    }
+  };
+
+  // Open the video review focused on one player's instances of a single
+  // stat column (clicked from the player stats table), and jump the video to
+  // the first matching instance instead of leaving it at the game start.
+  const openPlayerReview = (
+    player: { team: string; number: number | null },
+    col: { key: string; label: string }
+  ) => {
+    setReviewPlayer({
+      team: player.team,
+      number: player.number,
+      columnKey: col.key,
+      columnLabel: col.label,
+    });
+    setVideoStatFilter("all");
+
+    // Find the earliest matching instance so playback starts there.
+    const teamLower = player.team.toLowerCase();
+    const matches = (i: Instance | null) =>
+      !!i &&
+      i.team.toLowerCase() === teamLower &&
+      i.playerNumber === player.number &&
+      statMatchesColumn(sportConfig, col.key, i.stat.toLowerCase());
+
+    let firstStart: number | null = null;
+    for (const row of result?.rows ?? []) {
+      for (const inst of [row.master, row.analyst]) {
+        if (matches(inst)) {
+          const s = (inst as Instance).start;
+          if (firstStart === null || s < firstStart) firstStart = s;
+        }
+      }
+    }
+
+    if (firstStart !== null) {
+      // seekVideo also opens the modal.
+      seekVideo(firstStart);
+    } else {
+      setVideoOpen(true);
+    }
+  };
+
+  // Right-click a timeline instance in the video review to flag it. Only
+  // enabled when a saved check is loaded and the user is allowed to flag.
+  const openFlagMenu = (
+    e: React.MouseEvent,
+    instance: Instance,
+    side: DisputeSide
+  ) => {
+    if (!canFlag) return;
+    e.preventDefault();
+    setFlagMenu({ x: e.clientX, y: e.clientY, instance, side });
+  };
+
+  const submitFlag = async (reason: string | null) => {
+    if (!flagMenu || loadedCheckId == null) return;
+    const { instance, side } = flagMenu;
+    setFlagMenu(null);
+    try {
+      await createDispute({
+        checkId: loadedCheckId,
+        instanceId: instance.id,
+        side,
+        stat: instance.stat || null,
+        player:
+          instance.playerNumber != null
+            ? `#${instance.playerNumber}`
+            : instance.playerRaw || null,
+        team: instance.team || null,
+        codeTime: instance.mid,
+        raisedBy: user?.username ?? null,
+        reason,
+      });
+      await reloadDisputes(loadedCheckId);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to flag instance.");
+    }
+  };
+
+  // Close the flag menu on any outside click / escape.
+  useEffect(() => {
+    if (!flagMenu) return;
+    const close = () => setFlagMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFlagMenu(null);
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [flagMenu]);
 
   // Previously-saved master XMLs, for the "reuse master" dropdown.
   const [savedMasters, setSavedMasters] = useState<SavedMaster[]>([]);
@@ -679,6 +931,11 @@ export default function AccuracyComparePage() {
       if (check.video_url) setVideoUrl(check.video_url);
       if (check.sport === "afl" || check.sport === "football")
         setSport(check.sport);
+
+      // Enable disputes for this saved check.
+      setLoadedCheckId(check.id);
+      setCheckAnalystName(check.analyst_name);
+      reloadDisputes(check.id);
     })();
 
     return () => {
@@ -809,6 +1066,10 @@ export default function AccuracyComparePage() {
   // filters. Keep the original comparison rows so missed and extra entries
   // remain available in the review.
   const [videoStatFilter, setVideoStatFilter] = useState<string | "all">("all");
+  // Reset the clip index when the review scope changes.
+  useEffect(() => {
+    setReviewIndex(0);
+  }, [videoStatFilter, videoStatusFilter, reviewPlayer]);
   const videoStatOptions = useMemo(() => {
     if (!result) return [];
     const stats = new Set<string>();
@@ -821,13 +1082,114 @@ export default function AccuracyComparePage() {
 
   const videoRows: ComparisonRow[] = useMemo(() => {
     if (!result) return [];
-    if (videoStatFilter === "all") return result.rows;
-    return result.rows.filter(
-      (row) =>
-        row.master?.stat.trim() === videoStatFilter ||
-        row.analyst?.stat.trim() === videoStatFilter
-    );
-  }, [result, videoStatFilter]);
+
+    let rows: ComparisonRow[];
+
+    // Player+stat focus (from clicking a player-table cell) takes priority:
+    // show only instances for that player that belong to the clicked column.
+    if (reviewPlayer) {
+      const teamLower = reviewPlayer.team.toLowerCase();
+      const matchesPlayer = (i: Instance | null) =>
+        !!i &&
+        i.team.toLowerCase() === teamLower &&
+        i.playerNumber === reviewPlayer.number &&
+        statMatchesColumn(
+          sportConfig,
+          reviewPlayer.columnKey,
+          i.stat.toLowerCase()
+        );
+      rows = result.rows.filter(
+        (row) => matchesPlayer(row.master) || matchesPlayer(row.analyst)
+      );
+    } else if (videoStatFilter === "all") {
+      rows = result.rows;
+    } else {
+      rows = result.rows.filter(
+        (row) =>
+          row.master?.stat.trim() === videoStatFilter ||
+          row.analyst?.stat.trim() === videoStatFilter
+      );
+    }
+
+    // Layer the status filter (Exact / Missed / Wrong stat …) on top.
+    if (videoStatusFilter !== "all") {
+      rows = rows.filter((row) => row.status === videoStatusFilter);
+    }
+
+    return rows;
+  }, [result, videoStatFilter, reviewPlayer, videoStatusFilter, sportConfig]);
+
+  // Per-status counts for the video review filter buttons (reflect the
+  // current stat/player scope, before the status filter is applied).
+  const videoStatusCounts = useMemo(() => {
+    if (!result) return {} as Record<MatchStatus, number>;
+
+    let base: ComparisonRow[];
+    if (reviewPlayer) {
+      const teamLower = reviewPlayer.team.toLowerCase();
+      const matchesPlayer = (i: Instance | null) =>
+        !!i &&
+        i.team.toLowerCase() === teamLower &&
+        i.playerNumber === reviewPlayer.number &&
+        statMatchesColumn(
+          sportConfig,
+          reviewPlayer.columnKey,
+          i.stat.toLowerCase()
+        );
+      base = result.rows.filter(
+        (row) => matchesPlayer(row.master) || matchesPlayer(row.analyst)
+      );
+    } else if (videoStatFilter === "all") {
+      base = result.rows;
+    } else {
+      base = result.rows.filter(
+        (row) =>
+          row.master?.stat.trim() === videoStatFilter ||
+          row.analyst?.stat.trim() === videoStatFilter
+      );
+    }
+
+    const counts = {} as Record<MatchStatus, number>;
+    for (const row of base) {
+      counts[row.status] = (counts[row.status] ?? 0) + 1;
+    }
+    return counts;
+  }, [result, videoStatFilter, reviewPlayer, sportConfig]);
+
+  // Start/end window for each filtered review row: from whichever displayed
+  // side is present (prefer master). Prev/Next seek to `start`; auto-skip
+  // watches for playback passing `end` and jumps to the next clip.
+  const reviewClips = useMemo(() => {
+    const sideShows = (inst: Instance | null): boolean => {
+      if (!inst) return false;
+      if (reviewPlayer) {
+        return (
+          inst.team.toLowerCase() === reviewPlayer.team.toLowerCase() &&
+          inst.playerNumber === reviewPlayer.number &&
+          statMatchesColumn(
+            sportConfig,
+            reviewPlayer.columnKey,
+            inst.stat.toLowerCase()
+          )
+        );
+      }
+      return videoStatFilter === "all" || inst.stat.trim() === videoStatFilter;
+    };
+    return videoRows.map((row) => {
+      const m = sideShows(row.master) ? row.master : null;
+      const a = sideShows(row.analyst) ? row.analyst : null;
+      const inst = m ?? a;
+      return { start: inst?.start ?? 0, end: inst?.end ?? 0 };
+    });
+  }, [videoRows, reviewPlayer, videoStatFilter, sportConfig]);
+
+  const reviewSeekTimes = useMemo(
+    () => reviewClips.map((c) => c.start),
+    [reviewClips]
+  );
+  useEffect(() => {
+    reviewClipsRef.current = reviewClips;
+  }, [reviewClips]);
 
   // Summary that reflects the active team/category/stat filters (NOT the
   // status filter, so the cards show the full breakdown of the scope).
@@ -1112,7 +1474,11 @@ export default function AccuracyComparePage() {
             className="min-w-[280px] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none"
           />
           <button
-            onClick={() => videoUrl.trim() && setVideoOpen(true)}
+            onClick={() => {
+              if (!videoUrl.trim()) return;
+              setReviewPlayer(null);
+              setVideoOpen(true);
+            }}
             disabled={!videoUrl.trim()}
             className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition ${ACCENT_BG} hover:opacity-90 disabled:cursor-not-allowed disabled:bg-slate-300`}
           >
@@ -1709,6 +2075,11 @@ export default function AccuracyComparePage() {
                                 master={m}
                                 analyst={a}
                                 mismatch={mismatch}
+                                onClick={
+                                  videoUrl.trim()
+                                    ? () => openPlayerReview(p, col)
+                                    : undefined
+                                }
                               />
                             );
                           })}
@@ -1917,11 +2288,21 @@ export default function AccuracyComparePage() {
                       <TimelineCell
                         instance={row.master}
                         onSeek={videoUrl.trim() ? seekVideo : undefined}
+                        flagged={
+                          !!row.master &&
+                          flaggedKeys.has(disputeKey(row.master.id, "master"))
+                        }
                       />
                       <TimelineCell
                         instance={row.analyst}
                         delta={row.timeDelta}
                         onSeek={videoUrl.trim() ? seekVideo : undefined}
+                        flagged={
+                          !!row.analyst &&
+                          flaggedKeys.has(
+                            disputeKey(row.analyst.id, "analyst")
+                          )
+                        }
                       />
                     </div>
                   );
@@ -1951,28 +2332,119 @@ export default function AccuracyComparePage() {
                 </span>
               </span>
               <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 text-xs font-semibold text-slate-400">
-                  <span>Show stat</span>
-                  <select
-                    value={videoStatFilter}
-                    onChange={(e) => setVideoStatFilter(e.target.value)}
-                    className="max-w-[240px] rounded-md border border-slate-600 bg-slate-800 px-2 py-1.5 text-xs font-medium normal-case text-slate-100 outline-none focus:border-sky-400"
-                    aria-label="Select a stat to show in video review"
-                  >
-                    <option value="all">All stats</option>
-                    {videoStatOptions.map((stat) => (
-                      <option key={stat} value={stat}>
-                        {stat}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {reviewPlayer ? (
+                  <span className="inline-flex items-center gap-2 rounded-md border border-sky-500/60 bg-sky-500/10 px-2.5 py-1.5 text-xs font-semibold text-sky-200">
+                    {reviewPlayer.team} · #{reviewPlayer.number ?? "?"} ·{" "}
+                    {reviewPlayer.columnLabel}
+                    <button
+                      onClick={() => setReviewPlayer(null)}
+                      className="text-sky-300 hover:text-white"
+                      title="Clear player filter"
+                    >
+                      <XIcon size={13} />
+                    </button>
+                  </span>
+                ) : (
+                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-400">
+                    <span>Show stat</span>
+                    <select
+                      value={videoStatFilter}
+                      onChange={(e) => setVideoStatFilter(e.target.value)}
+                      className="max-w-[240px] rounded-md border border-slate-600 bg-slate-800 px-2 py-1.5 text-xs font-medium normal-case text-slate-100 outline-none focus:border-sky-400"
+                      aria-label="Select a stat to show in video review"
+                    >
+                      <option value="all">All stats</option>
+                      {videoStatOptions.map((stat) => (
+                        <option key={stat} value={stat}>
+                          {stat}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <button
                   onClick={() => setVideoOpen(false)}
                   className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
                   title="Close"
                 >
                   <XIcon size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Status filter + clip navigator bar */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700 bg-slate-900 px-4 py-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                  Status
+                </span>
+                <button
+                  onClick={() => setVideoStatusFilter("all")}
+                  className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                    videoStatusFilter === "all"
+                      ? "bg-white text-slate-900"
+                      : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  }`}
+                >
+                  All (
+                  {Object.values(videoStatusCounts).reduce((a, b) => a + b, 0)})
+                </button>
+                {(Object.keys(STATUS_META) as MatchStatus[]).map((s) => {
+                  const n = videoStatusCounts[s] ?? 0;
+                  if (n === 0) return null;
+                  const active = videoStatusFilter === s;
+                  return (
+                    <button
+                      key={s}
+                      onClick={() =>
+                        setVideoStatusFilter(active ? "all" : s)
+                      }
+                      className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                        active
+                          ? "bg-white text-slate-900"
+                          : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                      }`}
+                    >
+                      {STATUS_META[s].label} ({n})
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Clip navigator: jump straight to each instance. */}
+              <div className="flex items-center gap-2">
+                <label className="mr-1 inline-flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={autoSkip}
+                    onChange={(e) => setAutoSkip(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-sky-500"
+                  />
+                  Auto-skip
+                </label>
+                <button
+                  onClick={() => goToClip(reviewIndex - 1, reviewSeekTimes)}
+                  disabled={reviewSeekTimes.length === 0 || reviewIndex <= 0}
+                  className="inline-flex items-center gap-1 rounded-md bg-slate-800 px-2.5 py-1 text-xs font-semibold text-slate-200 transition hover:bg-slate-700 disabled:opacity-40"
+                  title="Previous instance"
+                >
+                  <ChevronLeft size={14} /> Prev
+                </button>
+                <span className="min-w-[52px] text-center text-xs font-semibold tabular-nums text-slate-300">
+                  {reviewSeekTimes.length === 0
+                    ? "0 / 0"
+                    : `${reviewIndex + 1} / ${reviewSeekTimes.length}`}
+                </span>
+                <button
+                  onClick={() => goToClip(reviewIndex + 1, reviewSeekTimes)}
+                  disabled={
+                    reviewSeekTimes.length === 0 ||
+                    reviewIndex >= reviewSeekTimes.length - 1
+                  }
+                  className="inline-flex items-center gap-1 rounded-md bg-sky-600 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-sky-500 disabled:opacity-40"
+                  title="Next instance"
+                >
+                  Next <ChevronRight size={14} />
                 </button>
               </div>
             </div>
@@ -1985,9 +2457,7 @@ export default function AccuracyComparePage() {
                   ref={videoRef}
                   src={videoUrl.trim()}
                   controls
-                  onTimeUpdate={(e) =>
-                    setVideoTime(e.currentTarget.currentTime)
-                  }
+                  onTimeUpdate={handleVideoTimeUpdate}
                   className="max-h-full max-w-full"
                 />
               </div>
@@ -2006,19 +2476,34 @@ export default function AccuracyComparePage() {
                 <div className="min-h-0 flex-1 overflow-y-auto bg-white">
                   {videoRows.map((row, i) => {
                     const meta = STATUS_META[row.status];
-                    // A selected stat can exist on only one side of a
-                    // wrong-stat row. Keep each side independent so every
-                    // matching instance remains visible.
-                    const masterInstance =
-                      videoStatFilter === "all" ||
-                      row.master?.stat.trim() === videoStatFilter
-                        ? row.master
-                        : null;
-                    const analystInstance =
-                      videoStatFilter === "all" ||
-                      row.analyst?.stat.trim() === videoStatFilter
-                        ? row.analyst
-                        : null;
+                    // A selected stat/player can exist on only one side of a
+                    // row. Keep each side independent so every matching
+                    // instance stays visible and the other side blanks out.
+                    const sideShows = (inst: Instance | null) => {
+                      if (!inst) return false;
+                      if (reviewPlayer) {
+                        return (
+                          inst.team.toLowerCase() ===
+                            reviewPlayer.team.toLowerCase() &&
+                          inst.playerNumber === reviewPlayer.number &&
+                          statMatchesColumn(
+                            sportConfig,
+                            reviewPlayer.columnKey,
+                            inst.stat.toLowerCase()
+                          )
+                        );
+                      }
+                      return (
+                        videoStatFilter === "all" ||
+                        inst.stat.trim() === videoStatFilter
+                      );
+                    };
+                    const masterInstance = sideShows(row.master)
+                      ? row.master
+                      : null;
+                    const analystInstance = sideShows(row.analyst)
+                      ? row.analyst
+                      : null;
                     const masterActive =
                       !!masterInstance &&
                       videoTime >= masterInstance.start &&
@@ -2049,12 +2534,35 @@ export default function AccuracyComparePage() {
                           instance={masterInstance}
                           onSeek={seekVideo}
                           active={masterActive}
+                          flagged={
+                            !!masterInstance &&
+                            flaggedKeys.has(
+                              disputeKey(masterInstance.id, "master")
+                            )
+                          }
+                          onFlag={
+                            canFlag && masterInstance
+                              ? (e) => openFlagMenu(e, masterInstance, "master")
+                              : undefined
+                          }
                         />
                         <TimelineCell
                           instance={analystInstance}
                           delta={masterInstance && analystInstance ? row.timeDelta : null}
                           onSeek={seekVideo}
                           active={analystActive}
+                          flagged={
+                            !!analystInstance &&
+                            flaggedKeys.has(
+                              disputeKey(analystInstance.id, "analyst")
+                            )
+                          }
+                          onFlag={
+                            canFlag && analystInstance
+                              ? (e) =>
+                                  openFlagMenu(e, analystInstance, "analyst")
+                              : undefined
+                          }
                         />
                       </div>
                     );
@@ -2070,6 +2578,78 @@ export default function AccuracyComparePage() {
           </div>
         </div>
       )}
+
+      {/* Flag-as-dispute context menu (right-click a review instance). */}
+      {flagMenu && (
+        <FlagMenu
+          x={flagMenu.x}
+          y={flagMenu.y}
+          instance={flagMenu.instance}
+          side={flagMenu.side}
+          alreadyFlagged={flaggedKeys.has(
+            disputeKey(flagMenu.instance.id, flagMenu.side)
+          )}
+          onSubmit={submitFlag}
+        />
+      )}
+    </div>
+  );
+}
+
+// Small popover shown on right-clicking a review instance: optional reason
+// then flag. Stops propagation so the outside-click handler doesn't close it.
+function FlagMenu({
+  x,
+  y,
+  instance,
+  side,
+  alreadyFlagged,
+  onSubmit,
+}: {
+  x: number;
+  y: number;
+  instance: Instance;
+  side: DisputeSide;
+  alreadyFlagged: boolean;
+  onSubmit: (reason: string | null) => void;
+}) {
+  const [reason, setReason] = useState("");
+  // Keep the menu on-screen.
+  const left = Math.min(x, (typeof window !== "undefined" ? window.innerWidth : 9999) - 280);
+  const top = Math.min(y, (typeof window !== "undefined" ? window.innerHeight : 9999) - 180);
+  return (
+    <div
+      className="fixed z-[60] w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-2xl"
+      style={{ left, top }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+        <Flag size={13} className="text-amber-600" /> Flag as dispute
+      </p>
+      <p className="mb-2 truncate text-[11px] text-slate-500">
+        {side === "master" ? "Master" : "Analyst"} ·{" "}
+        {instance.stat || "—"}
+        {instance.playerNumber != null ? ` · #${instance.playerNumber}` : ""}
+      </p>
+      {alreadyFlagged && (
+        <p className="mb-2 rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
+          Already flagged — submitting updates the reason.
+        </p>
+      )}
+      <textarea
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        rows={2}
+        autoFocus
+        placeholder="Reason (optional)"
+        className="mb-2 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-amber-500"
+      />
+      <button
+        onClick={() => onSubmit(reason.trim() || null)}
+        className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600"
+      >
+        <Flag size={13} /> Flag instance
+      </button>
     </div>
   );
 }
@@ -2204,11 +2784,15 @@ function TimelineCell({
   delta,
   onSeek,
   active,
+  flagged,
+  onFlag,
 }: {
   instance: Instance | null;
   delta?: number | null;
   onSeek?: (seconds: number) => void;
   active?: boolean;
+  flagged?: boolean;
+  onFlag?: (e: React.MouseEvent) => void;
 }) {
   if (!instance) {
     return (
@@ -2238,13 +2822,20 @@ function TimelineCell({
         clickable ? "cursor-pointer hover:brightness-95" : ""
       } ${
         active ? "ring-2 ring-inset ring-sky-500" : ""
-      }`}
+      } ${flagged ? "ring-2 ring-inset ring-amber-500" : ""}`}
       onClick={
         clickable
           ? () => onSeek!(instance.start)
           : undefined
       }
-      title={clickable ? "Jump to this moment in the video" : undefined}
+      onContextMenu={onFlag}
+      title={
+        onFlag
+          ? "Click to jump · right-click to flag as dispute"
+          : clickable
+            ? "Jump to this moment in the video"
+            : undefined
+      }
     >
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <span className="font-mono text-xs font-semibold text-slate-500">
@@ -2252,6 +2843,12 @@ function TimelineCell({
         </span>
         {clickable && (
           <Video size={11} className="text-slate-400" />
+        )}
+        {flagged && (
+          <Flag
+            size={11}
+            className="fill-amber-500 text-amber-600"
+          />
         )}
         {delta != null && delta > 0 && (
           <span className="text-[10px] text-slate-400">

@@ -66,6 +66,7 @@ export const PAGES: PageDef[] = [
     { key: "accuracy-compare", label: "Accuracy Comparison", href: "/accuracy-compare" },
     { key: "accuracy-checks", label: "Accuracy History", href: "/accuracy-checks" },
     { key: "settings", label: "Settings", href: "/settings" },
+    { key: "disputes", label: "Disputes", href: "/disputes" },
     { key: "users", label: "User Accounts", href: "/users" },
     { key: "permissions", label: "Permissions", href: "/permissions" },
 ];

@@ -23,6 +23,7 @@ import {
   KeyRound,
   UserCog,
   LogOut,
+  Flag,
 } from "lucide-react";
 
 import { useAuth } from "@/components/auth/AuthContext";
@@ -147,6 +148,11 @@ const sections = [
   {
     heading: "ADMIN",
     items: [
+      {
+        title: "Disputes",
+        href: "/disputes",
+        icon: Flag,
+      },
       {
         title: "User Accounts",
         href: "/users",
