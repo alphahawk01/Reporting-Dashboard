@@ -182,14 +182,19 @@ const gamesData = await fetchAll<TTGame>("TT_Games");
   // ACTIVE ANALYST
   // -------------------------
   const activeData = useMemo(() => {
-
     if (!analysts.length) return null;
 
     if (selectedAnalyst === "All") return analysts[0];
 
+    // Match by exact name, then case-insensitively. IMPORTANT: do NOT fall
+    // back to another analyst — if there's no match (e.g. the analyst has no
+    // coded games yet), return null so we show an empty state rather than
+    // someone else's profile.
+    const target = selectedAnalyst.trim().toLowerCase();
     return (
       analysts.find((a) => a.name === selectedAnalyst) ||
-      analysts[0]
+      analysts.find((a) => a.name.trim().toLowerCase() === target) ||
+      null
     );
   }, [selectedAnalyst, analysts]);
 
@@ -507,8 +512,15 @@ const filteredGames = useMemo(() => {
 
           </>
         ) : (
-          <div className="text-slate-400">
-            No analyst data available
+          <div className="rounded-2xl border border-slate-800 bg-[#0f1b2d] p-10 text-center">
+            <p className="text-lg font-semibold text-slate-200">
+              {selectedAnalyst && selectedAnalyst !== "All"
+                ? `No coded data yet for ${selectedAnalyst}`
+                : "No analyst data available"}
+            </p>
+            <p className="mt-1 text-sm text-slate-400">
+              This profile has no games or shifts recorded yet.
+            </p>
           </div>
         )}
       </div>
