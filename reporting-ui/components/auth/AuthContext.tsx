@@ -142,16 +142,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const profileDenied =
             user.role !== "super_admin" &&
             permissions[user.role]?.["analyst-profile"] === false;
-        if (
-            user.role === "analyst" &&
-            !!user.analyst_name &&
-            !!user.analyst_name.trim() &&
-            !profileDenied
-        ) {
-            return `/analyst-profile?analyst=${encodeURIComponent(
-                user.analyst_name.trim()
-            )}`;
+        const allocatedName = user.analyst_name?.trim();
+
+        if (user.role === "analyst") {
+            // Allocated analyst → their own profile.
+            if (allocatedName && !profileDenied) {
+                return `/analyst-profile?analyst=${encodeURIComponent(
+                    allocatedName
+                )}`;
+            }
+            // Not allocated → Accuracy History.
+            return "/accuracy-checks";
         }
+
         return firstAccessiblePath();
     }, [user, permissions, firstAccessiblePath]);
 

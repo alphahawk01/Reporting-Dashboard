@@ -28,7 +28,7 @@ type CheckGroup = {
 
 export default function DisputesPage() {
     const router = useRouter();
-    const { user } = useAuth();
+    const { user, ready } = useAuth();
     const canResolve = user?.role === "admin" || user?.role === "super_admin";
 
     const [disputes, setDisputes] = useState<Dispute[]>([]);
@@ -54,18 +54,18 @@ export default function DisputesPage() {
                 getAllAccuracyChecks().catch(() => [] as AccuracyCheck[]),
             ]);
 
-            // Analysts only see disputes on checks saved against their own
-            // name; admins/super admins see everything.
+            // Admins/super admins see everything. Analysts see ONLY disputes
+            // on checks saved against their own name (nothing if unallocated).
             const isAdmin =
                 user?.role === "admin" || user?.role === "super_admin";
-            const own = user?.analyst_name?.trim().toLowerCase();
+            const own = user?.analyst_name?.trim().toLowerCase() ?? "";
 
-            if (isAdmin || !own) {
+            if (isAdmin) {
                 setChecks(c);
                 setDisputes(d);
             } else {
                 const ownChecks = c.filter(
-                    (chk) => chk.analyst_name.trim().toLowerCase() === own
+                    (chk) => !!own && chk.analyst_name.trim().toLowerCase() === own
                 );
                 const ownIds = new Set(ownChecks.map((chk) => chk.id));
                 setChecks(ownChecks);
@@ -79,9 +79,10 @@ export default function DisputesPage() {
     }
 
     useEffect(() => {
+        if (!ready) return;
         load();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user?.role, user?.analyst_name]);
+    }, [ready, user?.role, user?.analyst_name]);
 
     const checkById = useMemo(() => {
         const m = new Map<number, AccuracyCheck>();

@@ -68,7 +68,7 @@ function homeAwayAccuracy(check: AccuracyCheck): {
 
 export default function AccuracyChecksPage() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, ready } = useAuth();
   const canResolve =
     user?.role === "admin" || user?.role === "super_admin";
 
@@ -128,17 +128,17 @@ export default function AccuracyChecksPage() {
         getOpenDisputeCounts().catch(() => ({}) as Record<number, number>),
       ]);
 
-      // Analysts see only checks saved against their own name; admins/super
-      // admins see everything.
+      // Admins/super admins see everything. Any other role (analyst) sees
+      // ONLY checks saved against their own allocated name — and nothing if
+      // they have no allocated name (never fall back to showing all).
       const isAdmin =
         user?.role === "admin" || user?.role === "super_admin";
-      const own = user?.analyst_name?.trim().toLowerCase();
-      const scoped =
-        isAdmin || !own
-          ? data
-          : data.filter(
-              (c) => c.analyst_name.trim().toLowerCase() === own
-            );
+      const own = user?.analyst_name?.trim().toLowerCase() ?? "";
+      const scoped = isAdmin
+        ? data
+        : data.filter(
+            (c) => !!own && c.analyst_name.trim().toLowerCase() === own
+          );
 
       setChecks(scoped);
       setOpenCounts(counts);
@@ -153,12 +153,13 @@ export default function AccuracyChecksPage() {
     }
   }
 
-  // Reload when the user (role / analyst_name) becomes available so the
-  // analyst-scoping is applied correctly.
+  // Wait until auth is ready (session restored) before loading, so the
+  // analyst-scoping filter runs against the real user, not a half-loaded one.
   useEffect(() => {
+    if (!ready) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.role, user?.analyst_name]);
+  }, [ready, user?.role, user?.analyst_name]);
 
   const analystSummaries = useMemo(
     () => summariseByAnalyst(checks),
