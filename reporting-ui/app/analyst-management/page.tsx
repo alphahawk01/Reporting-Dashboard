@@ -5,10 +5,12 @@ import Link from "next/link";
 
 import {
     getAnalysts,
+    getPlatformAnalysts,
     updateHomeComputer,
     updateOfficeComputer,
     renameAnalyst,
     type Analyst,
+    type PlatformAnalyst,
 } from "@/lib/api/analysts";
 
 import {
@@ -22,9 +24,11 @@ import AnalystTable from "./AnalystTable";
 import SearchBar from "./SearchBar";
 import SummaryCards from "./SummaryCards";
 import ReassignComputerModal from "./ReassignComputerModal";
+import AddAnalystModal from "./AddAnalystModal";
 
 import { getHubConnection } from "@/lib/signalr";
 import { HubConnectionState } from "@microsoft/signalr";
+import { UserPlus } from "lucide-react";
 
 type AnalystAffiliations = Record<
     string,
@@ -35,6 +39,15 @@ export default function AnalystsPage() {
 
     const [analysts, setAnalysts] =
         useState<Analyst[]>([]);
+
+    // Analysts added via the shared Supabase `analysts` table (platform
+    // source of truth). Merged into the displayed list below so newly-added
+    // analysts are visible here even though the main list comes from the
+    // .NET API.
+    const [platformAnalysts, setPlatformAnalysts] =
+        useState<PlatformAnalyst[]>([]);
+
+    const [addOpen, setAddOpen] = useState(false);
 
     const [computers, setComputers] =
         useState<Computer[]>([]);
@@ -93,6 +106,7 @@ export default function AnalystsPage() {
                 analystData,
                 computerData,
                 affiliationResult,
+                platformData,
             ] = await Promise.all([
 
                 getAnalysts(),
@@ -108,6 +122,14 @@ export default function AnalystsPage() {
                             team_name
                         )
                     `),
+
+                getPlatformAnalysts().catch((err) => {
+                    console.error(
+                        "Failed loading platform analysts:",
+                        err
+                    );
+                    return [] as PlatformAnalyst[];
+                }),
 
             ]);
 
@@ -226,6 +248,10 @@ export default function AnalystsPage() {
                 analystData
             );
 
+            setPlatformAnalysts(
+                platformData
+            );
+
             setComputers(
                 computerData
             );
@@ -337,8 +363,30 @@ export default function AnalystsPage() {
     // FILTER ANALYSTS
     // ==================================================
 
+    // Merge the .NET analyst list with any Supabase-added platform analysts
+    // that aren't already present (matched by name, case-insensitively).
+    // Platform-only analysts have no computer records yet, so they show with
+    // a negative id and empty computer assignments.
+    const mergedAnalysts: Analyst[] = (() => {
+        const seen = new Set(
+            analysts.map((a) => a.name.trim().toLowerCase())
+        );
+        const extras: Analyst[] = platformAnalysts
+            .filter((p) => !seen.has(p.name.trim().toLowerCase()))
+            .map((p) => ({
+                id: -p.id,
+                name: p.name,
+                email: p.email,
+                homeComputer: null,
+                officeComputer: null,
+            }));
+        return [...analysts, ...extras].sort((a, b) =>
+            a.name.localeCompare(b.name)
+        );
+    })();
+
     const filteredAnalysts =
-        analysts.filter(
+        mergedAnalysts.filter(
             analyst => {
 
                 const analystTeams =
@@ -371,7 +419,7 @@ export default function AnalystsPage() {
     // ==================================================
 
     const assignedCount =
-        analysts.filter(
+        mergedAnalysts.filter(
             analyst =>
                 analyst.homeComputer ||
                 analyst.officeComputer
@@ -704,27 +752,51 @@ export default function AnalystsPage() {
                 </div>
 
 
-                <Link
-                    href="/fixtures"
-                    className="
-                        rounded-lg
-                        bg-blue-600
-                        px-4
-                        py-2
-                        font-medium
-                        text-white
-                        hover:bg-blue-700
-                    "
-                >
-                    Back to Fixtures
-                </Link>
+                <div className="flex items-center gap-2">
+
+                    <button
+                        onClick={() => setAddOpen(true)}
+                        className="
+                            inline-flex
+                            items-center
+                            gap-1.5
+                            rounded-lg
+                            bg-blue-600
+                            px-4
+                            py-2
+                            font-medium
+                            text-white
+                            hover:bg-blue-700
+                        "
+                    >
+                        <UserPlus size={16} /> Add analyst
+                    </button>
+
+                    <Link
+                        href="/fixtures"
+                        className="
+                            rounded-lg
+                            border
+                            border-slate-300
+                            bg-white
+                            px-4
+                            py-2
+                            font-medium
+                            text-slate-700
+                            hover:bg-slate-50
+                        "
+                    >
+                        Back to Fixtures
+                    </Link>
+
+                </div>
 
             </div>
 
 
             <SummaryCards
                 total={
-                    analysts.length
+                    mergedAnalysts.length
                 }
                 assigned={
                     assignedCount
@@ -792,6 +864,13 @@ export default function AnalystsPage() {
                 onConfirm={
                     confirmReassign
                 }
+            />
+
+
+            <AddAnalystModal
+                open={addOpen}
+                onClose={() => setAddOpen(false)}
+                onSaved={load}
             />
 
             {/* RENAME MODAL */}

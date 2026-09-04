@@ -18,13 +18,13 @@ import {
   Video,
   X as XIcon,
 } from "lucide-react";
-import { supabase } from "@/lib/supabase";
 import {
   saveAccuracyCheck,
   getAccuracyCheckById,
   getSavedMasters,
   type SavedMaster,
 } from "@/lib/api/accuracyChecks";
+import { getPlatformAnalystNames } from "@/lib/api/analysts";
 import {
   parseInstances,
   compareInstances,
@@ -611,43 +611,18 @@ export default function AccuracyComparePage() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
-  // Load the distinct analyst names (from Deputy roster) for the
-  // allocation dropdowns.
+  // Load the distinct analyst names for the allocation dropdowns. Unions the
+  // shared platform `analysts` table (manually-added analysts) with the
+  // Deputy roster, so newly-added analysts appear here immediately.
   useEffect(() => {
     let cancelled = false;
 
-    async function loadNames() {
-      const names = new Set<string>();
-      const pageSize = 1000;
-      let from = 0;
+    getPlatformAnalystNames()
+      .then((names) => {
+        if (!cancelled) setAnalystNames(names);
+      })
+      .catch((err) => console.error("Failed loading analyst names:", err));
 
-      while (true) {
-        const { data, error } = await supabase
-          .from("deputy_shifts")
-          .select("employee_name")
-          .range(from, from + pageSize - 1);
-
-        if (error) {
-          console.error("Failed loading analyst names:", error);
-          break;
-        }
-        if (!data || data.length === 0) break;
-
-        for (const r of data) {
-          const n = (r as any).employee_name?.trim();
-          if (n) names.add(n);
-        }
-
-        from += pageSize;
-        if (data.length < pageSize) break;
-      }
-
-      if (!cancelled) {
-        setAnalystNames(Array.from(names).sort((a, b) => a.localeCompare(b)));
-      }
-    }
-
-    loadNames();
     return () => {
       cancelled = true;
     };
