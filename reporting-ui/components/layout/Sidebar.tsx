@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import {
   LayoutDashboard,
@@ -20,7 +20,13 @@ import {
   Globe,
   FileCheck2,
   History,
+  KeyRound,
+  UserCog,
+  LogOut,
 } from "lucide-react";
+
+import { useAuth } from "@/components/auth/AuthContext";
+import { pageKeyForPath, ROLE_LABELS } from "@/lib/api/auth";
 
 const sections = [
   {
@@ -142,6 +148,16 @@ const sections = [
     heading: "ADMIN",
     items: [
       {
+        title: "User Accounts",
+        href: "/users",
+        icon: UserCog,
+      },
+      {
+        title: "Permissions",
+        href: "/permissions",
+        icon: KeyRound,
+      },
+      {
         title: "Settings",
         href: "/settings",
         icon: Settings,
@@ -152,6 +168,23 @@ const sections = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user, hasAccess, logout } = useAuth();
+
+  function handleLogout() {
+    logout();
+    router.replace("/login");
+  }
+
+  // Only show items the current role can access; drop empty sections.
+  const visibleSections = sections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) =>
+        hasAccess(pageKeyForPath(item.href))
+      ),
+    }))
+    .filter((section) => section.items.length > 0);
 
   return (
     <aside className="flex w-72 flex-col border-r border-slate-800 bg-[#0B1220]">
@@ -175,7 +208,7 @@ export default function Sidebar() {
 
       <nav className="flex-1 overflow-y-auto px-4 py-6">
 
-        {sections.map((section) => (
+        {visibleSections.map((section) => (
 
           <div
             key={section.heading}
@@ -231,9 +264,25 @@ export default function Sidebar() {
 
       </nav>
 
-      <div className="border-t border-slate-800 p-4 text-xs text-slate-500">
+      <div className="border-t border-slate-800 p-4">
 
-        Version 1.0
+        {user && (
+          <div className="mb-3">
+            <div className="truncate text-sm font-medium text-white">
+              {user.analyst_name || user.username}
+            </div>
+            <div className="text-xs text-slate-500">
+              {ROLE_LABELS[user.role]}
+            </div>
+          </div>
+        )}
+
+        <button
+          onClick={handleLogout}
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800 hover:text-white"
+        >
+          <LogOut size={16} /> Sign out
+        </button>
 
       </div>
 
