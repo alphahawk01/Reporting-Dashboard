@@ -899,6 +899,11 @@ export default function AccuracyComparePage() {
     const checkId = params.get("check");
     if (!checkId) return;
 
+    // Optional deep-link from the Disputes page: open the video review and
+    // seek to a specific instance (by its stat + start time seconds).
+    const reviewSeek = params.get("seek");
+    const reviewStat = params.get("stat");
+
     let cancelled = false;
 
     (async () => {
@@ -936,6 +941,18 @@ export default function AccuracyComparePage() {
       setLoadedCheckId(check.id);
       setCheckAnalystName(check.analyst_name);
       reloadDisputes(check.id);
+
+      // Deep-link: open the review focused on the disputed stat and seek to
+      // it. Filter by stat so the reviewer sees that stat's instances, then
+      // seek to the exact moment.
+      if (reviewSeek != null && check.video_url) {
+        const seconds = parseFloat(reviewSeek);
+        if (!Number.isNaN(seconds)) {
+          if (reviewStat) setVideoStatFilter(reviewStat);
+          // seekVideo opens the modal and retries until the <video> mounts.
+          seekVideo(seconds);
+        }
+      }
     })();
 
     return () => {

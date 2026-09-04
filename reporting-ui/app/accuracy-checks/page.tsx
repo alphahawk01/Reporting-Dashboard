@@ -151,15 +151,15 @@ export default function AccuracyChecksPage() {
 
   const masterCounts = useMemo(() => countMasterChecks(checks), [checks]);
 
-  // Default the selected analyst once data loads.
-  useEffect(() => {
-    if (!selectedAnalyst && analystSummaries.length > 0) {
-      setSelectedAnalyst(analystSummaries[0].analystName);
-    }
-  }, [analystSummaries, selectedAnalyst]);
-
+  // Empty selectedAnalyst = "All analysts" (the default view). Checks are
+  // shown oldest-first per analyst, or all checks newest-first for "All".
   const analystChecks = useMemo(() => {
-    if (!selectedAnalyst) return [];
+    if (!selectedAnalyst) {
+      return [...checks].sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+    }
     return checks
       .filter(
         (c) =>
@@ -256,6 +256,10 @@ export default function AccuracyChecksPage() {
                   onChange={(e) => setSelectedAnalyst(e.target.value)}
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none"
                 >
+                  <option value="">
+                    All analysts ({checks.length} check
+                    {checks.length === 1 ? "" : "s"})
+                  </option>
                   {analystSummaries.map((s) => (
                     <option key={s.analystName} value={s.analystName}>
                       {s.analystName} ({s.checks} check{s.checks === 1 ? "" : "s"})
@@ -315,7 +319,11 @@ export default function AccuracyChecksPage() {
                 <h2 className="mb-3 text-sm font-semibold text-slate-700">
                   Accuracy trend
                 </h2>
-                {trendData.length < 2 ? (
+                {!selectedAnalyst ? (
+                  <p className="text-sm text-slate-400">
+                    Select an analyst to see their accuracy trend.
+                  </p>
+                ) : trendData.length < 2 ? (
                   <p className="text-sm text-slate-400">
                     Need at least 2 saved checks to show a trend.
                   </p>
@@ -347,6 +355,9 @@ export default function AccuracyChecksPage() {
                     <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                       <tr>
                         <th className="px-4 py-2.5">Date</th>
+                        {!selectedAnalyst && (
+                          <th className="px-4 py-2.5">Analyst</th>
+                        )}
                         <th className="px-4 py-2.5">Match</th>
                         <th className="px-4 py-2.5">Master by</th>
                         <th className="px-4 py-2.5 text-right">Overall</th>
@@ -358,9 +369,12 @@ export default function AccuracyChecksPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {analystChecks
-                        .slice()
-                        .reverse()
+                      {[...analystChecks]
+                        .sort(
+                          (a, b) =>
+                            new Date(b.created_at).getTime() -
+                            new Date(a.created_at).getTime()
+                        )
                         .map((c) => {
                           const { home, away } = homeAwayAccuracy(c);
                           return (
@@ -373,6 +387,11 @@ export default function AccuracyChecksPage() {
                             <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
                               {formatDate(c.created_at)}
                             </td>
+                            {!selectedAnalyst && (
+                              <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-700">
+                                {c.analyst_name || "—"}
+                              </td>
+                            )}
                             <td className="px-4 py-2.5 text-slate-700">
                               <span
                                 className="block max-w-[420px] truncate"
@@ -436,11 +455,22 @@ export default function AccuracyChecksPage() {
                           </tr>
                           {expandedCheck === c.id && (
                             <tr className="border-t border-slate-100 bg-slate-50/60">
-                              <td colSpan={9} className="px-4 py-3">
+                              <td colSpan={selectedAnalyst ? 9 : 10} className="px-4 py-3">
                                 <DisputesPanel
                                   disputes={panelDisputes}
                                   canResolve={canResolve}
                                   onResolve={handleResolve}
+                                  onOpen={(d) => {
+                                    const params = new URLSearchParams({
+                                      check: String(d.check_id),
+                                    });
+                                    if (d.code_time != null)
+                                      params.set("seek", String(d.code_time));
+                                    if (d.stat) params.set("stat", d.stat);
+                                    router.push(
+                                      `/accuracy-compare?${params.toString()}`
+                                    );
+                                  }}
                                 />
                               </td>
                             </tr>

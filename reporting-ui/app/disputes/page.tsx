@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Flag } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Flag, ChevronDown, ChevronRight } from "lucide-react";
 import {
     getAllDisputes,
     resolveDispute,
@@ -16,7 +17,17 @@ import DisputesPanel from "@/components/DisputesPanel";
 
 type Filter = "open" | "resolved" | "all";
 
+type CheckGroup = {
+    checkId: number;
+    label: string;
+    analyst: string;
+    date: string | null;
+    disputes: Dispute[];
+    openCount: number;
+};
+
 export default function DisputesPage() {
+    const router = useRouter();
     const { user } = useAuth();
     const canResolve = user?.role === "admin" || user?.role === "super_admin";
 
@@ -24,6 +35,16 @@ export default function DisputesPage() {
     const [checks, setChecks] = useState<AccuracyCheck[]>([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState<Filter>("open");
+    const [expanded, setExpanded] = useState<Set<number>>(new Set());
+    const [search, setSearch] = useState("");
+
+    // Open the disputed instance in the Accuracy Comparison video review.
+    function openInReview(d: Dispute) {
+        const params = new URLSearchParams({ check: String(d.check_id) });
+        if (d.code_time != null) params.set("seek", String(d.code_time));
+        if (d.stat) params.set("stat", d.stat);
+        router.push(`/accuracy-compare?${params.toString()}`);
+    }
 
     async function load() {
         try {
@@ -45,24 +66,77 @@ export default function DisputesPage() {
         load();
     }, []);
 
-    // check_id -> label ("Analyst · match" or a fallback).
-    const checkLabels = useMemo(() => {
-        const m: Record<number, string> = {};
-        for (const c of checks) {
-            m[c.id] =
-                c.match_label ||
-                `${c.analyst_name}${
-                    c.file_name_analyst ? ` · ${c.file_name_analyst}` : ""
-                }`;
-        }
+    const checkById = useMemo(() => {
+        const m = new Map<number, AccuracyCheck>();
+        for (const c of checks) m.set(c.id, c);
         return m;
     }, [checks]);
 
-    const filtered = useMemo(() => {
-        if (filter === "all") return disputes;
-        if (filter === "open") return disputes.filter((d) => d.status === "open");
-        return disputes.filter((d) => d.status !== "open");
-    }, [disputes, filter]);
+    function labelFor(checkId: number): string {
+        const c = checkById.get(checkId);
+        if (!c) return `Check #${checkId}`;
+        return (
+            c.match_label ||
+            `${c.analyst_name}${
+                c.file_name_analyst ? ` · ${c.file_name_analyst}` : ""
+            }`
+        );
+    }
+
+    // Filtered disputes, then grouped by check.
+    const groups = useMemo(() => {
+        const matchesFilter = (d: Dispute) =>
+            filter === "all"
+                ? true
+                : filter === "open"
+                  ? d.status === "open"
+                  : d.status !== "open";
+
+        const byCheck = new Map<number, Dispute[]>();
+        for (const d of disputes) {
+            if (!matchesFilter(d)) continue;
+            const arr = byCheck.get(d.check_id) ?? [];
+            arr.push(d);
+            byCheck.set(d.check_id, arr);
+        }
+
+        const q = search.trim().toLowerCase();
+        const result: CheckGroup[] = [];
+        for (const [checkId, ds] of byCheck.entries()) {
+            const c = checkById.get(checkId);
+            const label = labelFor(checkId);
+            const analyst = c?.analyst_name ?? "";
+            if (q && !`${label} ${analyst}`.toLowerCase().includes(q)) continue;
+            result.push({
+                checkId,
+                label,
+                analyst,
+                date: c?.created_at ?? null,
+                disputes: ds.sort(
+                    (a, b) =>
+                        (a.code_time ?? 0) - (b.code_time ?? 0)
+                ),
+                openCount: ds.filter((d) => d.status === "open").length,
+            });
+        }
+        // Checks with open disputes first, then most disputes, then newest.
+        return result.sort((a, b) => {
+            if (a.openCount !== b.openCount) return b.openCount - a.openCount;
+            if (a.disputes.length !== b.disputes.length)
+                return b.disputes.length - a.disputes.length;
+            return (b.date ?? "").localeCompare(a.date ?? "");
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [disputes, checkById, filter, search]);
+
+    function toggle(checkId: number) {
+        setExpanded((prev) => {
+            const next = new Set(prev);
+            if (next.has(checkId)) next.delete(checkId);
+            else next.add(checkId);
+            return next;
+        });
+    }
 
     async function handleResolve(
         disputeId: number,
@@ -82,6 +156,15 @@ export default function DisputesPage() {
         return { open, total: disputes.length };
     }, [disputes]);
 
+    function fmtDate(iso: string | null) {
+        if (!iso) return "";
+        return new Date(iso).toLocaleDateString("en-AU", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+        });
+    }
+
     if (loading) {
         return (
             <div className="min-h-full bg-slate-100 p-8 text-slate-600">
@@ -98,43 +181,103 @@ export default function DisputesPage() {
                         <Flag size={26} /> Disputes
                     </h1>
                     <p className="mt-2 text-sm text-slate-600">
-                        Flagged instances across all accuracy checks.{" "}
+                        Grouped by accuracy check.{" "}
                         <span className="font-semibold text-amber-600">
                             {counts.open} open
                         </span>{" "}
-                        · {counts.total} total.
+                        · {counts.total} total across {groups.length} check
+                        {groups.length === 1 ? "" : "s"}.
                     </p>
                 </div>
 
-                {/* Filter */}
-                <div className="mb-4 flex items-center gap-1.5">
-                    {(["open", "resolved", "all"] as Filter[]).map((f) => (
-                        <button
-                            key={f}
-                            onClick={() => setFilter(f)}
-                            className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition ${
-                                filter === f
-                                    ? "bg-slate-900 text-white"
-                                    : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
-                            }`}
-                        >
-                            {f}
-                        </button>
-                    ))}
+                {/* Filter + search */}
+                <div className="mb-4 flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-1.5">
+                        {(["open", "resolved", "all"] as Filter[]).map((f) => (
+                            <button
+                                key={f}
+                                onClick={() => setFilter(f)}
+                                className={`rounded-lg px-3 py-1.5 text-xs font-semibold capitalize transition ${
+                                    filter === f
+                                        ? "bg-slate-900 text-white"
+                                        : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+                                }`}
+                            >
+                                {f}
+                            </button>
+                        ))}
+                    </div>
+                    <input
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Search check or analyst…"
+                        className="ml-auto w-56 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none focus:border-slate-500"
+                    />
                 </div>
 
-                {filtered.length === 0 ? (
+                {groups.length === 0 ? (
                     <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">
                         No {filter === "all" ? "" : filter} disputes.
                     </div>
                 ) : (
-                    <DisputesPanel
-                        disputes={filtered}
-                        canResolve={canResolve}
-                        onResolve={handleResolve}
-                        showCheckColumn
-                        checkLabel={(id) => checkLabels[id] ?? `Check #${id}`}
-                    />
+                    <div className="space-y-2">
+                        {groups.map((g) => {
+                            const isOpen = expanded.has(g.checkId);
+                            return (
+                                <div
+                                    key={g.checkId}
+                                    className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+                                >
+                                    <button
+                                        onClick={() => toggle(g.checkId)}
+                                        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50"
+                                    >
+                                        {isOpen ? (
+                                            <ChevronDown
+                                                size={16}
+                                                className="shrink-0 text-slate-400"
+                                            />
+                                        ) : (
+                                            <ChevronRight
+                                                size={16}
+                                                className="shrink-0 text-slate-400"
+                                            />
+                                        )}
+                                        <div className="min-w-0 flex-1">
+                                            <p className="truncate text-sm font-semibold text-slate-800">
+                                                {g.label}
+                                            </p>
+                                            <p className="truncate text-xs text-slate-500">
+                                                {g.analyst}
+                                                {g.date
+                                                    ? ` · ${fmtDate(g.date)}`
+                                                    : ""}
+                                            </p>
+                                        </div>
+                                        {g.openCount > 0 && (
+                                            <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-700">
+                                                {g.openCount} open
+                                            </span>
+                                        )}
+                                        <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
+                                            {g.disputes.length} total
+                                        </span>
+                                    </button>
+
+                                    {isOpen && (
+                                        <div className="border-t border-slate-100 bg-slate-50/60 p-3">
+                                            <DisputesPanel
+                                                disputes={g.disputes}
+                                                canResolve={canResolve}
+                                                onResolve={handleResolve}
+                                                onOpen={openInReview}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
                 )}
             </div>
         </div>

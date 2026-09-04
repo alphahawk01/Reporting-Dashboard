@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Flag, Check, X, Clock } from "lucide-react";
+import { Flag, Check, X, Clock, Video } from "lucide-react";
 import type { Dispute } from "@/lib/api/disputes";
 
 function statusBadge(status: Dispute["status"]) {
@@ -32,6 +32,7 @@ export default function DisputesPanel({
     onResolve,
     showCheckColumn,
     checkLabel,
+    onOpen,
 }: {
     disputes: Dispute[];
     canResolve: boolean;
@@ -44,6 +45,8 @@ export default function DisputesPanel({
     showCheckColumn?: boolean;
     /** Resolve a check_id to a human label (global page). */
     checkLabel?: (checkId: number) => string;
+    /** When set, a "Review in video" action opens the disputed instance. */
+    onOpen?: (dispute: Dispute) => void;
 }) {
     if (disputes.length === 0) {
         return (
@@ -63,6 +66,7 @@ export default function DisputesPanel({
                     onResolve={onResolve}
                     showCheckColumn={showCheckColumn}
                     checkLabel={checkLabel}
+                    onOpen={onOpen}
                 />
             ))}
         </div>
@@ -75,6 +79,7 @@ function DisputeRow({
     onResolve,
     showCheckColumn,
     checkLabel,
+    onOpen,
 }: {
     dispute: Dispute;
     canResolve: boolean;
@@ -85,6 +90,7 @@ function DisputeRow({
     ) => void | Promise<void>;
     showCheckColumn?: boolean;
     checkLabel?: (checkId: number) => string;
+    onOpen?: (dispute: Dispute) => void;
 }) {
     const [note, setNote] = useState("");
     const open = d.status === "open";
@@ -106,13 +112,24 @@ function DisputeRow({
                         <Clock size={11} /> {fmtTime(d.code_time)}
                     </span>
                 </div>
-                <span
-                    className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusBadge(
-                        d.status
-                    )}`}
-                >
-                    {d.status}
-                </span>
+                <div className="flex items-center gap-2">
+                    {onOpen && (
+                        <button
+                            onClick={() => onOpen(d)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-sky-700"
+                            title="Review this instance in the video"
+                        >
+                            <Video size={12} /> Review
+                        </button>
+                    )}
+                    <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusBadge(
+                            d.status
+                        )}`}
+                    >
+                        {d.status}
+                    </span>
+                </div>
             </div>
 
             {showCheckColumn && checkLabel && (
