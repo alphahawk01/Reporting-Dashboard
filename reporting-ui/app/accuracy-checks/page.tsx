@@ -66,6 +66,54 @@ function homeAwayAccuracy(check: AccuracyCheck): {
   };
 }
 
+// Per-team count for a metric (wrongStat / wrongPlayer / missed), or null if
+// the team has no breakdown recorded.
+function teamMetric(
+  check: AccuracyCheck,
+  team: "home" | "away",
+  metric: "wrongStat" | "wrongPlayer" | "missed"
+): number | null {
+  const t = check.team_breakdown?.find(
+    (b) => b.team.trim().toLowerCase() === team && b.masterTotal > 0
+  );
+  return t ? t[metric] : null;
+}
+
+// One analyst's row within a master-fixture group, with all sortable metrics.
+type FixtureRow = {
+  check: AccuracyCheck;
+  analyst: string;
+  date: string;
+  overallAcc: number;
+  homeAcc: number | null;
+  awayAcc: number | null;
+  wrongStat: number;
+  wrongStatHome: number | null;
+  wrongStatAway: number | null;
+  wrongPlayer: number;
+  wrongPlayerHome: number | null;
+  wrongPlayerAway: number | null;
+  missed: number;
+  missedHome: number | null;
+  missedAway: number | null;
+};
+
+type FixtureSortKey =
+  | "analyst"
+  | "date"
+  | "overallAcc"
+  | "homeAcc"
+  | "awayAcc"
+  | "wrongStat"
+  | "wrongStatHome"
+  | "wrongStatAway"
+  | "wrongPlayer"
+  | "wrongPlayerHome"
+  | "wrongPlayerAway"
+  | "missed"
+  | "missedHome"
+  | "missedAway";
+
 export default function AccuracyChecksPage() {
   const router = useRouter();
   const { user, ready } = useAuth();
@@ -208,6 +256,113 @@ export default function AccuracyChecksPage() {
       ),
     [analystSummaries, selectedAnalyst]
   );
+
+  // Group all checks by the master fixture (master file). Each group lists
+  // every analyst checked against that master, with overall/home/away
+  // metrics — a per-fixture leaderboard.
+  const masterFixtureGroups = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        key: string;
+        label: string;
+        masterBy: string | null;
+        rows: FixtureRow[];
+      }
+    >();
+
+    for (const c of checks) {
+      const key = (c.file_name_master || c.match_label || `check-${c.id}`)
+        .trim();
+      if (!key) continue;
+      let g = map.get(key);
+      if (!g) {
+        g = {
+          key,
+          label: c.file_name_master || c.match_label || key,
+          masterBy: c.master_analyst_name ?? null,
+          rows: [],
+        };
+        map.set(key, g);
+      }
+      const { home, away } = homeAwayAccuracy(c);
+      g.rows.push({
+        check: c,
+        analyst: c.analyst_name,
+        date: c.created_at,
+        overallAcc: c.accuracy,
+        homeAcc: home,
+        awayAcc: away,
+        wrongStat: c.wrong_stat,
+        wrongStatHome: teamMetric(c, "home", "wrongStat"),
+        wrongStatAway: teamMetric(c, "away", "wrongStat"),
+        wrongPlayer: c.wrong_player,
+        wrongPlayerHome: teamMetric(c, "home", "wrongPlayer"),
+        wrongPlayerAway: teamMetric(c, "away", "wrongPlayer"),
+        missed: c.missed,
+        missedHome: teamMetric(c, "home", "missed"),
+        missedAway: teamMetric(c, "away", "missed"),
+      });
+    }
+
+    const groups = Array.from(map.values());
+    return groups.sort(
+      (a, b) => b.rows.length - a.rows.length || a.label.localeCompare(b.label)
+    );
+  }, [checks]);
+
+  const [expandedFixture, setExpandedFixture] = useState<string | null>(null);
+  const [fixtureSearch, setFixtureSearch] = useState("");
+  // Shared sort applied within each expanded fixture table.
+  const [fixtureSort, setFixtureSort] = useState<{
+    key: FixtureSortKey;
+    dir: "asc" | "desc";
+  }>({ key: "date", dir: "asc" });
+
+  function toggleFixtureSort(key: FixtureSortKey) {
+    setFixtureSort((cur) =>
+      cur.key === key
+        ? { key, dir: cur.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: "asc" }
+    );
+  }
+
+  function sortFixtureRows(rows: FixtureRow[]): FixtureRow[] {
+    const { key, dir } = fixtureSort;
+    const mult = dir === "asc" ? 1 : -1;
+    const val = (r: FixtureRow): number | string | null => {
+      switch (key) {
+        case "analyst":
+          return r.analyst.toLowerCase();
+        case "date":
+          return new Date(r.date).getTime();
+        default:
+          return r[key] as number | null;
+      }
+    };
+    return [...rows].sort((a, b) => {
+      const av = val(a);
+      const bv = val(b);
+      // Nulls always sort last regardless of direction.
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "string" && typeof bv === "string") {
+        return av.localeCompare(bv) * mult;
+      }
+      return ((av as number) - (bv as number)) * mult;
+    });
+  }
+
+  const filteredFixtureGroups = useMemo(() => {
+    const q = fixtureSearch.trim().toLowerCase();
+    if (!q) return masterFixtureGroups;
+    return masterFixtureGroups.filter(
+      (g) =>
+        g.label.toLowerCase().includes(q) ||
+        (g.masterBy ?? "").toLowerCase().includes(q)
+    );
+  }, [masterFixtureGroups, fixtureSearch]);
 
   async function handleDelete(id: number) {
     if (!confirm("Delete this saved accuracy check?")) return;
@@ -542,6 +697,188 @@ export default function AccuracyChecksPage() {
             </div>
           </div>
         )}
+
+        {/* BY MASTER FIXTURE — every check grouped by the master file, with
+            each analyst's overall / home / away accuracy. */}
+        {checks.length > 0 && masterFixtureGroups.length > 0 && (
+          <div className="mt-6 rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
+              <h2 className="text-sm font-semibold text-slate-700">
+                Checks by master fixture
+              </h2>
+              <input
+                value={fixtureSearch}
+                onChange={(e) => setFixtureSearch(e.target.value)}
+                placeholder="Search fixture or master…"
+                className="w-64 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none focus:border-slate-500"
+              />
+            </div>
+
+            <div className="divide-y divide-slate-100">
+              {filteredFixtureGroups.map((g) => {
+                const isOpen = expandedFixture === g.key;
+                return (
+                  <div key={g.key}>
+                    <button
+                      onClick={() =>
+                        setExpandedFixture(isOpen ? null : g.key)
+                      }
+                      className="flex w-full items-center gap-3 px-5 py-3 text-left hover:bg-slate-50"
+                    >
+                      <span className="shrink-0 text-slate-400">
+                        {isOpen ? "▾" : "▸"}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-slate-800">
+                          {g.label}
+                        </p>
+                        <p className="truncate text-xs text-slate-500">
+                          {g.masterBy ? `Master by ${g.masterBy} · ` : ""}
+                          {g.rows.length} check
+                          {g.rows.length === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                    </button>
+
+                    {isOpen && (
+                      <div className="overflow-x-auto bg-slate-50/60 px-5 pb-4">
+                        <table className="min-w-full text-sm">
+                          <thead className="text-xs uppercase tracking-wide text-slate-500">
+                            {/* Grouped header row */}
+                            <tr>
+                              <th className="py-2 pr-4" rowSpan={2}>
+                                <SortHead
+                                  label="Analyst"
+                                  col="analyst"
+                                  sort={fixtureSort}
+                                  onSort={toggleFixtureSort}
+                                  align="left"
+                                />
+                              </th>
+                              <th className="py-2 pr-4" rowSpan={2}>
+                                <SortHead
+                                  label="Date"
+                                  col="date"
+                                  sort={fixtureSort}
+                                  onSort={toggleFixtureSort}
+                                  align="left"
+                                />
+                              </th>
+                              <th className="border-l border-slate-200 py-1.5 pl-4 text-center" colSpan={3}>
+                                Accuracy
+                              </th>
+                              <th className="border-l border-slate-200 py-1.5 pl-4 text-center" colSpan={3}>
+                                Wrong stat
+                              </th>
+                              <th className="border-l border-slate-200 py-1.5 pl-4 text-center" colSpan={3}>
+                                Wrong player
+                              </th>
+                              <th className="border-l border-slate-200 py-1.5 pl-4 text-center" colSpan={3}>
+                                Missed
+                              </th>
+                            </tr>
+                            {/* Sub-header row: Overall / Home / Away per metric */}
+                            <tr>
+                              {(
+                                [
+                                  ["overallAcc", "Overall"],
+                                  ["homeAcc", "Home"],
+                                  ["awayAcc", "Away"],
+                                  ["wrongStat", "Overall"],
+                                  ["wrongStatHome", "Home"],
+                                  ["wrongStatAway", "Away"],
+                                  ["wrongPlayer", "Overall"],
+                                  ["wrongPlayerHome", "Home"],
+                                  ["wrongPlayerAway", "Away"],
+                                  ["missed", "Overall"],
+                                  ["missedHome", "Home"],
+                                  ["missedAway", "Away"],
+                                ] as [FixtureSortKey, string][]
+                              ).map(([col, label], idx) => (
+                                <th
+                                  key={col}
+                                  className={`py-1.5 px-3 text-center ${
+                                    idx % 3 === 0
+                                      ? "border-l border-slate-200"
+                                      : ""
+                                  }`}
+                                >
+                                  <SortHead
+                                    label={label}
+                                    col={col}
+                                    sort={fixtureSort}
+                                    onSort={toggleFixtureSort}
+                                    align="center"
+                                  />
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sortFixtureRows(g.rows).map((r) => {
+                              const numCell = (v: number | null) => (
+                                <td className="py-2 px-3 text-center tabular-nums text-slate-600">
+                                  {v != null ? v : "—"}
+                                </td>
+                              );
+                              const accCell = (v: number | null, first = false) => (
+                                <td
+                                  className={`py-2 px-3 text-center font-medium tabular-nums ${
+                                    first ? "border-l border-slate-200" : ""
+                                  } ${v != null ? accColor(v) : "text-slate-300"}`}
+                                >
+                                  {v != null ? pct(v) : "—"}
+                                </td>
+                              );
+                              return (
+                                <tr
+                                  key={r.check.id}
+                                  onClick={() => openCheck(r.check.id)}
+                                  className="cursor-pointer border-t border-slate-200 hover:bg-white"
+                                  title="Open full accuracy check"
+                                >
+                                  <td className="py-2 pr-4 font-medium text-slate-800">
+                                    {r.analyst}
+                                  </td>
+                                  <td className="whitespace-nowrap py-2 pr-4 text-slate-600">
+                                    {formatDate(r.date)}
+                                  </td>
+                                  {accCell(r.overallAcc, true)}
+                                  {accCell(r.homeAcc)}
+                                  {accCell(r.awayAcc)}
+                                  <td className="border-l border-slate-200 py-2 px-3 text-center tabular-nums text-slate-600">
+                                    {r.wrongStat}
+                                  </td>
+                                  {numCell(r.wrongStatHome)}
+                                  {numCell(r.wrongStatAway)}
+                                  <td className="border-l border-slate-200 py-2 px-3 text-center tabular-nums text-slate-600">
+                                    {r.wrongPlayer}
+                                  </td>
+                                  {numCell(r.wrongPlayerHome)}
+                                  {numCell(r.wrongPlayerAway)}
+                                  <td className="border-l border-slate-200 py-2 px-3 text-center tabular-nums text-slate-600">
+                                    {r.missed}
+                                  </td>
+                                  {numCell(r.missedHome)}
+                                  {numCell(r.missedAway)}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {filteredFixtureGroups.length === 0 && (
+                <p className="p-6 text-center text-sm text-slate-400">
+                  No fixtures match your search.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
     </div>
@@ -693,6 +1030,42 @@ function CheckDetailModal({
         )}
       </div>
     </div>
+  );
+}
+
+// Clickable sort header for the by-master-fixture table.
+function SortHead({
+  label,
+  col,
+  sort,
+  onSort,
+  align = "right",
+}: {
+  label: string;
+  col: FixtureSortKey;
+  sort: { key: FixtureSortKey; dir: "asc" | "desc" };
+  onSort: (key: FixtureSortKey) => void;
+  align?: "left" | "right" | "center";
+}) {
+  const active = sort.key === col;
+  const justify =
+    align === "right"
+      ? "justify-end"
+      : align === "center"
+        ? "justify-center"
+        : "justify-start";
+  return (
+    <button
+      onClick={() => onSort(col)}
+      className={`inline-flex w-full items-center gap-1 font-semibold uppercase tracking-wide transition hover:text-slate-800 ${
+        active ? "text-slate-800" : "text-slate-500"
+      } ${justify}`}
+    >
+      {label}
+      <span className="text-[9px]">
+        {active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}
+      </span>
+    </button>
   );
 }
 
