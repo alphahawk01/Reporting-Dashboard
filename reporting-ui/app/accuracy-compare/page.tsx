@@ -32,6 +32,7 @@ import { useAuth } from "@/components/auth/AuthContext";
 import {
   createDispute,
   getDisputesForCheck,
+  resolveDispute,
   disputeKey,
   type Dispute,
   type DisputeSide,
@@ -617,6 +618,8 @@ export default function AccuracyComparePage() {
   const [videoStatusFilter, setVideoStatusFilter] = useState<
     MatchStatus | "all"
   >("all");
+  // When on, the review shows only instances that have been flagged.
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
 
   // Disputes: which saved check is loaded (if any), so instances can be
   // flagged and the flags reflected in both timelines.
@@ -632,17 +635,22 @@ export default function AccuracyComparePage() {
     side: DisputeSide;
   } | null>(null);
 
-  // Whether the current user may flag on the loaded check: an admin/super
-  // admin, or the analyst the check is saved to.
+  // Only the analyst a check is saved to may FLAG (raise) disputes — this is
+  // their review of their own game.
   const canFlag =
     loadedCheckId != null &&
     !!user &&
-    (user.role === "admin" ||
-      user.role === "super_admin" ||
-      (!!user.analyst_name &&
-        !!checkAnalystName &&
-        user.analyst_name.trim().toLowerCase() ===
-          checkAnalystName.trim().toLowerCase()));
+    user.role === "analyst" &&
+    !!user.analyst_name &&
+    !!checkAnalystName &&
+    user.analyst_name.trim().toLowerCase() ===
+      checkAnalystName.trim().toLowerCase();
+
+  // Only admins/super admins may RESOLVE a flagged instance (Analyst correct /
+  // Master correct) from the review pop-up.
+  const canResolveDispute =
+    loadedCheckId != null &&
+    (user?.role === "admin" || user?.role === "super_admin");
 
   // Fast lookup of flagged instances by "instanceId|side".
   const flaggedKeys = useMemo(() => {
@@ -797,14 +805,17 @@ export default function AccuracyComparePage() {
     }
   };
 
-  // Right-click a timeline instance in the video review to flag it. Only
-  // enabled when a saved check is loaded and the user is allowed to flag.
+  // Right-click a timeline instance in the video review. Analysts get the
+  // flag form; admins get resolve options on already-flagged instances.
   const openFlagMenu = (
     e: React.MouseEvent,
     instance: Instance,
     side: DisputeSide
   ) => {
-    if (!canFlag) return;
+    const isFlagged = flaggedKeys.has(disputeKey(instance.id, side));
+    const allowFlag = canFlag;
+    const allowResolve = canResolveDispute && isFlagged;
+    if (!allowFlag && !allowResolve) return;
     e.preventDefault();
     setFlagMenu({ x: e.clientX, y: e.clientY, instance, side });
   };
@@ -831,6 +842,25 @@ export default function AccuracyComparePage() {
       await reloadDisputes(loadedCheckId);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to flag instance.");
+    }
+  };
+
+  // Admin resolves a flagged instance from the review pop-up.
+  const submitResolve = async (
+    status: "confirmed" | "denied",
+    note: string | null
+  ) => {
+    if (!flagMenu || loadedCheckId == null) return;
+    const dispute = flaggedKeys.get(
+      disputeKey(flagMenu.instance.id, flagMenu.side)
+    );
+    setFlagMenu(null);
+    if (!dispute) return;
+    try {
+      await resolveDispute(dispute.id, status, user?.username ?? null, note);
+      await reloadDisputes(loadedCheckId);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to resolve.");
     }
   };
 
@@ -1133,8 +1163,27 @@ export default function AccuracyComparePage() {
       rows = rows.filter((row) => row.status === videoStatusFilter);
     }
 
+    // Flagged-only: keep rows where either side is a flagged instance.
+    if (flaggedOnly) {
+      rows = rows.filter(
+        (row) =>
+          (!!row.master &&
+            flaggedKeys.has(disputeKey(row.master.id, "master"))) ||
+          (!!row.analyst &&
+            flaggedKeys.has(disputeKey(row.analyst.id, "analyst")))
+      );
+    }
+
     return rows;
-  }, [result, videoStatFilter, reviewPlayer, videoStatusFilter, sportConfig]);
+  }, [
+    result,
+    videoStatFilter,
+    reviewPlayer,
+    videoStatusFilter,
+    flaggedOnly,
+    flaggedKeys,
+    sportConfig,
+  ]);
 
   // Per-status counts for the video review filter buttons (reflect the
   // current stat/player scope, before the status filter is applied).
@@ -2338,8 +2387,8 @@ export default function AccuracyComparePage() {
       {/* Split-screen review pop-up: video on the left half, both
           timelines (clickable) on the right half. */}
       {videoOpen && videoUrl.trim() && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-slate-900/80 p-4 backdrop-blur-sm">
-          <div className="mx-auto flex h-full w-full max-w-[1600px] flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex flex-col bg-slate-900/80 p-2 backdrop-blur-sm">
+          <div className="mx-auto flex h-full w-full max-w-[1800px] flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
             {/* Header */}
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700 px-4 py-2.5">
               <span className="flex items-center gap-2 text-sm font-semibold text-slate-100">
@@ -2426,6 +2475,19 @@ export default function AccuracyComparePage() {
                     </button>
                   );
                 })}
+                {disputes.length > 0 && (
+                  <button
+                    onClick={() => setFlaggedOnly((v) => !v)}
+                    className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                      flaggedOnly
+                        ? "bg-amber-500 text-white"
+                        : "bg-slate-800 text-amber-300 hover:bg-slate-700"
+                    }`}
+                    title="Show only flagged instances"
+                  >
+                    <Flag size={11} /> Flagged ({disputes.length})
+                  </button>
+                )}
               </div>
 
               {/* Clip navigator: jump straight to each instance. */}
@@ -2466,8 +2528,8 @@ export default function AccuracyComparePage() {
               </div>
             </div>
 
-            {/* Body: video (left) + timelines (right) */}
-            <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-2">
+            {/* Body: video (left, larger) + timelines (right) */}
+            <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[2fr_1fr]">
               {/* Left: video */}
               <div className="flex min-h-0 items-center justify-center bg-black p-2">
                 <video
@@ -2558,7 +2620,7 @@ export default function AccuracyComparePage() {
                             )
                           }
                           onFlag={
-                            canFlag && masterInstance
+                            (canFlag || canResolveDispute) && masterInstance
                               ? (e) => openFlagMenu(e, masterInstance, "master")
                               : undefined
                           }
@@ -2575,7 +2637,7 @@ export default function AccuracyComparePage() {
                             )
                           }
                           onFlag={
-                            canFlag && analystInstance
+                            (canFlag || canResolveDispute) && analystInstance
                               ? (e) =>
                                   openFlagMenu(e, analystInstance, "analyst")
                               : undefined
@@ -2603,10 +2665,20 @@ export default function AccuracyComparePage() {
           y={flagMenu.y}
           instance={flagMenu.instance}
           side={flagMenu.side}
-          alreadyFlagged={flaggedKeys.has(
-            disputeKey(flagMenu.instance.id, flagMenu.side)
-          )}
+          dispute={
+            flaggedKeys.get(
+              disputeKey(flagMenu.instance.id, flagMenu.side)
+            ) ?? null
+          }
+          // Analysts flag; admins resolve flagged instances.
+          mode={
+            canResolveDispute &&
+            flaggedKeys.has(disputeKey(flagMenu.instance.id, flagMenu.side))
+              ? "resolve"
+              : "flag"
+          }
           onSubmit={submitFlag}
+          onResolve={submitResolve}
         />
       )}
     </div>
@@ -2620,20 +2692,76 @@ function FlagMenu({
   y,
   instance,
   side,
-  alreadyFlagged,
+  dispute,
+  mode,
   onSubmit,
+  onResolve,
 }: {
   x: number;
   y: number;
   instance: Instance;
   side: DisputeSide;
-  alreadyFlagged: boolean;
+  dispute: Dispute | null;
+  mode: "flag" | "resolve";
   onSubmit: (reason: string | null) => void;
+  onResolve: (status: "confirmed" | "denied", note: string | null) => void;
 }) {
-  const [reason, setReason] = useState("");
+  const [reason, setReason] = useState(dispute?.reason ?? "");
+  const [note, setNote] = useState("");
   // Keep the menu on-screen.
-  const left = Math.min(x, (typeof window !== "undefined" ? window.innerWidth : 9999) - 280);
-  const top = Math.min(y, (typeof window !== "undefined" ? window.innerHeight : 9999) - 180);
+  const left = Math.min(x, (typeof window !== "undefined" ? window.innerWidth : 9999) - 300);
+  const top = Math.min(y, (typeof window !== "undefined" ? window.innerHeight : 9999) - 220);
+
+  const header = (
+    <p className="mb-2 truncate text-[11px] text-slate-500">
+      {side === "master" ? "Master" : "Analyst"} ·{" "}
+      {instance.stat || "—"}
+      {instance.playerNumber != null ? ` · #${instance.playerNumber}` : ""}
+    </p>
+  );
+
+  if (mode === "resolve") {
+    // Admin resolving a flagged instance.
+    return (
+      <div
+        className="fixed z-[60] w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-2xl"
+        style={{ left, top }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+          <Flag size={13} className="text-amber-600" /> Resolve dispute
+        </p>
+        {header}
+        {dispute?.reason && (
+          <p className="mb-2 rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
+            Reason: {dispute.reason}
+          </p>
+        )}
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Resolution note (optional)"
+          className="mb-2 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-slate-500"
+        />
+        <div className="flex gap-1.5">
+          <button
+            onClick={() => onResolve("confirmed", note.trim() || null)}
+            className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-emerald-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+          >
+            Analyst correct
+          </button>
+          <button
+            onClick={() => onResolve("denied", note.trim() || null)}
+            className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-sky-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-sky-700"
+          >
+            Master correct
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Analyst flagging (or updating the reason).
   return (
     <div
       className="fixed z-[60] w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-2xl"
@@ -2643,12 +2771,8 @@ function FlagMenu({
       <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-slate-700">
         <Flag size={13} className="text-amber-600" /> Flag as dispute
       </p>
-      <p className="mb-2 truncate text-[11px] text-slate-500">
-        {side === "master" ? "Master" : "Analyst"} ·{" "}
-        {instance.stat || "—"}
-        {instance.playerNumber != null ? ` · #${instance.playerNumber}` : ""}
-      </p>
-      {alreadyFlagged && (
+      {header}
+      {dispute && (
         <p className="mb-2 rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
           Already flagged — submitting updates the reason.
         </p>

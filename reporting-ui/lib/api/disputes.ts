@@ -40,23 +40,53 @@ export interface NewDispute {
 
 /** Flag an instance. Upserts so re-flagging the same instance is a no-op. */
 export async function createDispute(input: NewDispute): Promise<Dispute> {
+    // Does a dispute already exist for this instance/side?
+    const { data: existing } = await supabase
+        .from("accuracy_disputes")
+        .select("*")
+        .eq("check_id", input.checkId)
+        .eq("instance_id", input.instanceId)
+        .eq("side", input.side)
+        .maybeSingle();
+
+    if (existing) {
+        // Re-flagging: only update the reason IF a new one was supplied, so an
+        // empty submit never wipes an existing reason. Never reset status.
+        const patch: Record<string, unknown> = {};
+        if (input.reason != null && input.reason.trim() !== "") {
+            patch.reason = input.reason.trim();
+        }
+        if (Object.keys(patch).length === 0) {
+            return existing as Dispute;
+        }
+        const { data, error } = await supabase
+            .from("accuracy_disputes")
+            .update(patch)
+            .eq("id", (existing as Dispute).id)
+            .select("*")
+            .single();
+        if (error) {
+            console.error("Failed updating dispute reason:", error);
+            throw new Error(error.message || "Failed updating dispute");
+        }
+        return data as Dispute;
+    }
+
+    // New dispute.
     const { data, error } = await supabase
         .from("accuracy_disputes")
-        .upsert(
-            {
-                check_id: input.checkId,
-                instance_id: input.instanceId,
-                side: input.side,
-                stat: input.stat ?? null,
-                player: input.player ?? null,
-                team: input.team ?? null,
-                code_time: input.codeTime ?? null,
-                raised_by: input.raisedBy ?? null,
-                reason: input.reason ?? null,
-                status: "open",
-            },
-            { onConflict: "check_id,instance_id,side" }
-        )
+        .insert({
+            check_id: input.checkId,
+            instance_id: input.instanceId,
+            side: input.side,
+            stat: input.stat ?? null,
+            player: input.player ?? null,
+            team: input.team ?? null,
+            code_time: input.codeTime ?? null,
+            raised_by: input.raisedBy ?? null,
+            reason: input.reason?.trim() || null,
+            status: "open",
+        })
         .select("*")
         .single();
 

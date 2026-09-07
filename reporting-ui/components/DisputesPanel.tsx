@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Flag, Check, X, Clock, Video } from "lucide-react";
+import { Flag, Check, Clock, Video } from "lucide-react";
 import type { Dispute } from "@/lib/api/disputes";
 
 function statusBadge(status: Dispute["status"]) {
@@ -9,9 +9,22 @@ function statusBadge(status: Dispute["status"]) {
         case "confirmed":
             return "bg-emerald-100 text-emerald-700";
         case "denied":
-            return "bg-slate-200 text-slate-600";
+            return "bg-sky-100 text-sky-700";
         default:
             return "bg-amber-100 text-amber-700";
+    }
+}
+
+// Adjudication labels: "confirmed" = the analyst was right (flag upheld);
+// "denied" = the master was right (flag rejected).
+function statusLabel(status: Dispute["status"]): string {
+    switch (status) {
+        case "confirmed":
+            return "Analyst correct";
+        case "denied":
+            return "Master correct";
+        default:
+            return "Open";
     }
 }
 
@@ -127,7 +140,7 @@ function DisputeRow({
                             d.status
                         )}`}
                     >
-                        {d.status}
+                        {statusLabel(d.status)}
                     </span>
                 </div>
             </div>
@@ -145,7 +158,7 @@ function DisputeRow({
 
             {d.status !== "open" && (
                 <p className="mt-1 text-xs text-slate-500">
-                    {d.status === "confirmed" ? "Confirmed" : "Denied"}
+                    {statusLabel(d.status)}
                     {d.resolved_by ? ` by ${d.resolved_by}` : ""}
                     {d.resolution_note ? ` · ${d.resolution_note}` : ""}
                 </p>
@@ -165,15 +178,15 @@ function DisputeRow({
                         }
                         className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
                     >
-                        <Check size={13} /> Confirm
+                        <Check size={13} /> Analyst correct
                     </button>
                     <button
                         onClick={() =>
                             onResolve(d.id, "denied", note.trim() || null)
                         }
-                        className="inline-flex items-center gap-1 rounded-lg bg-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-300"
+                        className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-sky-700"
                     >
-                        <X size={13} /> Deny
+                        <Check size={13} /> Master correct
                     </button>
                 </div>
             )}
