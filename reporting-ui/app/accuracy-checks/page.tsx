@@ -415,8 +415,10 @@ export default function AccuracyChecksPage() {
             history here.
           </div>
         ) : (
-          <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-            {/* LEFT: per-analyst history */}
+          <div className="space-y-6">
+            {/* Top: analyst picker + trend (left) and leaderboard (right) */}
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,1fr)]">
+            {/* LEFT: analyst picker + trend */}
             <div className="space-y-6">
               {/* Analyst picker */}
               <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -516,8 +518,51 @@ export default function AccuracyChecksPage() {
                   </div>
                 )}
               </div>
+            </div>
 
-              {/* History table */}
+            {/* RIGHT: master-checks leaderboard */}
+            <div className="space-y-6">
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-700">
+                  <Trophy size={16} className="text-amber-500" /> Master checks completed
+                </h2>
+                <p className="mb-4 text-xs text-slate-400">
+                  How many accuracy checks each person has completed as the
+                  master coder.
+                </p>
+
+                {masterCounts.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-slate-400">
+                    No master checks recorded yet.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {masterCounts.map((m, i) => (
+                      <div
+                        key={m.masterAnalystName}
+                        className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="w-5 shrink-0 text-center text-xs font-bold text-slate-400">
+                            {i + 1}
+                          </span>
+                          <span className="truncate text-sm font-medium text-slate-700">
+                            {m.masterAnalystName}
+                          </span>
+                        </div>
+                        <span className="shrink-0 rounded-full bg-slate-900 px-2.5 py-0.5 text-xs font-bold text-white">
+                          {m.count}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            </div>
+
+            {/* Saved checks — full width */}
+            <div>
               <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <h2 className="border-b border-slate-100 p-5 text-sm font-semibold text-slate-700">
                   Saved checks
@@ -653,46 +698,6 @@ export default function AccuracyChecksPage() {
                     </tbody>
                   </table>
                 </div>
-              </div>
-            </div>
-
-            {/* RIGHT: master-checks leaderboard */}
-            <div className="space-y-6">
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-700">
-                  <Trophy size={16} className="text-amber-500" /> Master checks completed
-                </h2>
-                <p className="mb-4 text-xs text-slate-400">
-                  How many accuracy checks each person has completed as the
-                  master coder.
-                </p>
-
-                {masterCounts.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-slate-400">
-                    No master checks recorded yet.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {masterCounts.map((m, i) => (
-                      <div
-                        key={m.masterAnalystName}
-                        className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="w-5 shrink-0 text-center text-xs font-bold text-slate-400">
-                            {i + 1}
-                          </span>
-                          <span className="truncate text-sm font-medium text-slate-700">
-                            {m.masterAnalystName}
-                          </span>
-                        </div>
-                        <span className="shrink-0 rounded-full bg-slate-900 px-2.5 py-0.5 text-xs font-bold text-white">
-                          {m.count}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           </div>
