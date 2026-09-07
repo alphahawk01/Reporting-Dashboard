@@ -84,9 +84,16 @@ function excelTimeToString(value) {
 function excelDateToJS(value) {
   if (!value) return null;
 
-  // Already an ISO date string (CSV)
+  // Already a date string (CSV). Only accept it if it actually parses
+  // to a valid date — otherwise a stray header row (value === "Date")
+  // would be passed straight through and rejected by Postgres.
   if (typeof value === "string") {
-    return value.split("T")[0];
+    const datePart = value.split("T")[0];
+    const parsed = new Date(datePart);
+    if (isNaN(parsed.getTime())) {
+      return null;
+    }
+    return datePart;
   }
 
   // Excel serial number (XLSX)
