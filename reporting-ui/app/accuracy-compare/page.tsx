@@ -2344,12 +2344,19 @@ export default function AccuracyComparePage() {
                       key={i}
                       className="grid grid-cols-[110px_1fr_1fr] border-b border-slate-100 text-sm last:border-b-0 hover:bg-slate-50/60"
                     >
-                      <div className="flex items-center p-3">
+                      <div className="flex flex-col items-start gap-1 p-3">
                         <span
                           className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ${meta.badge}`}
                         >
                           {meta.label}
                         </span>
+                        {row.alsoWrongPlayer && (
+                          <span
+                            className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ${STATUS_META.wrong_player.badge}`}
+                          >
+                            {STATUS_META.wrong_player.label}
+                          </span>
+                        )}
                       </div>
                       <TimelineCell
                         instance={row.master}
@@ -2602,12 +2609,19 @@ export default function AccuracyComparePage() {
                             : "border-slate-100"
                         }`}
                       >
-                        <div className="flex items-center p-2.5">
+                        <div className="flex flex-col items-start gap-1 p-2.5">
                           <span
                             className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ${meta.badge}`}
                           >
                             {meta.label}
                           </span>
+                          {row.alsoWrongPlayer && (
+                            <span
+                              className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ${STATUS_META.wrong_player.badge}`}
+                            >
+                              {STATUS_META.wrong_player.label}
+                            </span>
+                          )}
                         </div>
                         <TimelineCell
                           instance={masterInstance}

@@ -48,6 +48,12 @@ export type ComparisonRow = {
   analyst: Instance | null;
   /** absolute time delta in seconds between matched instances */
   timeDelta: number | null;
+  /**
+   * Secondary flag: a wrong-stat pair where the PLAYER also differs. The
+   * primary `status` stays "wrong_stat" (so counts/filters are unchanged);
+   * the UI shows an extra "wrong player" badge when this is true.
+   */
+  alsoWrongPlayer?: boolean;
 };
 
 export type CategoryBreakdown = {
@@ -380,6 +386,94 @@ function isEventStat(stat: string): boolean {
 }
 
 /**
+ * Stat preference map (per the analyst-provided comparison table). For each
+ * MASTER stat, an ordered list of acceptable ANALYST stats (index 0 = same
+ * stat = best). Two DIFFERENT stats are only comparable (can pair as
+ * wrong-stat / wrong-player) if the analyst stat appears in the master stat's
+ * preference list. Rankings are asymmetric — each master stat defines its own
+ * order. Stats with no entry only match on an exact same-stat basis.
+ *
+ * All keys/values are lowercased to match normStat().
+ */
+const STAT_PREFERENCES: Record<string, string[]> = {
+  // --- Passing ---
+  "long passes successful": [
+    "long passes successful",
+    "long passes unsuccessful",
+    "short passes successful",
+    "short passes unsuccessful",
+    "through balls successful",
+    "through balls unsuccessful",
+  ],
+  "long passes unsuccessful": [
+    "long passes unsuccessful",
+    "long passes successful",
+    "short passes successful",
+    "short passes unsuccessful",
+    "through balls successful",
+    "through balls unsuccessful",
+  ],
+  "short passes successful": [
+    "short passes successful",
+    "short passes unsuccessful",
+    "long passes successful",
+    "long passes unsuccessful",
+    "through balls successful",
+    "through balls unsuccessful",
+  ],
+  "short passes unsuccessful": [
+    "short passes unsuccessful",
+    "short passes successful",
+    "long passes unsuccessful",
+    "long passes successful",
+    "through balls successful",
+    "through balls unsuccessful",
+  ],
+  // --- Ball-winning ---
+  "ball recoverys": ["ball recoverys", "intercepts", "clearances"],
+  intercepts: ["intercepts", "ball recoverys", "clearances"],
+  clearances: ["clearances", "intercepts", "ball recoverys"],
+  // --- Crosses (source misspells "unsuccesful" with one 's') ---
+  "crosses successful": ["crosses successful", "crosses unsuccesful"],
+  "crosses unsuccesful": ["crosses unsuccesful", "crosses successful"],
+  // --- Goalkeeper handling ---
+  catches: ["catches", "claims", "saves"],
+  claims: ["claims", "catches", "saves"],
+  saves: ["saves", "catches", "claims"],
+  // --- On-ball possession ---
+  touch: ["touch", "carries", "dribbles successful", "dribbles unsuccessful"],
+  carries: ["carries", "touch", "dribbles successful", "dribbles unsuccessful"],
+};
+
+/**
+ * Preference rank of an analyst stat given the master stat. 0 = same stat
+ * (best). Lower is better. Returns a large number if not comparable.
+ */
+function statPreferenceRank(masterStat: string, analystStat: string): number {
+  const m = normStat(masterStat);
+  const a = normStat(analystStat);
+  if (m === a) return 0;
+  const prefs = STAT_PREFERENCES[m];
+  if (!prefs) return 999;
+  const idx = prefs.indexOf(a);
+  return idx === -1 ? 999 : idx;
+}
+
+/**
+ * Are two stats comparable (same stat, or one lists the other in its
+ * preference table)? Comparability is symmetric: either direction counts.
+ */
+function sameStatGroup(a: string, b: string): boolean {
+  const na = normStat(a);
+  const nb = normStat(b);
+  if (na === nb) return true;
+  return (
+    (STAT_PREFERENCES[na]?.includes(nb) ?? false) ||
+    (STAT_PREFERENCES[nb]?.includes(na) ?? false)
+  );
+}
+
+/**
  * Team-name canonicalisation.
  *
  * The master and analyst files often name the same club differently
@@ -541,48 +635,61 @@ export function compareInstances(
         a.playerNumber != null &&
         m.playerNumber === a.playerNumber;
 
-    // Same stat category (XML <group>), e.g. both "Hard Ball Gets" and
-    // "Loose Ball Gets" live under a contested-possession group. Used to
-    // prefer a same-category wrong-stat pairing over an unrelated one.
-    const categoryOk =
-      !!m.category &&
-      !!a.category &&
-      normStat(m.category) === normStat(a.category);
+    // Two DIFFERENT stats are only comparable (can pair as wrong-stat /
+    // wrong-player) if they share a defined preference group (see
+    // STAT_GROUPS). This replaces the old loose XML-<group> check so
+    // unrelated stats in the same broad category (e.g. Dribble vs Through
+    // Ball) don't wrongly pair.
+    const categoryOk = sameStatGroup(m.stat, a.stat);
 
     return { teamOk, playerOk, statOk, categoryOk, event: false };
   };
 
-  // Match-quality tier (higher = better). The key change: player + stat
-  // agreement matters far more than team alone, so a same-team-but-otherwise-
-  // wrong pair can't steal an analyst instance from a genuine match.
+  // Match-quality tier (higher = better). SAME PLAYER is prioritised over
+  // same stat: a coded action belongs to a specific player, so keeping the
+  // same player (even with a wrong stat, when in the same stat family) is a
+  // truer pairing than matching the same stat on a different player.
   //   6 = exact (team + player + stat)
   //   5 = stat + player, wrong team   (same action & player, opposing team)
-  //   4 = stat + team,   wrong player (same action, right team, wrong #)
-  //   3 = stat only,     wrong team & player (same action, opposing team)
-  //   2 = player + team + SAME CATEGORY, wrong stat
-  //         (same player, same stat family — e.g. Hard Ball vs Loose Ball)
-  //   1 = player + team, wrong stat, different category
-  //         (same player but an unrelated action — weaker "wrong stat")
-  //   0 = not a plausible match (neither stat nor player agree)
+  //   4 = player + team + SAME GROUP, wrong stat
+  //         (same player, comparable stat — e.g. Short Pass vs Long Pass).
+  //         Beats same-stat-wrong-player below (same player is truer).
+  //   3 = stat + team,   wrong player (same action, right team, wrong #)
+  //   2 = stat only,     wrong team & player (same action, opposing team)
+  //   1 = team + SAME GROUP, wrong stat AND wrong player
+  //         (comparable action, different player — e.g. Ball Recovery #24 vs
+  //          Intercept #34). Weakest match; still better than missed/extra.
+  //   0 = not a plausible match (unrelated stats / different group)
   //
-  // A pair is only eligible to match if the STAT matches OR the PLAYER matches.
-  // Sharing only the team (e.g. Loose Ball Get vs Ineffective Kick, same team)
-  // is NOT the same event, so those aren't paired — the master is "missed" and
-  // the analyst is "extra".
-  //
-  // The category split fixes cases like: master "Hard Ball Gets #4" with two
-  // nearby analyst rows — "Loose Ball Gets #4" (same category) and
-  // "Shallow I50 #4" (different category). Both are wrong-stat, but the
-  // same-category one is the intended pairing, leaving Shallow I50 as extra.
+  // A pair is eligible only if the stat matches, OR both stats share a
+  // preference group. Unrelated stats (different group, different stat) are
+  // not paired — the master is "missed" and the analyst is "extra".
   const quality = (m: Instance, a: Instance): number => {
     const { teamOk, playerOk, statOk, categoryOk } = fieldsOk(m, a);
     if (statOk && playerOk && teamOk) return 6;
     if (statOk && playerOk) return 5;
-    if (statOk && teamOk) return 4;
-    if (statOk) return 3;
-    if (playerOk && teamOk && categoryOk) return 2;
-    if (playerOk && teamOk) return 1;
+    if (playerOk && teamOk && categoryOk) return 4;
+    if (statOk && teamOk) return 3;
+    if (statOk) return 2;
+    if (teamOk && categoryOk) return 1; // same group, wrong stat + wrong player
     return 0; // ineligible
+  };
+
+  // Preference tie-break between equal-quality candidates: within a stat
+  // group, prefer the analyst stat the master's stat ranks highest (per the
+  // configured preference order). Higher score = more preferred. A same-stat
+  // pair scores highest; then same base stat opposite success; then group
+  // order. Non-comparable stats score 0.
+  const familyScore = (m: Instance, a: Instance): number => {
+    // Use the better (lower) preference rank in either direction, since some
+    // stats define preferences the other doesn't list symmetrically.
+    const rank = Math.min(
+      statPreferenceRank(m.stat, a.stat),
+      statPreferenceRank(a.stat, m.stat)
+    );
+    if (rank >= 999) return 0;
+    // Invert: rank 0 (same stat) -> highest score.
+    return 100 - rank;
   };
 
   // Build every candidate pair within the time tolerance, then assign the
@@ -593,6 +700,7 @@ export function compareInstances(
     mi: number;
     ai: number;
     q: number;
+    fam: number;
     delta: number;
   };
   const candidates: Candidate[] = [];
@@ -604,12 +712,16 @@ export function compareInstances(
       if (delta > tolerance) continue;
       const q = quality(m, a);
       if (q === 0) continue; // not a plausible match — skip
-      candidates.push({ mi, ai, q, delta });
+      candidates.push({ mi, ai, q, fam: familyScore(m, a), delta });
     }
   }
 
-  // Best first: higher quality wins; ties broken by smaller time delta.
-  candidates.sort((x, y) => (y.q - x.q) || (x.delta - y.delta));
+  // Best first: higher quality wins; then closer stat sub-family (so a pass
+  // prefers a same-type pass over a different-type pass); then smaller time
+  // delta.
+  candidates.sort(
+    (x, y) => (y.q - x.q) || (y.fam - x.fam) || (x.delta - y.delta)
+  );
 
   const matchByMaster = new Map<number, { ai: number; delta: number }>();
   for (const c of candidates) {
@@ -632,6 +744,7 @@ export function compareInstances(
 
     // Matched pairs always share stat or player (see quality()).
     let status: MatchStatus;
+    let alsoWrongPlayer = false;
     if (statOk && playerOk && teamOk) {
       status = "exact";
     } else if (statOk && !teamOk) {
@@ -641,11 +754,20 @@ export function compareInstances(
       // Same action, right team, wrong jersey number.
       status = "wrong_player";
     } else {
-      // Player matches (and team), but the stat/action differs.
+      // Comparable stat but the action differs = wrong stat. If the player
+      // ALSO differs (a same-group cross-player pair), flag it so the UI can
+      // show a second "wrong player" badge.
       status = "wrong_stat";
+      alsoWrongPlayer = !playerOk;
     }
 
-    rows.push({ status, master: m, analyst: a, timeDelta: match.delta });
+    rows.push({
+      status,
+      master: m,
+      analyst: a,
+      timeDelta: match.delta,
+      alsoWrongPlayer,
+    });
   }
 
   // Any analyst instance never consumed is an "extra" (false positive).
