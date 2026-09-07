@@ -206,6 +206,68 @@ function codeTime(stat: string, start: number, end: number): number {
  * Robust to leading junk, missing groups, and multiple stat labels
  * (first non Team/Player label wins as the stat).
  */
+/**
+ * Infer the sport from a parsed set of instances by scanning the stat and
+ * category text for sport-distinctive keywords. Used to classify saved
+ * checks whose `sport` column wasn't recorded. Returns "afl" | "football",
+ * or null if there's no clear signal.
+ */
+const AFL_KEYWORDS = [
+  "handball",
+  "hit out",
+  "hitout",
+  "mark",
+  "behind",
+  "centre bounce",
+  "center bounce",
+  "ball up",
+  "hard ball",
+  "loose ball",
+  "spoil",
+  "i50",
+  "inside 50",
+  "clanger",
+];
+const FOOTBALL_KEYWORDS = [
+  "pass",
+  "cross",
+  "dribble",
+  "through ball",
+  "goal kick",
+  "throw in",
+  "corner",
+  "offside",
+  "aerial",
+  "ground duel",
+  "clearance",
+  "interception",
+  "ball recover",
+  "header",
+  "keeper",
+];
+
+export function detectSportFromInstances(
+  instances: Instance[]
+): "afl" | "football" | null {
+  let afl = 0;
+  let football = 0;
+  for (const i of instances) {
+    const s = `${i.stat} ${i.category}`.toLowerCase();
+    for (const k of AFL_KEYWORDS) if (s.includes(k)) afl++;
+    for (const k of FOOTBALL_KEYWORDS) if (s.includes(k)) football++;
+  }
+  if (afl === 0 && football === 0) return null;
+  return football > afl ? "football" : "afl";
+}
+
+/** Convenience: infer sport straight from raw XML. */
+export function detectSportFromXml(
+  xml: string | null | undefined
+): "afl" | "football" | null {
+  if (!xml) return null;
+  return detectSportFromInstances(parseInstances(xml));
+}
+
 export function parseInstances(xml: string): Instance[] {
   const instances: Instance[] = [];
   if (typeof window === "undefined" || typeof DOMParser === "undefined") {

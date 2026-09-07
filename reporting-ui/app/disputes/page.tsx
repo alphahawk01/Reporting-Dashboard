@@ -20,8 +20,10 @@ import {
     type ComparisonRow,
     type Instance,
 } from "@/lib/comparison/xml-compare";
+import { detectSportFromXml } from "@/lib/comparison/xml-compare";
 import { useAuth } from "@/components/auth/AuthContext";
 import DisputesPanel from "@/components/DisputesPanel";
+import SportToggle, { type SportFilter } from "@/components/SportToggle";
 
 type Filter = "open" | "resolved" | "all";
 
@@ -44,6 +46,7 @@ export default function DisputesPage() {
     const [filter, setFilter] = useState<Filter>("open");
     const [expanded, setExpanded] = useState<Set<number>>(new Set());
     const [search, setSearch] = useState("");
+    const [sportFilter, setSportFilter] = useState<SportFilter>("all");
 
     // Self-contained review pop-up (Option B): the disputed instance's video
     // clip + inline resolve, without leaving the Disputes page.
@@ -102,6 +105,17 @@ export default function DisputesPage() {
         return m;
     }, [checks]);
 
+    // Effective sport per check: stored, else inferred from master XML.
+    const sportByCheck = useMemo(() => {
+        const m = new Map<number, "afl" | "football">();
+        for (const c of checks) {
+            const stored =
+                c.sport === "afl" || c.sport === "football" ? c.sport : null;
+            m.set(c.id, stored ?? detectSportFromXml(c.xml_master) ?? "afl");
+        }
+        return m;
+    }, [checks]);
+
     function labelFor(checkId: number): string {
         const c = checkById.get(checkId);
         if (!c) return `Check #${checkId}`;
@@ -122,9 +136,15 @@ export default function DisputesPage() {
                   ? d.status === "open"
                   : d.status !== "open";
 
+        const matchesSport = (checkId: number) => {
+            if (sportFilter === "all") return true;
+            return sportByCheck.get(checkId) === sportFilter;
+        };
+
         const byCheck = new Map<number, Dispute[]>();
         for (const d of disputes) {
             if (!matchesFilter(d)) continue;
+            if (!matchesSport(d.check_id)) continue;
             const arr = byCheck.get(d.check_id) ?? [];
             arr.push(d);
             byCheck.set(d.check_id, arr);
@@ -157,7 +177,7 @@ export default function DisputesPage() {
             return (b.date ?? "").localeCompare(a.date ?? "");
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [disputes, checkById, filter, search]);
+    }, [disputes, checkById, sportByCheck, filter, search, sportFilter]);
 
     function toggle(checkId: number) {
         setExpanded((prev) => {
@@ -226,6 +246,7 @@ export default function DisputesPage() {
 
                 {/* Filter + search */}
                 <div className="mb-4 flex flex-wrap items-center gap-2">
+                    <SportToggle value={sportFilter} onChange={setSportFilter} />
                     <div className="flex items-center gap-1.5">
                         {(["open", "resolved", "all"] as Filter[]).map((f) => (
                             <button

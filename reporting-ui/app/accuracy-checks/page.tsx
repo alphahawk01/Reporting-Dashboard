@@ -30,10 +30,12 @@ import {
   parseInstances,
   canonicaliseTeams,
   compareInstances,
+  detectSportFromXml,
   type Instance,
 } from "@/lib/comparison/xml-compare";
 import { useAuth } from "@/components/auth/AuthContext";
 import DisputesPanel from "@/components/DisputesPanel";
+import SportToggle, { type SportFilter } from "@/components/SportToggle";
 
 function pct(v: number) {
   return `${(v * 100).toFixed(1)}%`;
@@ -126,10 +128,30 @@ export default function AccuracyChecksPage() {
   const canResolve =
     user?.role === "admin" || user?.role === "super_admin";
 
-  const [checks, setChecks] = useState<AccuracyCheck[]>([]);
+  // All loaded checks; `checks` below applies the sport filter.
+  const [allChecks, setAllChecks] = useState<AccuracyCheck[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedAnalyst, setSelectedAnalyst] = useState<string>("");
+  // Sport filter (all | afl | football), matching Accuracy Comparison.
+  const [sportFilter, setSportFilter] = useState<SportFilter>("all");
+
+  // Effective sport per check: stored value, else inferred from the master
+  // XML (so older checks without a sport are classified correctly).
+  const sportByCheck = useMemo(() => {
+    const m = new Map<number, "afl" | "football">();
+    for (const c of allChecks) {
+      const stored =
+        c.sport === "afl" || c.sport === "football" ? c.sport : null;
+      m.set(c.id, stored ?? detectSportFromXml(c.xml_master) ?? "afl");
+    }
+    return m;
+  }, [allChecks]);
+
+  const checks = useMemo(() => {
+    if (sportFilter === "all") return allChecks;
+    return allChecks.filter((c) => sportByCheck.get(c.id) === sportFilter);
+  }, [allChecks, sportFilter, sportByCheck]);
 
   // Open-dispute counts per check id (for the badge), and the currently
   // expanded check's disputes panel.
@@ -194,7 +216,7 @@ export default function AccuracyChecksPage() {
             (c) => !!own && c.analyst_name.trim().toLowerCase() === own
           );
 
-      setChecks(scoped);
+      setAllChecks(scoped);
       setOpenCounts(counts);
       setError(null);
     } catch (err) {
@@ -402,12 +424,15 @@ export default function AccuracyChecksPage() {
               trend and see who has completed the most master checks.
             </p>
           </div>
-          <Link
-            href="/accuracy-compare"
-            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50"
-          >
-            New comparison
-          </Link>
+          <div className="flex items-center gap-2">
+            <SportToggle value={sportFilter} onChange={setSportFilter} />
+            <Link
+              href="/accuracy-compare"
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              New comparison
+            </Link>
+          </div>
         </div>
 
         {error && (
@@ -416,10 +441,15 @@ export default function AccuracyChecksPage() {
           </div>
         )}
 
-        {checks.length === 0 ? (
+        {allChecks.length === 0 ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">
             No accuracy checks saved yet. Run a comparison and save it to build
             history here.
+          </div>
+        ) : checks.length === 0 ? (
+          <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">
+            No {sportFilter === "afl" ? "Aussie Rules" : "Football"} checks
+            saved yet.
           </div>
         ) : (
           <div className="space-y-6">
@@ -579,10 +609,10 @@ export default function AccuracyChecksPage() {
                     <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                       <tr>
                         <th className="px-4 py-2.5">Date</th>
+                        <th className="px-4 py-2.5">Match</th>
                         {!selectedAnalyst && (
                           <th className="px-4 py-2.5">Analyst</th>
                         )}
-                        <th className="px-4 py-2.5">Match</th>
                         <th className="px-4 py-2.5">Master by</th>
                         <th className="px-4 py-2.5 text-right">Overall</th>
                         <th className="px-4 py-2.5 text-right">Home</th>
@@ -611,11 +641,6 @@ export default function AccuracyChecksPage() {
                             <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
                               {formatDate(c.created_at)}
                             </td>
-                            {!selectedAnalyst && (
-                              <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-700">
-                                {c.analyst_name || "—"}
-                              </td>
-                            )}
                             <td className="px-4 py-2.5 text-slate-700">
                               <span
                                 className="block max-w-[420px] truncate"
@@ -624,6 +649,11 @@ export default function AccuracyChecksPage() {
                                 {c.match_label || "—"}
                               </span>
                             </td>
+                            {!selectedAnalyst && (
+                              <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-700">
+                                {c.analyst_name || "—"}
+                              </td>
+                            )}
                             <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
                               {c.master_analyst_name || "—"}
                             </td>
