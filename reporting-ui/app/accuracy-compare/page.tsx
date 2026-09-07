@@ -1866,7 +1866,7 @@ export default function AccuracyComparePage() {
                 accent={
                   scopedSummary.accuracy >= 0.9
                     ? "text-emerald-600"
-                    : scopedSummary.accuracy >= 0.75
+                    : scopedSummary.accuracy >= 0.7
                       ? "text-amber-600"
                       : "text-red-600"
                 }
@@ -1937,7 +1937,7 @@ export default function AccuracyComparePage() {
                             className={`h-full rounded-full ${
                               c.accuracy >= 0.9
                                 ? "bg-emerald-500"
-                                : c.accuracy >= 0.75
+                                : c.accuracy >= 0.7
                                   ? "bg-amber-500"
                                   : "bg-red-500"
                             }`}
@@ -2016,7 +2016,7 @@ export default function AccuracyComparePage() {
                             className={`px-4 py-2 text-right tabular-nums font-semibold ${
                               s.accuracy >= 0.9
                                 ? "text-emerald-600"
-                                : s.accuracy >= 0.75
+                                : s.accuracy >= 0.7
                                   ? "text-amber-600"
                                   : "text-red-600"
                             }`}
