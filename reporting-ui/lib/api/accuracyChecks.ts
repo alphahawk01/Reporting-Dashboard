@@ -269,6 +269,45 @@ export async function getAccuracyChecksMeta(): Promise<AccuracyCheckMeta[]> {
     return rows;
 }
 
+/** Just the raw XML blobs for one check (for on-demand parsing). */
+export interface AccuracyCheckXml {
+    id: number;
+    xml_master: string | null;
+    xml_analyst: string | null;
+}
+
+/**
+ * Fetch the xml_master/xml_analyst blobs for a specific set of check ids,
+ * in small batches. Used for on-demand work (e.g. Home/Away category
+ * breakdowns) so the main list load never has to pull every check's XML at
+ * once — which is large enough to hit Postgres statement timeouts.
+ */
+export async function getAccuracyChecksXml(
+    ids: number[]
+): Promise<Map<number, AccuracyCheckXml>> {
+    const out = new Map<number, AccuracyCheckXml>();
+    const unique = Array.from(new Set(ids));
+    const batchSize = 25; // keep each query small so it never times out
+
+    for (let i = 0; i < unique.length; i += batchSize) {
+        const batch = unique.slice(i, i + batchSize);
+        const { data, error } = await supabase
+            .from("accuracy_checks")
+            .select("id, xml_master, xml_analyst")
+            .in("id", batch);
+
+        if (error) {
+            console.error("Failed loading accuracy check XML:", error);
+            throw new Error(error.message || "Failed loading check XML");
+        }
+        for (const row of (data ?? []) as AccuracyCheckXml[]) {
+            out.set(row.id, row);
+        }
+    }
+
+    return out;
+}
+
 /**
  * Delete a saved accuracy check (e.g. a mistaken save).
  */

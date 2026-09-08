@@ -17,11 +17,12 @@ const AccuracyTrendChart = dynamic(() => import("./AccuracyTrendChart"), {
   ),
 });
 import {
-  getAllAccuracyChecks,
+  getAccuracyChecksMeta,
+  getAccuracyChecksXml,
   countMasterChecks,
   summariseByAnalyst,
   deleteAccuracyCheck,
-  type AccuracyCheck,
+  type AccuracyCheckMeta,
 } from "@/lib/api/accuracyChecks";
 import {
   getOpenDisputeCounts,
@@ -33,7 +34,6 @@ import {
   parseInstances,
   canonicaliseTeams,
   compareInstances,
-  detectSportFromXml,
   type Instance,
 } from "@/lib/comparison/xml-compare";
 import { useAuth } from "@/components/auth/AuthContext";
@@ -61,7 +61,7 @@ function formatDate(iso: string) {
 // Pull the Home / Away accuracy out of a check's stored team breakdown.
 // Teams are canonicalised to "Home"/"Away" at comparison time, so we can
 // read them straight off team_breakdown without touching the schema.
-function homeAwayAccuracy(check: AccuracyCheck): {
+function homeAwayAccuracy(check: AccuracyCheckMeta): {
   home: number | null;
   away: number | null;
 } {
@@ -80,22 +80,40 @@ function homeAwayAccuracy(check: AccuracyCheck): {
 type TeamScope = "both" | "home" | "away";
 
 // Per-category accuracy for a check, scoped to Both / Home / Away. Computed
-// by re-parsing the stored XML (the only place home/away-per-category data
-// exists), the same way the Accuracy Comparison breakdown does it.
-// Returns category -> { accuracy, exact, total }.
+// Both-teams category accuracy comes straight from the stored
+// category_breakdown (no XML needed — fast). Home/Away requires the raw XML
+// (the only place per-team-per-category data exists), which is fetched
+// on-demand and passed in as `xml`. Returns category -> {accuracy,exact,total}.
 function categoryAccuracy(
-  check: AccuracyCheck,
-  scope: TeamScope
+  check: AccuracyCheckMeta,
+  scope: TeamScope,
+  xml?: { xml_master: string | null; xml_analyst: string | null }
 ): Record<string, { accuracy: number; exact: number; total: number }> {
-  if (!check.xml_master || !check.xml_analyst) return {};
-  const master = parseInstances(check.xml_master);
-  const analyst = parseInstances(check.xml_analyst);
+  // "Both" scope: use the precomputed breakdown stored on the check.
+  if (scope === "both") {
+    const out: Record<
+      string,
+      { accuracy: number; exact: number; total: number }
+    > = {};
+    for (const c of check.category_breakdown ?? []) {
+      out[c.category] = {
+        accuracy: c.accuracy,
+        exact: c.exact,
+        total: c.total,
+      };
+    }
+    return out;
+  }
+
+  // Home/Away scope: derive from the raw XML (must be supplied).
+  if (!xml?.xml_master || !xml?.xml_analyst) return {};
+  const master = parseInstances(xml.xml_master);
+  const analyst = parseInstances(xml.xml_analyst);
   const tol = check.tolerance ?? 3;
   const canon = canonicaliseTeams(master, analyst, tol);
 
-  const wanted = scope === "both" ? null : scope; // "home" | "away"
-  const inScope = (i: Instance) =>
-    wanted == null || i.team.trim().toLowerCase() === wanted;
+  const wanted = scope; // "home" | "away"
+  const inScope = (i: Instance) => i.team.trim().toLowerCase() === wanted;
 
   const result = compareInstances(
     canon.master.filter(inScope),
@@ -117,7 +135,7 @@ function categoryAccuracy(
 
 // One analyst's row within a master-fixture group.
 type FixtureRow = {
-  check: AccuracyCheck;
+  check: AccuracyCheckMeta;
   analyst: string;
   date: string;
   overallAcc: number;
@@ -132,7 +150,14 @@ export default function AccuracyChecksPage() {
     user?.role === "admin" || user?.role === "super_admin";
 
   // All loaded checks; `checks` below applies the sport filter.
-  const [allChecks, setAllChecks] = useState<AccuracyCheck[]>([]);
+  const [allChecks, setAllChecks] = useState<AccuracyCheckMeta[]>([]);
+  // On-demand XML cache (check id -> raw XML), populated only when the user
+  // switches the category columns to Home/Away, which needs per-team data
+  // that only exists in the stored XML. Keeps the initial load light.
+  const [xmlById, setXmlById] = useState<
+    Map<number, { xml_master: string | null; xml_analyst: string | null }>
+  >(new Map());
+  const [loadingScopeXml, setLoadingScopeXml] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedAnalyst, setSelectedAnalyst] = useState<string>("");
@@ -146,7 +171,7 @@ export default function AccuracyChecksPage() {
     for (const c of allChecks) {
       const stored =
         c.sport === "afl" || c.sport === "football" ? c.sport : null;
-      m.set(c.id, stored ?? detectSportFromXml(c.xml_master) ?? "afl");
+      m.set(c.id, stored ?? "afl");
     }
     return m;
   }, [allChecks]);
@@ -203,7 +228,7 @@ export default function AccuracyChecksPage() {
     try {
       setLoading(true);
       const [data, counts] = await Promise.all([
-        getAllAccuracyChecks(),
+        getAccuracyChecksMeta(),
         getOpenDisputeCounts().catch(() => ({}) as Record<number, number>),
       ]);
 
@@ -292,6 +317,39 @@ export default function AccuracyChecksPage() {
   const [fixtureSearch, setFixtureSearch] = useState("");
   // Both / Home / Away scope for the category accuracy columns.
   const [fixtureScope, setFixtureScope] = useState<TeamScope>("both");
+
+  // Home/Away category columns need raw XML (per-team data), which the light
+  // list load doesn't fetch. When the user picks Home/Away, lazily pull XML
+  // for the visible checks (batched) and cache it. "Both" uses the stored
+  // breakdown and needs nothing.
+  useEffect(() => {
+    if (fixtureScope === "both") return;
+    const missing = checks
+      .map((c) => c.id)
+      .filter((id) => !xmlById.has(id));
+    if (missing.length === 0) return;
+
+    let cancelled = false;
+    setLoadingScopeXml(true);
+    getAccuracyChecksXml(missing)
+      .then((fetched) => {
+        if (cancelled) return;
+        setXmlById((prev) => {
+          const next = new Map(prev);
+          for (const [id, row] of fetched) next.set(id, row);
+          return next;
+        });
+      })
+      .catch((err) => console.error("Failed loading Home/Away XML:", err))
+      .finally(() => {
+        if (!cancelled) setLoadingScopeXml(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fixtureScope, checks, xmlById]);
+
   // Sort: "analyst" | "date" | a category name.
   const [fixtureSort, setFixtureSort] = useState<{
     key: string;
@@ -335,7 +393,7 @@ export default function AccuracyChecksPage() {
         };
         map.set(key, g);
       }
-      const cats = categoryAccuracy(c, fixtureScope);
+      const cats = categoryAccuracy(c, fixtureScope, xmlById.get(c.id));
       const flat: Record<string, number> = {};
       for (const [cat, v] of Object.entries(cats)) {
         flat[cat] = v.accuracy;
@@ -361,7 +419,7 @@ export default function AccuracyChecksPage() {
         (a, b) =>
           b.rows.length - a.rows.length || a.label.localeCompare(b.label)
       );
-  }, [checks, fixtureScope]);
+  }, [checks, fixtureScope, xmlById]);
 
   function sortFixtureRows(rows: FixtureRow[]): FixtureRow[] {
     const { key, dir } = fixtureSort;
@@ -762,6 +820,11 @@ export default function AccuracyChecksPage() {
                       {label}
                     </button>
                   ))}
+                  {loadingScopeXml && (
+                    <span className="ml-1 text-xs text-slate-400">
+                      Loading…
+                    </span>
+                  )}
                 </div>
                 <input
                   value={fixtureSearch}
@@ -917,7 +980,7 @@ function CheckDetailModal({
   check,
   onClose,
 }: {
-  check: AccuracyCheck;
+  check: AccuracyCheckMeta;
   onClose: () => void;
 }) {
   const cards: { label: string; value: string; color?: string }[] = [
