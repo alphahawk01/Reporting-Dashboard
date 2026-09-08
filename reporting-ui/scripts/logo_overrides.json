@@ -1,0 +1,8 @@
+{
+  "_comment": "Manual overrides for the PlayHQ logo mapper. 'exclude' = team names the auto-matcher must never map (different clubs that share a name). 'force' = explicit team_name -> logo URL when the matcher can't resolve it. Names are matched case-insensitively.",
+  "exclude": [
+    "North Shore Bombers",
+    "St Albans EDFL"
+  ],
+  "force": {}
+}
