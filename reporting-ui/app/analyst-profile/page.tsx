@@ -104,9 +104,14 @@ const gamesData = await fetchAll<TTGame>("TT_Games");
 
       // Fetch team logos from Supabase
       try {
+        // Only fetch teams that actually have a logo. The teams table has
+        // >1000 rows (one per distinct team name), which would hit Supabase's
+        // default 1000-row cap and silently drop most clubs; filtering to
+        // non-null logo_url keeps the result small and complete.
         const { data: teamsData, error: teamsError } = await supabase
           .from("teams")
-          .select("team_name, logo_url");
+          .select("team_name, logo_url")
+          .not("logo_url", "is", null);
 
         if (!teamsError && teamsData) {
           const logoMap: Record<string, string> = {};
