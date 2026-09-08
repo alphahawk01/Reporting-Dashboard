@@ -110,7 +110,7 @@ function categoryAccuracy(
   const master = parseInstances(xml.xml_master);
   const analyst = parseInstances(xml.xml_analyst);
   const tol = check.tolerance ?? 3;
-  const canon = canonicaliseTeams(master, analyst, tol);
+  const canon = canonicaliseTeams(master, analyst, tol, check.file_name_master);
 
   const wanted = scope; // "home" | "away"
   const inScope = (i: Instance) => i.team.trim().toLowerCase() === wanted;

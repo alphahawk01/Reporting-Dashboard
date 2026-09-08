@@ -1118,8 +1118,25 @@ function AccuracyCompareInner() {
   // instances (which still carry the original club names).
   const canonical = useMemo(() => {
     if (!master || !analyst) return null;
-    return canonicaliseTeams(master.instances, analyst.instances, tolerance);
+    return canonicaliseTeams(
+      master.instances,
+      analyst.instances,
+      tolerance,
+      master.name
+    );
   }, [master, analyst, tolerance]);
+
+  // Map a canonical team ("Home"/"Away") to the real club name from the master
+  // file, for display only. Comparison/filtering still use the canonical team.
+  const teamDisplay = useMemo(() => {
+    const names = canonical?.displayNames;
+    return (canonTeam: string): string => {
+      const key = canonTeam.trim().toLowerCase();
+      if (key === "home" && names?.home) return names.home;
+      if (key === "away" && names?.away) return names.away;
+      return canonTeam;
+    };
+  }, [canonical]);
 
   const result = useMemo(() => {
     if (!canonical) return null;
@@ -1909,7 +1926,7 @@ function AccuracyCompareInner() {
                 </span>
                 {teamFilter !== "all" && (
                   <span className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
-                    {teamFilter}
+                    {teamDisplay(teamFilter)}
                   </span>
                 )}
                 {categoryFilter !== "all" && (
@@ -1971,6 +1988,7 @@ function AccuracyCompareInner() {
                       teams={realTeams.map((t) => t.team)}
                       value={teamFilter}
                       onChange={setTeamFilter}
+                      labelFor={teamDisplay}
                     />
                     {categoryFilter !== "all" && (
                       <button
@@ -2151,6 +2169,7 @@ function AccuracyCompareInner() {
                       teams={realTeams.map((t) => t.team)}
                       value={teamFilter}
                       onChange={setTeamFilter}
+                      labelFor={teamDisplay}
                     />
                     <button
                       onClick={() =>
@@ -2254,6 +2273,44 @@ function AccuracyCompareInner() {
                           );
                         })}
                       </tr>
+                      {/* How many players have identical master vs analyst
+                          totals for each stat. Counts every player in the
+                          table — a 0-vs-0 still means the analyst correctly
+                          did not code that stat for the player. */}
+                      <tr className="border-t border-slate-200 bg-slate-50 text-slate-600">
+                        <td className="whitespace-nowrap px-4 py-2 text-left text-xs font-semibold">
+                          Players matching
+                        </td>
+                        {sportConfig.columns.map((col) => {
+                          const totalPlayers = playerTable.length;
+                          const matching = playerTable.filter(
+                            (p) => col.get(p.master) === col.get(p.analyst)
+                          ).length;
+                          const allMatch =
+                            totalPlayers > 0 && matching === totalPlayers;
+                          return (
+                            <td
+                              key={col.key}
+                              colSpan={2}
+                              title={`${matching} of ${totalPlayers} player${
+                                totalPlayers === 1 ? "" : "s"
+                              } match on ${col.label}`}
+                              className={`border-l border-slate-200 px-2 py-2 text-center text-xs font-bold tabular-nums ${
+                                totalPlayers === 0
+                                  ? "text-slate-300"
+                                  : allMatch
+                                    ? "text-emerald-600"
+                                    : "text-slate-700"
+                              }`}
+                            >
+                              {matching}
+                              <span className="font-medium text-slate-400">
+                                /{totalPlayers}
+                              </span>
+                            </td>
+                          );
+                        })}
+                      </tr>
                     </tfoot>
                   </table>
                 </div>
@@ -2305,7 +2362,7 @@ function AccuracyCompareInner() {
                     AI insights
                   </h2>
                   <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
-                    {teamFilter === "all" ? "Both teams" : teamFilter}
+                    {teamFilter === "all" ? "Both teams" : teamDisplay(teamFilter)}
                     {categoryFilter !== "all" ? ` · ${categoryFilter}` : ""}
                   </span>
                 </div>
@@ -2364,6 +2421,7 @@ function AccuracyCompareInner() {
                   teams={realTeams.map((t) => t.team)}
                   value={teamFilter}
                   onChange={setTeamFilter}
+                  labelFor={teamDisplay}
                 />
               </div>
             )}
@@ -2438,6 +2496,9 @@ function AccuracyCompareInner() {
                       <TimelineCell
                         instance={row.master}
                         onSeek={videoUrl.trim() ? seekVideo : undefined}
+                        teamLabel={
+                          row.master ? teamDisplay(row.master.team) : undefined
+                        }
                         flagged={
                           !!row.master &&
                           flaggedKeys.has(disputeKey(row.master.id, "master"))
@@ -2447,6 +2508,11 @@ function AccuracyCompareInner() {
                         instance={row.analyst}
                         delta={row.timeDelta}
                         onSeek={videoUrl.trim() ? seekVideo : undefined}
+                        teamLabel={
+                          row.analyst
+                            ? teamDisplay(row.analyst.team)
+                            : undefined
+                        }
                         flagged={
                           !!row.analyst &&
                           flaggedKeys.has(
@@ -2704,6 +2770,11 @@ function AccuracyCompareInner() {
                           instance={masterInstance}
                           onSeek={seekVideo}
                           active={masterActive}
+                          teamLabel={
+                            masterInstance
+                              ? teamDisplay(masterInstance.team)
+                              : undefined
+                          }
                           flagged={
                             !!masterInstance &&
                             flaggedKeys.has(
@@ -2721,6 +2792,11 @@ function AccuracyCompareInner() {
                           delta={masterInstance && analystInstance ? row.timeDelta : null}
                           onSeek={seekVideo}
                           active={analystActive}
+                          teamLabel={
+                            analystInstance
+                              ? teamDisplay(analystInstance.team)
+                              : undefined
+                          }
                           flagged={
                             !!analystInstance &&
                             flaggedKeys.has(
@@ -2981,10 +3057,13 @@ function TeamToggle({
   teams,
   value,
   onChange,
+  labelFor,
 }: {
   teams: string[];
   value: string;
   onChange: (v: string) => void;
+  /** Maps a canonical team value to a display label (e.g. real club name). */
+  labelFor?: (team: string) => string;
 }) {
   const btn = (active: boolean) =>
     `rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
@@ -3004,7 +3083,7 @@ function TeamToggle({
           onClick={() => onChange(t)}
           className={btn(value === t)}
         >
-          {t}
+          {labelFor ? labelFor(t) : t}
         </button>
       ))}
     </div>
@@ -3018,6 +3097,7 @@ function TimelineCell({
   active,
   flagged,
   onFlag,
+  teamLabel,
 }: {
   instance: Instance | null;
   delta?: number | null;
@@ -3025,6 +3105,8 @@ function TimelineCell({
   active?: boolean;
   flagged?: boolean;
   onFlag?: (e: React.MouseEvent) => void;
+  /** Real club name to show instead of the canonical "Home"/"Away". */
+  teamLabel?: string;
 }) {
   if (!instance) {
     return (
@@ -3065,7 +3147,7 @@ function TimelineCell({
         onFlag
           ? `${formatTime(instance.mid)} · ${
               instance.stat || instance.category || "—"
-            } · ${instance.team}${
+            } · ${teamLabel ?? instance.team}${
               instance.playerNumber != null ? ` #${instance.playerNumber}` : ""
             } — click to jump · right-click to flag`
           : clickable
@@ -3093,7 +3175,7 @@ function TimelineCell({
           {instance.stat || instance.category || "—"}
         </span>
         <span className="ml-auto shrink-0 text-[11px] font-medium text-slate-500">
-          {instance.team}
+          {teamLabel ?? instance.team}
           {instance.playerNumber != null && ` #${instance.playerNumber}`}
         </span>
       </div>

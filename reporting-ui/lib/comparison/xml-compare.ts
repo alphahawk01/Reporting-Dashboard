@@ -550,17 +550,89 @@ function topTwoTeams(instances: Instance[]): string[] {
     .map(([t]) => t);
 }
 
+/**
+ * Parse the [home, away] team names out of a master file name. The naming
+ * convention puts the HOME team first and the AWAY team second, as the last
+ * two underscore-separated segments after a "_full_" marker, e.g.:
+ *   "...Comp 2026_01_full_Hume City FC_Malvern FC U13.xml"
+ *      -> ["hume city fc", "malvern fc u13"]
+ * Returns null if the name doesn't fit the pattern.
+ */
+export function parseHomeAwayFromFileName(
+  fileName: string | null | undefined
+): [string, string] | null {
+  if (!fileName) return null;
+  // Strip extension and any trailing " (1)", ". 1", ".." noise.
+  let base = fileName.replace(/\.xml$/i, "");
+  const marker = base.toLowerCase().lastIndexOf("_full_");
+  if (marker === -1) return null;
+  const tail = base.slice(marker + "_full_".length);
+  const parts = tail.split("_");
+  if (parts.length < 2) return null;
+  // Home = first segment, Away = the rest joined (in case an away name itself
+  // contained an underscore, though the last two segments are the norm).
+  const home = normTeam(parts[0]);
+  const away = normTeam(parts.slice(1).join(" ").replace(/\.+\s*\d*$/, ""));
+  if (!home || !away) return null;
+  return [home, away];
+}
+
+/**
+ * How well two team-name strings match, as a word-overlap score in [0,1].
+ * Used to line up a file-name team (e.g. "northcote city u15b") with the
+ * actual team label in the XML (e.g. "northcote city u15 boys"), which are
+ * close but rarely identical.
+ */
+function teamNameSimilarity(a: string, b: string): number {
+  const words = (s: string) =>
+    new Set(
+      normTeam(s)
+        .replace(/[^a-z0-9 ]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length >= 2)
+    );
+  const wa = words(a);
+  const wb = words(b);
+  if (wa.size === 0 || wb.size === 0) return 0;
+  let shared = 0;
+  for (const w of wa) if (wb.has(w)) shared += 1;
+  return shared / Math.min(wa.size, wb.size);
+}
+
+export type CanonTeamNames = { home: string | null; away: string | null };
+
 export function canonicaliseTeams(
   master: Instance[],
   analyst: Instance[],
-  tolerance: number
-): { master: Instance[]; analyst: Instance[]; mapped: boolean } {
+  tolerance: number,
+  masterFileName?: string | null
+): {
+  master: Instance[];
+  analyst: Instance[];
+  mapped: boolean;
+  /** Real club names for each canonical side, taken from the master's XML. */
+  displayNames: CanonTeamNames;
+} {
   const mTeams = topTwoTeams(master);
   const aTeams = topTwoTeams(analyst);
 
+  // Original-cased team name for a normalised key, from the master instances
+  // (so the timeline can show the real club name instead of "Home"/"Away").
+  const originalCase = (normKey: string): string | null => {
+    for (const i of master) {
+      if (normTeam(i.team) === normKey) return i.team.trim();
+    }
+    return normKey || null;
+  };
+
   // Nothing to align if either side has no team info.
   if (mTeams.length === 0 || aTeams.length === 0) {
-    return { master, analyst, mapped: false };
+    return {
+      master,
+      analyst,
+      mapped: false,
+      displayNames: { home: null, away: null },
+    };
   }
 
   // Tally analyst-team co-occurrence with master-team over time-aligned,
@@ -602,10 +674,37 @@ export function canonicaliseTeams(
     mapMasterToAnalyst.set(mTeams[0], aTeams[0]);
   }
 
-  // Assign canonical labels: master's most-common team = Home.
+  // Decide which master team is Home. Preferred source of truth: the master
+  // FILE NAME, which by convention lists the home team first, away second
+  // (e.g. "..._full_<Home>_<Away>.xml"). Match those names to the actual XML
+  // team labels (they're close but not identical). Fall back to the old
+  // heuristic (most-coded team = Home) when the file name isn't usable.
+  let homeTeam = mTeams[0];
+  let awayTeam = mTeams[1];
+
+  const fileTeams = parseHomeAwayFromFileName(masterFileName);
+  if (fileTeams && mTeams.length === 2) {
+    const [fileHome, fileAway] = fileTeams;
+    // Two ways to assign the two master teams to the file's home/away; pick
+    // the assignment with the higher combined name similarity.
+    const s = teamNameSimilarity;
+    const assignA =
+      s(mTeams[0], fileHome) + s(mTeams[1], fileAway); // m0=Home, m1=Away
+    const assignB =
+      s(mTeams[1], fileHome) + s(mTeams[0], fileAway); // m1=Home, m0=Away
+    if (assignB > assignA) {
+      homeTeam = mTeams[1];
+      awayTeam = mTeams[0];
+    } else {
+      homeTeam = mTeams[0];
+      awayTeam = mTeams[1];
+    }
+  }
+
+  // Assign canonical labels.
   const masterCanon = new Map<string, string>();
-  masterCanon.set(mTeams[0], CANON_HOME);
-  if (mTeams[1]) masterCanon.set(mTeams[1], CANON_AWAY);
+  masterCanon.set(homeTeam, CANON_HOME);
+  if (awayTeam) masterCanon.set(awayTeam, CANON_AWAY);
 
   const analystCanon = new Map<string, string>();
   for (const [mt, at] of mapMasterToAnalyst.entries()) {
@@ -626,6 +725,10 @@ export function canonicaliseTeams(
     master: master.map(relabelMaster),
     analyst: analyst.map(relabelAnalyst),
     mapped: true,
+    displayNames: {
+      home: originalCase(homeTeam),
+      away: awayTeam ? originalCase(awayTeam) : null,
+    },
   };
 }
 
@@ -641,12 +744,14 @@ export function canonicaliseTeams(
 export function compareInstances(
   masterRaw: Instance[],
   analystRaw: Instance[],
-  tolerance: number
+  tolerance: number,
+  masterFileName?: string | null
 ): ComparisonResult {
   const { master, analyst } = canonicaliseTeams(
     masterRaw,
     analystRaw,
-    tolerance
+    tolerance,
+    masterFileName
   );
   const rows: ComparisonRow[] = [];
   const usedAnalyst = new Set<number>();

@@ -384,6 +384,11 @@ function DisputeReviewModal({
     const [videoTime, setVideoTime] = useState(0);
     const [rows, setRows] = useState<ComparisonRow[]>([]);
     const [loadingRows, setLoadingRows] = useState(true);
+    // Real club names for the canonical Home/Away sides (from the master).
+    const [teamNames, setTeamNames] = useState<{
+        home: string | null;
+        away: string | null;
+    }>({ home: null, away: null });
 
     // Load + parse the check's stored XML to build both timelines.
     useEffect(() => {
@@ -400,13 +405,21 @@ function DisputeReviewModal({
                     ? parseInstances(check.xml_analyst)
                     : [];
                 const tol = check.tolerance ?? 3;
-                const canon = canonicaliseTeams(master, analyst, tol);
+                const canon = canonicaliseTeams(
+                    master,
+                    analyst,
+                    tol,
+                    check.file_name_master
+                );
                 const result = compareInstances(
                     canon.master,
                     canon.analyst,
                     tol
                 );
-                if (!cancelled) setRows(result.rows);
+                if (!cancelled) {
+                    setRows(result.rows);
+                    setTeamNames(canon.displayNames);
+                }
             } catch (err) {
                 console.error("Failed building dispute timeline:", err);
             } finally {
@@ -441,6 +454,14 @@ function DisputeReviewModal({
             behavior: "smooth",
         });
     }, [videoTime, rows]);
+
+    // Canonical team -> real club name (from the master file) for display.
+    const teamDisplay = (canonTeam: string): string => {
+        const key = canonTeam.trim().toLowerCase();
+        if (key === "home" && teamNames.home) return teamNames.home;
+        if (key === "away" && teamNames.away) return teamNames.away;
+        return canonTeam;
+    };
 
     const seekTo = (seconds: number) => {
         const v = videoRef.current;
@@ -564,11 +585,25 @@ function DisputeReviewModal({
                                                 inst={row.master}
                                                 onSeek={seekTo}
                                                 active={mActive}
+                                                teamLabel={
+                                                    row.master
+                                                        ? teamDisplay(
+                                                              row.master.team
+                                                          )
+                                                        : undefined
+                                                }
                                             />
                                             <MiniCell
                                                 inst={row.analyst}
                                                 onSeek={seekTo}
                                                 active={aActive}
+                                                teamLabel={
+                                                    row.analyst
+                                                        ? teamDisplay(
+                                                              row.analyst.team
+                                                          )
+                                                        : undefined
+                                                }
                                             />
                                         </div>
                                     );
@@ -653,10 +688,13 @@ function MiniCell({
     inst,
     onSeek,
     active,
+    teamLabel,
 }: {
     inst: Instance | null;
     onSeek: (seconds: number) => void;
     active?: boolean;
+    /** Real club name to show instead of the canonical "Home"/"Away". */
+    teamLabel?: string;
 }) {
     if (!inst) {
         return (
@@ -679,7 +717,7 @@ function MiniCell({
             onClick={() => onSeek(inst.start)}
             title={`${formatTime(inst.mid)} · ${
                 inst.stat || inst.category || "—"
-            } · ${inst.team}${
+            } · ${teamLabel ?? inst.team}${
                 inst.playerNumber != null ? ` #${inst.playerNumber}` : ""
             } — jump to this moment`}
             className={`cursor-pointer border-l border-slate-200 px-2 py-1 hover:brightness-95 ${
@@ -695,7 +733,7 @@ function MiniCell({
                     {inst.stat || inst.category || "—"}
                 </span>
                 <span className="ml-auto shrink-0 text-[11px] font-medium text-slate-500">
-                    {inst.team}
+                    {teamLabel ?? inst.team}
                     {inst.playerNumber != null ? ` #${inst.playerNumber}` : ""}
                 </span>
             </div>
