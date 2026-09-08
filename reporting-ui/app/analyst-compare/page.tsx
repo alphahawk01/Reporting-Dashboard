@@ -2,17 +2,31 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 
 import { supabase } from "@/lib/supabase";
 import AnalystSelect from "./AnalystSelect";
 import AnalystHero from "../analyst-profile/AnalystHero";
 import AttributeRatings from "../analyst-profile/AttributeRatings";
-import ComparisonRadar from "./ComparisonRadar";
 import { buildAnalystMetrics } from "@/lib/analytics/buildAnalystMetrics";
 import { buildAnalystBenchmark } from "@/lib/analytics/buildAnalystBenchmark";
 import ComparisonSummary from "./ComparisonSummary";
 import ComparisonKPIs from "./ComparisonKPIs";
-import ComparisonTrendCharts from "./ComparisonTrendCharts";
+// recharts-based comparison charts — load lazily (they live in tabs) so
+// recharts stays out of the initial comparison bundle.
+const chartLoading = () => (
+    <div className="flex h-64 items-center justify-center text-sm text-slate-400">
+        Loading chart…
+    </div>
+);
+const ComparisonRadar = dynamic(() => import("./ComparisonRadar"), {
+    ssr: false,
+    loading: chartLoading,
+});
+const ComparisonTrendCharts = dynamic(() => import("./ComparisonTrendCharts"), {
+    ssr: false,
+    loading: chartLoading,
+});
 import ComparisonAttributes from "./ComparisonAttributes";
 import ComparisonRanking from "./ComparisonRanking";
 import ComparisonGaps from "./ComparisonGaps";

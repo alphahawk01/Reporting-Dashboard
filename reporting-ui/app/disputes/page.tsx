@@ -8,9 +8,9 @@ import {
     type Dispute,
 } from "@/lib/api/disputes";
 import {
-    getAllAccuracyChecks,
+    getAccuracyChecksMeta,
     getAccuracyCheckById,
-    type AccuracyCheck,
+    type AccuracyCheckMeta,
 } from "@/lib/api/accuracyChecks";
 import {
     parseInstances,
@@ -20,7 +20,6 @@ import {
     type ComparisonRow,
     type Instance,
 } from "@/lib/comparison/xml-compare";
-import { detectSportFromXml } from "@/lib/comparison/xml-compare";
 import { useAuth } from "@/components/auth/AuthContext";
 import DisputesPanel from "@/components/DisputesPanel";
 import SportToggle, { type SportFilter } from "@/components/SportToggle";
@@ -41,7 +40,7 @@ export default function DisputesPage() {
     const canResolve = user?.role === "admin" || user?.role === "super_admin";
 
     const [disputes, setDisputes] = useState<Dispute[]>([]);
-    const [checks, setChecks] = useState<AccuracyCheck[]>([]);
+    const [checks, setChecks] = useState<AccuracyCheckMeta[]>([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState<Filter>("open");
     const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -66,7 +65,7 @@ export default function DisputesPage() {
             setLoading(true);
             const [d, c] = await Promise.all([
                 getAllDisputes(),
-                getAllAccuracyChecks().catch(() => [] as AccuracyCheck[]),
+                getAccuracyChecksMeta().catch(() => [] as AccuracyCheckMeta[]),
             ]);
 
             // Admins/super admins see everything. Analysts see ONLY disputes
@@ -100,18 +99,20 @@ export default function DisputesPage() {
     }, [ready, user?.role, user?.analyst_name]);
 
     const checkById = useMemo(() => {
-        const m = new Map<number, AccuracyCheck>();
+        const m = new Map<number, AccuracyCheckMeta>();
         for (const c of checks) m.set(c.id, c);
         return m;
     }, [checks]);
 
-    // Effective sport per check: stored, else inferred from master XML.
+    // Effective sport per check: use the stored value; legacy checks without
+    // one default to "afl". (The check list no longer carries raw XML, so we
+    // rely on the stored sport column rather than parsing it.)
     const sportByCheck = useMemo(() => {
         const m = new Map<number, "afl" | "football">();
         for (const c of checks) {
             const stored =
                 c.sport === "afl" || c.sport === "football" ? c.sport : null;
-            m.set(c.id, stored ?? detectSportFromXml(c.xml_master) ?? "afl");
+            m.set(c.id, stored ?? "afl");
         }
         return m;
     }, [checks]);

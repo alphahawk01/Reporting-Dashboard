@@ -132,10 +132,30 @@ export default function RecommendationPage() {
     async function loadHistory() {
       setLoading(true);
 
-      const { data: shifts, error: shiftError } =
-        await supabase
-          .from("deputy_shifts")
-          .select("*");
+      // deputy_shifts can exceed 1000 rows — an unpaginated select("*") is
+      // silently capped at 1000, dropping shifts. Page through with .range()
+      // like deputy_roster below so every shift loads.
+      const shifts: DeputyShift[] = [];
+      let shiftFrom = 0;
+      const shiftPageSize = 1000;
+
+      while (true) {
+        const { data: shiftPage, error: shiftError } =
+          await supabase
+            .from("deputy_shifts")
+            .select("*")
+            .range(shiftFrom, shiftFrom + shiftPageSize - 1);
+
+        if (shiftError) throw shiftError;
+        if (!shiftPage?.length) break;
+
+        shifts.push(...(shiftPage as DeputyShift[]));
+
+        if (shiftPage.length < shiftPageSize) break;
+
+        shiftFrom += shiftPageSize;
+      }
+
       const { data: affiliationData, error: affiliationError } =
         await supabase
           .from("analyst_team_affiliations")
@@ -288,12 +308,9 @@ export default function RecommendationPage() {
         setSelectedFixture(latestWeekFixtures[0]);
       }
 
-      if (shiftError || !shifts)
-        throw shiftError;
-
       const analystData =
         buildAnalystMetrics(
-          shifts as DeputyShift[],
+          shifts,
           allGames
         );
 

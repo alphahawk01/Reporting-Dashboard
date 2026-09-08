@@ -3,13 +3,31 @@ import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
+import dynamic from "next/dynamic";
+
 import AnalystHero from "./AnalystHero";
 import ExecutiveSummary from "./ExecutiveSummary";
 import LeagueBreakdown from "./LeagueBreakdown";
 import TeamBreakdown from "./TeamBreakdown";
-import AverageCodingTimeTrend from "./AverageCodingTimeTrend";
-import GamesCompletedTrend from "./GamesCompletedTrend";
-import HoursPerWeekTrend from "./HoursPerWeekTrend";
+// Trend charts pull in recharts — load lazily so it stays out of the initial
+// profile bundle and only downloads when the charts render.
+const trendLoading = () => (
+  <div className="flex h-full items-center justify-center text-sm text-slate-400">
+    Loading chart…
+  </div>
+);
+const AverageCodingTimeTrend = dynamic(() => import("./AverageCodingTimeTrend"), {
+  ssr: false,
+  loading: trendLoading,
+});
+const GamesCompletedTrend = dynamic(() => import("./GamesCompletedTrend"), {
+  ssr: false,
+  loading: trendLoading,
+});
+const HoursPerWeekTrend = dynamic(() => import("./HoursPerWeekTrend"), {
+  ssr: false,
+  loading: trendLoading,
+});
 import DashboardChartCard from "./DashboardChartCard";
 import { buildAnalystBenchmark } from "@/lib/analytics/buildAnalystBenchmark";
 import AttributeRatings from "./AttributeRatings";

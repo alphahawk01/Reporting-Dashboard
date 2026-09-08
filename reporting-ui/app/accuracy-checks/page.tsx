@@ -3,16 +3,19 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-} from "recharts";
+import dynamic from "next/dynamic";
 import { Trophy, History, Trash2, X, Flag } from "lucide-react";
+
+// Accuracy trend chart pulls in recharts — load lazily so recharts stays out
+// of this page's initial bundle and only downloads when a trend is shown.
+const AccuracyTrendChart = dynamic(() => import("./AccuracyTrendChart"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full items-center justify-center text-sm text-slate-400">
+      Loading chart…
+    </div>
+  ),
+});
 import {
   getAllAccuracyChecks,
   countMasterChecks,
@@ -540,18 +543,7 @@ export default function AccuracyChecksPage() {
                   </p>
                 ) : (
                   <div className="h-64">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={trendData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
-                        <CartesianGrid stroke="rgba(15,23,42,0.06)" vertical={false} />
-                        <XAxis dataKey="idx" tick={{ fontSize: 11, fill: "#64748B" }} />
-                        <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#64748B" }} tickFormatter={(v) => `${v}%`} />
-                        <Tooltip
-                          formatter={(v: any) => [`${v}%`, "Accuracy"]}
-                          labelFormatter={(_l, p) => (p?.[0]?.payload?.label ?? "")}
-                        />
-                        <Line type="monotone" dataKey="accuracy" stroke="#dc2626" strokeWidth={2} dot={{ r: 3 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
+                    <AccuracyTrendChart data={trendData} />
                   </div>
                 )}
               </div>

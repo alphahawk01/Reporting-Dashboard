@@ -2,13 +2,37 @@
 
 import { useMemo, useState, useEffect } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { calculateKPIs } from "@/lib/analytics";
 
-import HoursByEmployee from "./HoursByEmployee";
-import CostByArea from "./CostByArea";
-import CostByAreaByWeek from "./CostByAreaByWeek";
-import TTGames from "./TTGames";
-import AveHoursPerGame from "./AveHoursPerGame";
+// Chart components pull in recharts (a heavy dependency). Load them lazily so
+// recharts stays out of the dashboard's initial bundle and only downloads when
+// the relevant chart/tab is actually shown.
+const chartLoading = () => (
+  <div className="flex h-64 items-center justify-center text-sm text-slate-400">
+    Loading chart…
+  </div>
+);
+const HoursByEmployee = dynamic(() => import("./HoursByEmployee"), {
+  ssr: false,
+  loading: chartLoading,
+});
+const CostByArea = dynamic(() => import("./CostByArea"), {
+  ssr: false,
+  loading: chartLoading,
+});
+const CostByAreaByWeek = dynamic(() => import("./CostByAreaByWeek"), {
+  ssr: false,
+  loading: chartLoading,
+});
+const TTGames = dynamic(() => import("./TTGames"), {
+  ssr: false,
+  loading: chartLoading,
+});
+const AveHoursPerGame = dynamic(() => import("./AveHoursPerGame"), {
+  ssr: false,
+  loading: chartLoading,
+});
 import AveHoursTopAnalysts from "./AveHoursTopAnalysts";
 import AnalystInsightsTable from "./AnalystInsightsTable";
 import BonusTracker from "./BonusTracker";

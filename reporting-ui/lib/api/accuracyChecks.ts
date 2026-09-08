@@ -224,6 +224,52 @@ export async function getAllAccuracyChecks(): Promise<AccuracyCheck[]> {
 }
 
 /**
+ * A saved check without the heavy raw-XML blobs. Use this for list/summary
+ * views (leaderboards, dispute lists) that never re-parse the source XML —
+ * it avoids pulling potentially megabytes of xml_master/xml_analyst per row
+ * into the browser.
+ */
+export type AccuracyCheckMeta = Omit<AccuracyCheck, "xml_master" | "xml_analyst">;
+
+// Every AccuracyCheck column except the two XML blobs, for projected selects.
+const ACCURACY_CHECK_META_COLUMNS =
+    "id, created_at, analyst_name, master_analyst_name, match_label, " +
+    "file_name_master, file_name_analyst, tolerance, accuracy, master_total, " +
+    "analyst_total, exact, wrong_stat, wrong_player, wrong_team, missed, extra, " +
+    "avg_time_drift, category_breakdown, team_breakdown, video_url, sport";
+
+/**
+ * Like getAllAccuracyChecks but WITHOUT the xml_master/xml_analyst blobs.
+ * Much lighter over the wire; use when the caller only needs the summary
+ * fields (accuracy, breakdowns, sport, labels) and never re-parses XML.
+ */
+export async function getAccuracyChecksMeta(): Promise<AccuracyCheckMeta[]> {
+    const rows: AccuracyCheckMeta[] = [];
+    const pageSize = 1000;
+    let from = 0;
+
+    while (true) {
+        const { data, error } = await supabase
+            .from("accuracy_checks")
+            .select(ACCURACY_CHECK_META_COLUMNS)
+            .order("created_at", { ascending: false })
+            .range(from, from + pageSize - 1);
+
+        if (error) {
+            console.error("Failed loading accuracy check meta:", error);
+            throw new Error(error.message || "Failed loading accuracy checks");
+        }
+
+        if (!data || data.length === 0) break;
+        rows.push(...(data as unknown as AccuracyCheckMeta[]));
+        from += pageSize;
+        if (data.length < pageSize) break;
+    }
+
+    return rows;
+}
+
+/**
  * Delete a saved accuracy check (e.g. a mistaken save).
  */
 export async function deleteAccuracyCheck(id: number): Promise<void> {
@@ -250,7 +296,7 @@ export interface MasterCheckCount {
  * (grouped by master_analyst_name), highest first.
  */
 export function countMasterChecks(
-    checks: AccuracyCheck[]
+    checks: AccuracyCheckMeta[]
 ): MasterCheckCount[] {
     const map = new Map<string, number>();
 
@@ -283,7 +329,7 @@ export interface AnalystAccuracySummary {
  * team_breakdown. Teams are canonicalised to Home/Away at comparison time.
  */
 function teamAccuracy(
-    check: AccuracyCheck,
+    check: AccuracyCheckMeta,
     team: "home" | "away"
 ): number | null {
     const t = check.team_breakdown?.find(
@@ -296,9 +342,9 @@ function teamAccuracy(
  * Per-graded-analyst rollup across all their checks.
  */
 export function summariseByAnalyst(
-    checks: AccuracyCheck[]
+    checks: AccuracyCheckMeta[]
 ): AnalystAccuracySummary[] {
-    const map = new Map<string, AccuracyCheck[]>();
+    const map = new Map<string, AccuracyCheckMeta[]>();
 
     for (const c of checks) {
         const key = c.analyst_name.trim();

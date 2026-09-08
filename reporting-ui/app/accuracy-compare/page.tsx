@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useMemo, useState, useEffect, useRef, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   Upload,
@@ -580,6 +581,15 @@ function StatCard({
 }
 
 export default function AccuracyComparePage() {
+  return (
+    <Suspense fallback={null}>
+      <AccuracyCompareInner />
+    </Suspense>
+  );
+}
+
+function AccuracyCompareInner() {
+  const searchParams = useSearchParams();
   const [master, setMaster] = useState<LoadedFile | null>(null);
   const [analyst, setAnalyst] = useState<LoadedFile | null>(null);
   const [tolerance, setTolerance] = useState(3);
@@ -625,6 +635,12 @@ export default function AccuracyComparePage() {
   // flagged and the flags reflected in both timelines.
   const { user } = useAuth();
   const [loadedCheckId, setLoadedCheckId] = useState<number | null>(null);
+  // Mirror of loadedCheckId for the URL-sync effect to read without adding
+  // loadedCheckId to its deps (which would re-run the reset on every load).
+  const loadedCheckIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    loadedCheckIdRef.current = loadedCheckId;
+  }, [loadedCheckId]);
   const [checkAnalystName, setCheckAnalystName] = useState<string | null>(null);
   const [disputes, setDisputes] = useState<Dispute[]>([]);
   // Right-click context menu target for flagging.
@@ -925,14 +941,33 @@ export default function AccuracyComparePage() {
   // from Supabase, parse its stored XML back into master/analyst, and
   // restore the allocation/label so the full comparison is rebuilt.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const checkId = params.get("check");
-    if (!checkId) return;
+    const checkId = searchParams.get("check");
+
+    // No ?check= in the URL — this is a fresh "new accuracy check" view.
+    // If a saved check was previously loaded (e.g. the user navigated here
+    // from Accuracy History and then clicked the sidebar tab), clear it so
+    // they get a blank comparison instead of the stale check.
+    if (!checkId) {
+      if (loadedCheckIdRef.current != null) {
+        setMaster(null);
+        setAnalyst(null);
+        setLoadedCheckId(null);
+        setCheckAnalystName(null);
+        setDisputes([]);
+        setMatchLabel("");
+        setLabelEdited(false);
+        setGradedAnalyst("");
+        setMasterAnalyst("");
+        setVideoUrl("");
+        setVideoOpen(false);
+      }
+      return;
+    }
 
     // Optional deep-link from the Disputes page: open the video review and
     // seek to a specific instance (by its stat + start time seconds).
-    const reviewSeek = params.get("seek");
-    const reviewStat = params.get("stat");
+    const reviewSeek = searchParams.get("seek");
+    const reviewStat = searchParams.get("stat");
 
     let cancelled = false;
 
@@ -988,7 +1023,7 @@ export default function AccuracyComparePage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [searchParams]);
 
   // Default the save label to AnalystName_AnalystFilename (analyst name
   // with spaces stripped + underscore + analyst file name minus .xml),
