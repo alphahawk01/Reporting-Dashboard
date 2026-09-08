@@ -695,6 +695,10 @@ function AccuracyCompareInner() {
   const reviewIndexRef = useRef(0);
   const autoSkipRef = useRef(true);
   const reviewClipsRef = useRef<{ start: number; end: number }[]>([]);
+  // Last observed playback time, used to detect manual seeks (scrubbing the
+  // video's progress bar) so auto-skip re-syncs to wherever you jumped to
+  // instead of dragging you back to the next clip from a stale index.
+  const lastTimeRef = useRef(0);
   useEffect(() => {
     reviewIndexRef.current = reviewIndex;
   }, [reviewIndex]);
@@ -753,29 +757,67 @@ function AccuracyCompareInner() {
     e: React.SyntheticEvent<HTMLVideoElement>
   ) => {
     const t = e.currentTarget.currentTime;
+    const prev = lastTimeRef.current;
+    lastTimeRef.current = t;
     setVideoTime(t);
 
-    if (!autoSkipRef.current) return;
     const clips = reviewClipsRef.current;
-    const idx = reviewIndexRef.current;
-    if (clips.length === 0 || idx >= clips.length) return;
+    if (clips.length === 0) return;
 
-    const current = clips[idx];
-    // Small epsilon so we advance right at (not past) the end.
-    if (t >= current.end - 0.05) {
-      const nextIdx = idx + 1;
-      if (nextIdx < clips.length) {
-        const v = videoRef.current;
-        reviewIndexRef.current = nextIdx;
-        setReviewIndex(nextIdx);
-        if (v) {
-          v.currentTime = Math.max(0, clips[nextIdx].start);
-          v.play().catch(() => {});
-        }
-      } else {
-        // Last clip finished — stop so it doesn't run into the next game
-        // action that isn't part of this filter.
-        videoRef.current?.pause();
+    // Detect a manual seek: the user scrubbed the video's progress bar. A
+    // normal playback tick advances by a small amount (~0.25s); a jump
+    // backward, or forward by more than ~1s, means they moved the playhead.
+    // On a seek we re-sync reviewIndex to the clip at the new position and do
+    // NOT force a jump this tick, so playback continues from where they
+    // clicked instead of snapping back to a stale clip.
+    const seeked = t < prev - 0.4 || t > prev + 1;
+    if (seeked) {
+      // Prefer a clip whose window contains t; otherwise the next clip that
+      // starts at/after t; otherwise the last clip.
+      let synced = clips.findIndex((c) => t >= c.start && t <= c.end);
+      if (synced === -1) {
+        synced = clips.findIndex((c) => c.start >= t);
+        if (synced === -1) synced = clips.length - 1;
+      }
+      reviewIndexRef.current = synced;
+      setReviewIndex(synced);
+      return;
+    }
+
+    // Keep the tracked index in step with playback: advance past every clip
+    // whose end we've already passed, so the "current" clip is the one whose
+    // window we're in (or the next one coming up). This drives the row
+    // highlight WITHOUT seeking — overlapping stats in the same second just
+    // stay highlighted as the video plays naturally through them.
+    let idx = reviewIndexRef.current;
+    while (idx < clips.length && t > clips[idx].end - 0.05) {
+      idx += 1;
+    }
+    if (idx !== reviewIndexRef.current) {
+      reviewIndexRef.current = idx;
+      setReviewIndex(Math.min(idx, clips.length - 1));
+    }
+
+    if (!autoSkipRef.current) return;
+
+    // Auto-skip only jumps across genuine GAPS: if the next coded clip starts
+    // more than a second ahead of the current position, skip the dead air.
+    // We never seek backward or to a time at/behind the playhead, so clusters
+    // of stats in the same window play through smoothly instead of replaying.
+    if (idx >= clips.length) {
+      // Past the last coded clip — stop so it doesn't run into unrelated
+      // game action that isn't part of this filter.
+      videoRef.current?.pause();
+      return;
+    }
+    const GAP = 1; // seconds of dead air before we bother skipping
+    const nextStart = clips[idx].start;
+    if (nextStart > t + GAP) {
+      const v = videoRef.current;
+      if (v) {
+        v.currentTime = Math.max(0, nextStart);
+        lastTimeRef.current = nextStart;
+        v.play().catch(() => {});
       }
     }
   };
@@ -2362,7 +2404,7 @@ function AccuracyCompareInner() {
 
             {/* Synced side-by-side timeline */}
             <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="grid grid-cols-[110px_1fr_1fr] border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500">
+              <div className="grid grid-cols-[128px_1fr_1fr] border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500">
                 <div className="p-3">Status</div>
                 <div className="border-l border-slate-200 p-3">
                   Master {master ? `· ${master.name}` : ""}
@@ -2377,17 +2419,17 @@ function AccuracyCompareInner() {
                   return (
                     <div
                       key={i}
-                      className="grid grid-cols-[110px_1fr_1fr] border-b border-slate-100 text-sm last:border-b-0 hover:bg-slate-50/60"
+                      className="grid grid-cols-[128px_1fr_1fr] border-b border-slate-100 text-sm last:border-b-0 hover:bg-slate-50/60"
                     >
-                      <div className="flex flex-col items-start gap-1 p-3">
+                      <div className="flex flex-wrap items-center gap-1 px-2 py-1">
                         <span
-                          className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ${meta.badge}`}
+                          className={`inline-flex items-center whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${meta.badge}`}
                         >
                           {meta.label}
                         </span>
                         {row.alsoWrongPlayer && (
                           <span
-                            className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ${STATUS_META.wrong_player.badge}`}
+                            className={`inline-flex items-center whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${STATUS_META.wrong_player.badge}`}
                           >
                             {STATUS_META.wrong_player.label}
                           </span>
@@ -2585,7 +2627,7 @@ function AccuracyCompareInner() {
 
               {/* Right: timelines */}
               <div className="flex min-h-0 flex-col border-t border-slate-700 lg:border-l lg:border-t-0">
-                <div className="grid grid-cols-[90px_1fr_1fr] border-b border-slate-700 bg-slate-800 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                <div className="grid grid-cols-[124px_1fr_1fr] border-b border-slate-700 bg-slate-800 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                   <div className="p-2.5">Status</div>
                   <div className="border-l border-slate-700 p-2.5">
                     Master
@@ -2638,21 +2680,21 @@ function AccuracyCompareInner() {
                       <div
                         key={i}
                         ref={rowActive ? activeRowRef : undefined}
-                        className={`grid grid-cols-[90px_1fr_1fr] border-b text-sm last:border-b-0 ${
+                        className={`grid grid-cols-[124px_1fr_1fr] border-b text-sm last:border-b-0 ${
                           rowActive
-                            ? "border-sky-300 bg-sky-50"
+                            ? "border-sky-400 bg-sky-50 shadow-[inset_4px_0_0_0_#0ea5e9]"
                             : "border-slate-100"
                         }`}
                       >
-                        <div className="flex flex-col items-start gap-1 p-2.5">
+                        <div className="flex flex-wrap items-center gap-1 px-2 py-1">
                           <span
-                            className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ${meta.badge}`}
+                            className={`inline-flex items-center whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${meta.badge}`}
                           >
                             {meta.label}
                           </span>
                           {row.alsoWrongPlayer && (
                             <span
-                              className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ${STATUS_META.wrong_player.badge}`}
+                              className={`inline-flex items-center whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${STATUS_META.wrong_player.badge}`}
                             >
                               {STATUS_META.wrong_player.label}
                             </span>
@@ -2986,8 +3028,8 @@ function TimelineCell({
 }) {
   if (!instance) {
     return (
-      <div className="border-l border-slate-200 p-3">
-        <span className="text-xs italic text-slate-300">— no entry —</span>
+      <div className="border-l border-slate-200 px-2 py-1">
+        <span className="text-[11px] italic text-slate-300">— no entry —</span>
       </div>
     );
   }
@@ -3008,10 +3050,10 @@ function TimelineCell({
 
   return (
     <div
-      className={`border-l p-3 ${cellBg} ${
-        clickable ? "cursor-pointer hover:brightness-95" : ""
+      className={`border-l px-2 py-1 ${
+        active ? "bg-sky-100 ring-2 ring-inset ring-sky-500" : cellBg
       } ${
-        active ? "ring-2 ring-inset ring-sky-500" : ""
+        clickable ? "cursor-pointer hover:brightness-95" : ""
       } ${flagged ? "ring-2 ring-inset ring-amber-500" : ""}`}
       onClick={
         clickable
@@ -3021,43 +3063,40 @@ function TimelineCell({
       onContextMenu={onFlag}
       title={
         onFlag
-          ? "Click to jump · right-click to flag as dispute"
+          ? `${formatTime(instance.mid)} · ${
+              instance.stat || instance.category || "—"
+            } · ${instance.team}${
+              instance.playerNumber != null ? ` #${instance.playerNumber}` : ""
+            } — click to jump · right-click to flag`
           : clickable
             ? "Jump to this moment in the video"
             : undefined
       }
     >
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="font-mono text-xs font-semibold text-slate-500">
+      {/* Single compact line: time · icons · stat (truncates) · team/#player */}
+      <div className="flex items-center gap-x-1.5 overflow-hidden whitespace-nowrap">
+        <span className="shrink-0 font-mono text-[11px] font-semibold text-slate-500">
           {formatTime(instance.mid)}
         </span>
         {clickable && (
-          <Video size={11} className="text-slate-400" />
+          <Video size={10} className="shrink-0 text-slate-400" />
         )}
         {flagged && (
-          <Flag
-            size={11}
-            className="fill-amber-500 text-amber-600"
-          />
+          <Flag size={10} className="shrink-0 fill-amber-500 text-amber-600" />
         )}
         {delta != null && delta > 0 && (
-          <span className="text-[10px] text-slate-400">
-            (+{delta.toFixed(1)}s)
+          <span className="shrink-0 text-[10px] text-slate-400">
+            +{delta.toFixed(1)}s
           </span>
         )}
-        <span className="text-sm font-semibold text-slate-900">
+        <span className="truncate text-xs font-semibold text-slate-900">
           {instance.stat || instance.category || "—"}
         </span>
+        <span className="ml-auto shrink-0 text-[11px] font-medium text-slate-500">
+          {instance.team}
+          {instance.playerNumber != null && ` #${instance.playerNumber}`}
+        </span>
       </div>
-      <p className="text-xs font-medium text-slate-500">
-        {instance.team}
-        {instance.playerNumber != null && (
-          <span>
-            {" "}
-            · #{instance.playerNumber}
-          </span>
-        )}
-      </p>
     </div>
   );
 }

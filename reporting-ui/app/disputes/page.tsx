@@ -506,7 +506,7 @@ function DisputeReviewModal({
 
                     {/* Timelines */}
                     <div className="flex min-h-0 flex-col border-t border-slate-700 lg:border-l lg:border-t-0">
-                        <div className="grid grid-cols-[86px_1fr_1fr] border-b border-slate-700 bg-slate-800 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                        <div className="grid grid-cols-[124px_1fr_1fr] border-b border-slate-700 bg-slate-800 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                             <div className="p-2.5">Status</div>
                             <div className="border-l border-slate-700 p-2.5">
                                 Master
@@ -544,16 +544,16 @@ function DisputeReviewModal({
                                                     ? activeRowRef
                                                     : undefined
                                             }
-                                            className={`grid grid-cols-[86px_1fr_1fr] border-b text-sm last:border-b-0 ${
+                                            className={`grid grid-cols-[124px_1fr_1fr] border-b text-sm last:border-b-0 ${
                                                 isDisputed
                                                     ? "border-amber-300 bg-amber-50"
                                                     : active
-                                                      ? "border-sky-300 bg-sky-50"
+                                                      ? "border-sky-400 bg-sky-50 shadow-[inset_4px_0_0_0_#0ea5e9]"
                                                       : "border-slate-100"
                                             }`}
                                         >
-                                            <div className="flex items-center p-2.5">
-                                                <span className="text-[11px] font-semibold text-slate-500">
+                                            <div className="flex items-center px-2 py-1">
+                                                <span className="whitespace-nowrap text-[11px] font-semibold capitalize text-slate-500">
                                                     {row.status.replace(
                                                         "_",
                                                         " "
@@ -563,10 +563,12 @@ function DisputeReviewModal({
                                             <MiniCell
                                                 inst={row.master}
                                                 onSeek={seekTo}
+                                                active={mActive}
                                             />
                                             <MiniCell
                                                 inst={row.analyst}
                                                 onSeek={seekTo}
+                                                active={aActive}
                                             />
                                         </div>
                                     );
@@ -650,14 +652,16 @@ function DisputeReviewModal({
 function MiniCell({
     inst,
     onSeek,
+    active,
 }: {
     inst: Instance | null;
     onSeek: (seconds: number) => void;
+    active?: boolean;
 }) {
     if (!inst) {
         return (
-            <div className="border-l border-slate-200 p-2.5">
-                <span className="text-xs italic text-slate-300">
+            <div className="border-l border-slate-200 px-2 py-1">
+                <span className="text-[11px] italic text-slate-300">
                     — no entry —
                 </span>
             </div>
@@ -673,21 +677,28 @@ function MiniCell({
     return (
         <div
             onClick={() => onSeek(inst.start)}
-            title="Jump to this moment"
-            className={`cursor-pointer border-l border-slate-200 p-2.5 hover:brightness-95 ${bg}`}
+            title={`${formatTime(inst.mid)} · ${
+                inst.stat || inst.category || "—"
+            } · ${inst.team}${
+                inst.playerNumber != null ? ` #${inst.playerNumber}` : ""
+            } — jump to this moment`}
+            className={`cursor-pointer border-l border-slate-200 px-2 py-1 hover:brightness-95 ${
+                active ? "bg-sky-100 ring-2 ring-inset ring-sky-500" : bg
+            }`}
         >
-            <div className="flex flex-wrap items-baseline gap-x-2">
-                <span className="font-mono text-[11px] font-semibold text-slate-500">
+            {/* Single compact line: time · stat (truncates) · team/#player */}
+            <div className="flex items-center gap-x-1.5 overflow-hidden whitespace-nowrap">
+                <span className="shrink-0 font-mono text-[11px] font-semibold text-slate-500">
                     {formatTime(inst.mid)}
                 </span>
-                <span className="text-sm font-semibold text-slate-900">
+                <span className="truncate text-xs font-semibold text-slate-900">
                     {inst.stat || inst.category || "—"}
                 </span>
+                <span className="ml-auto shrink-0 text-[11px] font-medium text-slate-500">
+                    {inst.team}
+                    {inst.playerNumber != null ? ` #${inst.playerNumber}` : ""}
+                </span>
             </div>
-            <p className="text-xs font-medium text-slate-500">
-                {inst.team}
-                {inst.playerNumber != null ? ` · #${inst.playerNumber}` : ""}
-            </p>
         </div>
     );
 }
