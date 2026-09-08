@@ -2,7 +2,6 @@
 
 import Card from "@/components/UI/Card";
 import type { TeamMetric } from "@/types/analyst";
-import { clubLogos } from "./clubLogos";
 
 type Props = {
   data?: Record<string, TeamMetric>;
@@ -10,12 +9,12 @@ type Props = {
 };
 
 /**
- * Resolves a club logo URL by trying:
- * 1. Supabase logo_url (passed via logoMap prop, keyed by lowercase team name)
- * 2. Static clubLogos mapping (case-insensitive)
- * 3. Suffix match — "Strathmore U18s" matches "strathmore" but
- *    "East Ringwood" won't match "ringwood" and "Doncaster East" won't match "doncaster"
- * 4. Returns null if no logo found
+ * Resolves a club logo URL from the Supabase `teams.logo_url` map (the single
+ * source of truth, passed via the logoMap prop keyed by lowercase team name):
+ * 1. Exact match on the full team name.
+ * 2. Suffix match — "Strathmore U18s" matches "strathmore" but
+ *    "East Ringwood" won't match "ringwood" and "Doncaster East" won't match "doncaster".
+ * 3. Returns null if no logo found.
  */
 const teamSuffixes = [
   " reserves",
@@ -40,16 +39,12 @@ function getClubLogo(
   // Supabase logo_url — exact match
   if (logoMap[key]) return logoMap[key];
 
-  // Static mapping — exact match
-  if (clubLogos[key]) return clubLogos[key];
-
   // Suffix-aware match: strip known suffixes and try again
   // e.g. "strathmore u18s" → "strathmore", "aberfeldie reserves" → "aberfeldie"
   for (const suffix of teamSuffixes) {
     if (key.endsWith(suffix)) {
       const base = key.slice(0, -suffix.length);
       if (logoMap[base]) return logoMap[base];
-      if (clubLogos[base]) return clubLogos[base];
     }
   }
 

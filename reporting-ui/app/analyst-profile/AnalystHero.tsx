@@ -11,7 +11,6 @@ import {
   getAnalystInitials,
 } from "./analystImages";
 
-import { clubLogos } from "./clubLogos";
 
 type Props = {
   data: AnalystMetrics;
@@ -40,12 +39,36 @@ function gradeTheme(overall: number) {
   return { text: "text-rose-400", border: "border-rose-500/40", bg: "bg-rose-500/10", label: "text-rose-400" };
 }
 
+const teamSuffixes = [
+  " reserves",
+  " u18s",
+  " u18.5",
+  " u19s",
+  " u16s",
+  " u15s",
+  " u14s",
+  " thirds",
+  " seconds",
+  " womens",
+  " women",
+];
+
+// Resolves a club logo from the Supabase `teams.logo_url` map (single source of
+// truth). Exact match first, then a suffix-stripped retry so "Strathmore U18s"
+// resolves to the "strathmore" base entry.
 function resolveTeamLogo(
   team: string,
   logoMap: Record<string, string>
 ): string | null {
   const key = team.trim().toLowerCase();
-  return logoMap[key] ?? clubLogos[key] ?? null;
+  if (logoMap[key]) return logoMap[key];
+  for (const suffix of teamSuffixes) {
+    if (key.endsWith(suffix)) {
+      const base = key.slice(0, -suffix.length);
+      if (logoMap[base]) return logoMap[base];
+    }
+  }
+  return null;
 }
 
 export default function AnalystHero({

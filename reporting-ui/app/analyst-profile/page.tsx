@@ -118,7 +118,7 @@ const gamesData = await fetchAll<TTGame>("TT_Games");
           setTeamLogoMap(logoMap);
         }
       } catch {
-        // Fall back to static clubLogos mapping
+        // Logos are non-critical; leave the map empty if the fetch fails.
       }
 
       // Fetch analyst → team affiliations
