@@ -21,11 +21,16 @@ import {
   ChevronLeft,
   ChevronRight,
   Flag,
+  Info,
+  Pencil,
+  Plus,
 } from "lucide-react";
 import {
   saveAccuracyCheck,
   getAccuracyCheckById,
   getSavedMasters,
+  propagateMasterCorrection,
+  getMasterCheckSiblings,
   type SavedMaster,
 } from "@/lib/api/accuracyChecks";
 import { getPlatformAnalystNames } from "@/lib/api/analysts";
@@ -44,6 +49,8 @@ import {
   canonicaliseTeams,
   formatTime,
   parseTime,
+  serializeInstances,
+  buildCode,
   type Instance,
   type ComparisonRow,
   type MatchStatus,
@@ -53,6 +60,11 @@ import {
   generateInsights,
   generateRecommendations,
 } from "@/lib/comparison/insights";
+import {
+  computePlayerAccuracy,
+  type AccuracyGroup,
+} from "@/lib/comparison/player-accuracy";
+import MasterEditModal from "@/components/MasterEditModal";
 
 // Accent colors (lms-platform used custom pd-red / pd-navy tokens; reporting-ui
 // doesn't define those, so we map to the closest standard Tailwind colors).
@@ -350,10 +362,32 @@ const FOOTBALL_CONFIG: SportConfig = {
     headers: 0,
     fouls: 0,
     foulsDrawn: 0,
+    // Goalkeeper
+    gkSaves: 0,
+    gkBlocks: 0,
+    gkCatches: 0,
+    gkClaims: 0,
+    gkPunches: 0,
+    gkGoalKicks: 0,
+    gkThrows: 0,
   }),
   bump: (c, s) => {
-    // Shots & goals first (before generic pass/cross checks).
-    if (s.includes("goal") && !s.includes("goal kick")) c.goals += 1;
+    // Goalkeeper stats first — some labels contain words that later checks
+    // would otherwise swallow (e.g. "Goal Kick" contains "goal"/"kick",
+    // "keeper throw" is a distinct action, saves/blocks/catches are GK-only).
+    if (s.includes("save")) c.gkSaves += 1;
+    else if (s.includes("block")) c.gkBlocks += 1;
+    else if (s.includes("catch")) c.gkCatches += 1;
+    else if (s.includes("claim")) c.gkClaims += 1;
+    else if (s.includes("punch")) c.gkPunches += 1;
+    else if (s.includes("goal kick")) c.gkGoalKicks += 1;
+    else if (
+      (s.includes("keeper") || s.includes("goalkeeper")) &&
+      s.includes("throw")
+    )
+      c.gkThrows += 1;
+    // Shots & goals (before generic pass/cross checks).
+    else if (s.includes("goal") && !s.includes("goal kick")) c.goals += 1;
     else if (s.includes("shot")) c.shots += 1; // off target / saved / free kick shots
     // Passing
     else if (s.includes("short pass") && s.includes("unsuccessful"))
@@ -401,15 +435,15 @@ const FOOTBALL_CONFIG: SportConfig = {
   },
   derive: (c) => ({
     ...c,
-    passSucc: c.shortPassSucc + c.longPassSucc + c.throughSucc,
-    passUnsucc: c.shortPassUnsucc + c.longPassUnsucc + c.throughUnsucc,
+    // Passes EXCLUDE through balls — through balls are their own column, so
+    // this keeps the table consistent with the Passing card (no double-count).
+    passSucc: c.shortPassSucc + c.longPassSucc,
+    passUnsucc: c.shortPassUnsucc + c.longPassUnsucc,
     totalPasses:
       c.shortPassSucc +
       c.longPassSucc +
-      c.throughSucc +
       c.shortPassUnsucc +
-      c.longPassUnsucc +
-      c.throughUnsucc,
+      c.longPassUnsucc,
     crosses: c.crossSucc + c.crossUnsucc,
     tackles: c.tacklesSucc + c.tacklesUnsucc,
   }),
@@ -418,10 +452,20 @@ const FOOTBALL_CONFIG: SportConfig = {
     { key: "totalPasses", label: "Passes", get: (c) => c.totalPasses },
     { key: "passSucc", label: "Pass Succ", get: (c) => c.passSucc },
     { key: "passUnsucc", label: "Pass Unsucc", get: (c) => c.passUnsucc },
+    {
+      key: "throughBalls",
+      label: "Through Balls",
+      get: (c) => c.throughSucc + c.throughUnsucc,
+    },
     { key: "carries", label: "Carries", get: (c) => c.carries },
     { key: "crosses", label: "Crosses", get: (c) => c.crosses },
     { key: "shots", label: "Shots", get: (c) => c.shots },
     { key: "goals", label: "Goals", get: (c) => c.goals },
+    {
+      key: "dribbles",
+      label: "Dribbles",
+      get: (c) => c.dribblesSucc + c.dribblesUnsucc,
+    },
     { key: "tackles", label: "Tackles", get: (c) => c.tackles },
     {
       key: "interceptions",
@@ -435,9 +479,14 @@ const FOOTBALL_CONFIG: SportConfig = {
       get: (c) => c.ballRecoveries,
     },
     {
-      key: "dribblesSucc",
-      label: "Dribbles",
-      get: (c) => c.dribblesSucc + c.dribblesUnsucc,
+      key: "groundDuels",
+      label: "Ground Duels",
+      get: (c) => c.groundDuelsWon + c.groundDuelsLost,
+    },
+    {
+      key: "aerialDuels",
+      label: "Aerial Duels",
+      get: (c) => c.aerialWon + c.aerialLost,
     },
     { key: "headers", label: "Headers", get: (c) => c.headers },
     { key: "fouls", label: "Fouls", get: (c) => c.fouls },
@@ -446,6 +495,8 @@ const FOOTBALL_CONFIG: SportConfig = {
     const sum = (c: PlayerCounts) =>
       c.touches +
       c.totalPasses +
+      c.throughSucc +
+      c.throughUnsucc +
       c.carries +
       c.crosses +
       c.shots +
@@ -456,6 +507,10 @@ const FOOTBALL_CONFIG: SportConfig = {
       c.ballRecoveries +
       c.dribblesSucc +
       c.dribblesUnsucc +
+      c.groundDuelsWon +
+      c.groundDuelsLost +
+      c.aerialWon +
+      c.aerialLost +
       c.headers +
       c.fouls;
     return sum(m) + sum(a) > 0;
@@ -580,6 +635,126 @@ function StatCard({
   );
 }
 
+// A Player Accuracy card: shows the group's exact-match %, the exact/master
+// totals, and an info icon revealing the per-stat breakdown (exact vs master)
+// and the exact / master formula. This matches the per-stat breakdown table.
+function PlayerAccuracyCard({
+  label,
+  group,
+  highlight = false,
+}: {
+  label: string;
+  group: AccuracyGroup;
+  /** Emphasised styling for the summary (Overall) card. */
+  highlight?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const accent =
+    group.pct >= 0.9
+      ? "text-emerald-600"
+      : group.pct >= 0.7
+        ? "text-amber-600"
+        : "text-red-600";
+
+  return (
+    <div
+      className={`relative rounded-2xl border p-4 shadow-sm ${
+        highlight
+          ? "border-slate-300 bg-slate-50"
+          : "border-slate-200 bg-white"
+      }`}
+    >
+      <div className="flex items-start justify-between">
+        <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
+          {label}
+        </p>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          onBlur={() => setOpen(false)}
+          aria-label={`How ${label} is calculated`}
+          className="-mr-1 -mt-1 rounded-full p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+        >
+          <Info size={15} />
+        </button>
+      </div>
+      <p className={`mt-1 text-2xl font-bold ${accent}`}>
+        {(group.pct * 100).toFixed(1)}%
+      </p>
+      <p className="text-xs text-slate-500">
+        {group.exact}/{group.master} exact
+      </p>
+
+      {open && (
+        <div className="absolute right-2 top-10 z-20 w-64 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-lg">
+          <p className="mb-2 text-xs font-semibold text-slate-700">
+            How this % is calculated
+          </p>
+          <table className="w-full text-[11px] text-slate-600">
+            <thead>
+              <tr className="text-slate-400">
+                <th className="pb-1 text-left font-medium">Stat</th>
+                <th className="pb-1 text-right font-medium">Exact</th>
+                <th className="pb-1 text-right font-medium">Master</th>
+                <th className="pb-1 text-right font-medium">Acc</th>
+              </tr>
+            </thead>
+            <tbody>
+              {group.parts.map((p) => {
+                const acc = p.master === 0 ? 1 : p.exact / p.master;
+                return (
+                  <tr key={p.label}>
+                    <td className="py-0.5 text-left">{p.label}</td>
+                    <td className="py-0.5 text-right tabular-nums">{p.exact}</td>
+                    <td className="py-0.5 text-right tabular-nums">
+                      {p.master}
+                    </td>
+                    <td
+                      className={`py-0.5 text-right tabular-nums ${
+                        p.master === 0
+                          ? "text-slate-400"
+                          : acc >= 0.9
+                            ? "text-emerald-600"
+                            : acc >= 0.7
+                              ? "text-amber-600"
+                              : "text-red-600"
+                      }`}
+                    >
+                      {p.master === 0 ? "—" : `${(acc * 100).toFixed(0)}%`}
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr className="border-t border-slate-200 font-semibold text-slate-700">
+                <td className="pt-1 text-left">Total</td>
+                <td className="pt-1 text-right tabular-nums">{group.exact}</td>
+                <td className="pt-1 text-right tabular-nums">{group.master}</td>
+                <td className="pt-1 text-right tabular-nums">
+                  {(group.pct * 100).toFixed(0)}%
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div className="mt-2 border-t border-slate-100 pt-2 text-[11px] leading-relaxed text-slate-500">
+            <p className="text-slate-500">
+              Exact = master events the analyst matched exactly (team, player,
+              stat and timing all agree).
+            </p>
+            <p className="mt-1 font-mono text-slate-600">exact / master</p>
+            <p className="mt-1">
+              = {group.exact} / {group.master} ={" "}
+              <span className="font-semibold text-slate-700">
+                {(group.pct * 100).toFixed(1)}%
+              </span>
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 export default function AccuracyComparePage() {
   return (
     <Suspense fallback={null}>
@@ -667,6 +842,135 @@ function AccuracyCompareInner() {
   const canResolveDispute =
     loadedCheckId != null &&
     (user?.role === "admin" || user?.role === "super_admin");
+
+  // Only admins/super admins may EDIT the master (fix a mis-coded player/stat,
+  // remove a bad instance, or add one the master missed). Edits recompute the
+  // accuracy live and can be downloaded / saved as a corrected master.
+  const canEditMaster =
+    user?.role === "admin" || user?.role === "super_admin";
+
+  // Which master instance is being edited (by id), or "new" to add one.
+  const [editingMaster, setEditingMaster] = useState<Instance | "new" | null>(
+    null
+  );
+
+  // Open the editor for a master instance. Timeline rows carry the
+  // CANONICALISED instance (team = "Home"/"Away"), but we edit the ORIGINAL
+  // master instances (real club names). Resolve back to the original by id so
+  // the modal shows/keeps the real team name rather than "Home"/"Away".
+  const editMasterInstance = (canonical: Instance) => {
+    const original =
+      master?.instances.find((i) => i.id === canonical.id) ?? canonical;
+    setEditingMaster(original);
+  };
+
+
+
+  // Replace the master's instances and keep the raw XML in sync (so a Save or
+  // Download reflects the edit). Re-parsing the serialized XML normalises the
+  // instances (recomputes `mid`, playerNumber from code, etc.) exactly like a
+  // fresh upload, keeping every downstream memo consistent.
+  const applyMasterInstances = (next: Instance[]) => {
+    setMaster((cur) => {
+      if (!cur) return cur;
+      const raw = serializeInstances(next);
+      return { ...cur, instances: parseInstances(raw), raw };
+    });
+  };
+
+  const upsertMasterInstance = (inst: Instance) => {
+    if (!master) return;
+    const exists = master.instances.some((i) => i.id === inst.id);
+    const next = exists
+      ? master.instances.map((i) => (i.id === inst.id ? inst : i))
+      : [...master.instances, inst];
+    applyMasterInstances(next);
+    setEditingMaster(null);
+  };
+
+  const deleteMasterInstance = (id: string) => {
+    if (!master) return;
+    applyMasterInstances(master.instances.filter((i) => i.id !== id));
+    setEditingMaster(null);
+  };
+
+
+
+  // Vocabulary of valid { stat, category } pairs, from every stat present in
+  // the master + analyst files. Powers the edit dropdowns so a stat can only
+  // be set to a real, correctly-spelled label (and its category auto-fills).
+  const statCatalog = useMemo(() => {
+    const map = new Map<string, { stat: string; category: string }>();
+    const add = (i: Instance) => {
+      const stat = i.stat.trim();
+      if (!stat) return;
+      const key = stat.toLowerCase();
+      if (!map.has(key)) map.set(key, { stat, category: i.category.trim() });
+    };
+    for (const i of master?.instances ?? []) add(i);
+    for (const i of analyst?.instances ?? []) add(i);
+    return Array.from(map.values()).sort((a, b) =>
+      a.stat.localeCompare(b.stat)
+    );
+  }, [master, analyst]);
+
+  // Download the (possibly edited) master as a corrected .xml file.
+  const downloadMaster = () => {
+    if (!master) return;
+    const blob = new Blob([master.raw], { type: "application/xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const base = master.name.replace(/\.xml$/i, "");
+    a.download = `${base}-corrected.xml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Save the corrected master back to EVERY check of this master (shared
+  // source of truth), re-grading each against its own analyst. Only available
+  // when a saved check is loaded (so we have the master file name).
+  const [savingMaster, setSavingMaster] = useState(false);
+  const [masterSaveMsg, setMasterSaveMsg] = useState<string | null>(null);
+  const saveCorrectedMaster = async () => {
+    if (!master || loadedCheckId == null) return;
+    const fileName = master.name;
+    let siblings = { count: 1, analysts: [] as string[] };
+    try {
+      siblings = await getMasterCheckSiblings(fileName);
+    } catch {
+      /* fall back */
+    }
+    const others = Math.max(0, siblings.count - 1);
+    const confirmed = window.confirm(
+      `Correcting this master updates all ${siblings.count} check` +
+        `${siblings.count === 1 ? "" : "s"} of "${fileName}"` +
+        (others > 0
+          ? ` and re-grades ${others} other analyst check${
+              others === 1 ? "" : "s"
+            } (${siblings.analysts.join(", ")}).`
+          : ".") +
+        `\n\nContinue?`
+    );
+    if (!confirmed) return;
+
+    setSavingMaster(true);
+    setMasterSaveMsg(null);
+    try {
+      const res = await propagateMasterCorrection(fileName, master.raw);
+      setMasterSaveMsg(
+        `Saved. Master corrected across ${res.updated} check` +
+          `${res.updated === 1 ? "" : "s"}` +
+          (res.analysts.length ? ` (${res.analysts.join(", ")}).` : ".")
+      );
+    } catch (err) {
+      setMasterSaveMsg(
+        err instanceof Error ? err.message : "Failed to save corrected master."
+      );
+    } finally {
+      setSavingMaster(false);
+    }
+  };
 
   // Fast lookup of flagged instances by "instanceId|side".
   const flaggedKeys = useMemo(() => {
@@ -979,17 +1283,37 @@ function AccuracyCompareInner() {
     };
   }, []);
 
+  // Which ?check=<id> we've already loaded into state. Guards the effect below
+  // from re-fetching (and overwriting in-memory MASTER EDITS) when
+  // `searchParams` changes reference on unrelated re-renders — e.g. after an
+  // admin edits a master instance and setMaster triggers a render.
+  const loadedFromUrlRef = useRef<string | null>(null);
+
   // Re-open a saved check: if the URL has ?check=<id>, load that check
   // from Supabase, parse its stored XML back into master/analyst, and
   // restore the allocation/label so the full comparison is rebuilt.
   useEffect(() => {
     const checkId = searchParams.get("check");
 
+    // Skip re-fetching ONLY when this exact check is already loaded into state
+    // (guards against `searchParams` changing reference on unrelated
+    // re-renders — e.g. after a master edit — which would otherwise wipe
+    // unsaved edits). Comparing against the actually-loaded check id (not a
+    // separate ref) means navigating to a check always loads it, even the
+    // same one re-opened after leaving.
+    if (
+      checkId &&
+      loadedFromUrlRef.current === checkId &&
+      loadedCheckIdRef.current === Number(checkId)
+    )
+      return;
+
     // No ?check= in the URL — this is a fresh "new accuracy check" view.
     // If a saved check was previously loaded (e.g. the user navigated here
     // from Accuracy History and then clicked the sidebar tab), clear it so
     // they get a blank comparison instead of the stale check.
     if (!checkId) {
+      loadedFromUrlRef.current = null;
       if (loadedCheckIdRef.current != null) {
         setMaster(null);
         setAnalyst(null);
@@ -1005,6 +1329,10 @@ function AccuracyCompareInner() {
       }
       return;
     }
+
+    // Mark this check id as loaded up-front so a re-render mid-fetch doesn't
+    // start a second load of the same check.
+    loadedFromUrlRef.current = checkId;
 
     // Optional deep-link from the Disputes page: open the video review and
     // seek to a specific instance (by its stat + start time seconds).
@@ -1041,8 +1369,20 @@ function AccuracyCompareInner() {
         setLabelEdited(true);
       }
       if (check.video_url) setVideoUrl(check.video_url);
-      if (check.sport === "afl" || check.sport === "football")
+      // Set the sport so the right cards/table show immediately. The stored
+      // `sport` flag is often null on older checks, so when it's missing we
+      // infer it from the master XML: if it has any football stats it's
+      // football, otherwise AFL. This runs before the UI reads `sport`.
+      if (check.sport === "afl" || check.sport === "football") {
         setSport(check.sport);
+      } else if (check.xml_master) {
+        // Infer sport: compare the master against an empty analyst so every
+        // master instance is a row, then check if any football stats grouped.
+        const masterInstances = parseInstances(check.xml_master);
+        const cmp = compareInstances(masterInstances, [], check.tolerance ?? 3);
+        const fb = computePlayerAccuracy(cmp.rows);
+        setSport(fb.overall.master > 0 ? "football" : "afl");
+      }
 
       // Enable disputes for this saved check.
       setLoadedCheckId(check.id);
@@ -1369,6 +1709,26 @@ function AccuracyCompareInner() {
       extra: count("extra"),
     };
   }, [statScopedRows]);
+
+  // Player Accuracy cards (football): volume of the analyst's coded stats vs
+  // the master's, grouped into Overall / Passing / Offensive / Defensive /
+  // Goalkeeper via the shared computePlayerAccuracy (single source of truth,
+  // also used by the Accuracy History fixture table). Each group's % is the
+  // summed per-stat absolute error against the master total. Respects the
+  // active time-range + team filter.
+  const playerAccuracy = useMemo(() => {
+    if (!canonical || sport !== "football") return null;
+    const inScope = (i: Instance) =>
+      inRange(i) && (teamFilter === "all" || i.team === teamFilter);
+    // Exact-match player accuracy: compare the scoped instances, then group.
+    const cmp = compareInstances(
+      canonical.master.filter(inScope),
+      canonical.analyst.filter(inScope),
+      tolerance
+    );
+    return computePlayerAccuracy(cmp.rows);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canonical, sport, tolerance, effectiveRange, teamFilter]);
 
   const scopedStatBreakdown = useMemo(() => {
     const map = new Map<string, { total: number; exact: number }>();
@@ -1974,6 +2334,37 @@ function AccuracyCompareInner() {
               <StatCard label="Extra" value={`${scopedSummary.extra}`} accent="text-purple-600" />
             </div>
 
+            {/* Player Accuracy — analyst's coded volume vs master, grouped.
+                Passing (passes + crosses), Offensive (shots + goals),
+                Defensive (tackles + intercepts + clearances + ball recoveries).
+                Each card has an info icon showing the per-stat breakdown and
+                how the absolute-difference % is calculated. */}
+            {playerAccuracy && (
+              <div className="mt-4">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  Player Accuracy <span className="font-normal normal-case text-slate-400">(analyst vs master)</span>
+                </p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                  {(
+                    [
+                      { label: "Overall %", g: playerAccuracy.overall, highlight: true },
+                      { label: "Passing %", g: playerAccuracy.passing, highlight: false },
+                      { label: "Offensive %", g: playerAccuracy.offensive, highlight: false },
+                      { label: "Defensive %", g: playerAccuracy.defensive, highlight: false },
+                      { label: "Goalkeeper %", g: playerAccuracy.goalkeeper, highlight: false },
+                    ] as const
+                  ).map(({ label, g, highlight }) => (
+                    <PlayerAccuracyCard
+                      key={label}
+                      label={label}
+                      group={g}
+                      highlight={highlight}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Category breakdown + per-stat breakdown (same row) */}
             <div className="mt-4 grid items-stretch gap-4 lg:grid-cols-2">
             {/* Category breakdown */}
@@ -2191,7 +2582,7 @@ function AccuracyCompareInner() {
                       <tr className="bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500">
                         <th
                           rowSpan={2}
-                          className="border-b border-slate-200 px-4 py-2 text-left"
+                          className="sticky left-0 z-20 border-b border-slate-200 bg-slate-50 px-4 py-2 text-left"
                         >
                           Player
                         </th>
@@ -2215,11 +2606,15 @@ function AccuracyCompareInner() {
                       {playerTable.map((p) => (
                         <tr
                           key={p.key}
-                          className={`border-b border-slate-100 last:border-b-0 hover:bg-slate-50/60 ${
+                          className={`group border-b border-slate-100 last:border-b-0 hover:bg-slate-50/60 ${
                             p.analystOnly ? "bg-red-50/60" : ""
                           }`}
                         >
-                          <td className="whitespace-nowrap px-4 py-2 font-medium text-slate-800">
+                          <td
+                            className={`sticky left-0 z-10 whitespace-nowrap px-4 py-2 font-medium text-slate-800 ${
+                              p.analystOnly ? "bg-red-50" : "bg-white"
+                            } group-hover:bg-slate-50`}
+                          >
                             {p.key}
                             {p.analystOnly && (
                               <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
@@ -2250,7 +2645,7 @@ function AccuracyCompareInner() {
                     </tbody>
                     <tfoot className="sticky bottom-0 z-10">
                       <tr className="border-t-2 border-slate-300 bg-slate-100 font-bold text-slate-900">
-                        <td className="whitespace-nowrap px-4 py-2.5 text-left">
+                        <td className="sticky left-0 z-20 whitespace-nowrap bg-slate-100 px-4 py-2.5 text-left">
                           Team totals
                         </td>
                         {sportConfig.columns.map((col) => {
@@ -2278,7 +2673,7 @@ function AccuracyCompareInner() {
                           table — a 0-vs-0 still means the analyst correctly
                           did not code that stat for the player. */}
                       <tr className="border-t border-slate-200 bg-slate-50 text-slate-600">
-                        <td className="whitespace-nowrap px-4 py-2 text-left text-xs font-semibold">
+                        <td className="sticky left-0 z-20 whitespace-nowrap bg-slate-50 px-4 py-2 text-left text-xs font-semibold">
                           Players matching
                         </td>
                         {sportConfig.columns.map((col) => {
@@ -2462,6 +2857,46 @@ function AccuracyCompareInner() {
 
             {/* Synced side-by-side timeline */}
             <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              {canEditMaster && master && (
+                <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-amber-50/60 px-3 py-2">
+                  <span className="text-xs font-semibold text-amber-700">
+                    Master editing
+                  </span>
+                  <span className="text-[11px] text-slate-500">
+                    Fix a mis-coded player/stat, remove a bad entry, or add one
+                    the master missed. Accuracy updates live.
+                  </span>
+                  <div className="ml-auto flex items-center gap-2">
+                    <button
+                      onClick={() => setEditingMaster("new")}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      <Plus size={13} /> Add instance
+                    </button>
+                    <button
+                      onClick={downloadMaster}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      <Download size={13} /> Download corrected
+                    </button>
+                    {loadedCheckId != null && (
+                      <button
+                        onClick={saveCorrectedMaster}
+                        disabled={savingMaster}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
+                      >
+                        <Save size={13} />{" "}
+                        {savingMaster ? "Saving…" : "Save corrected master"}
+                      </button>
+                    )}
+                  </div>
+                  {masterSaveMsg && (
+                    <span className="w-full text-[11px] text-slate-500">
+                      {masterSaveMsg}
+                    </span>
+                  )}
+                </div>
+              )}
               <div className="grid grid-cols-[128px_1fr_1fr] border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500">
                 <div className="p-3">Status</div>
                 <div className="border-l border-slate-200 p-3">
@@ -2496,6 +2931,11 @@ function AccuracyCompareInner() {
                       <TimelineCell
                         instance={row.master}
                         onSeek={videoUrl.trim() ? seekVideo : undefined}
+                        onEdit={
+                          canEditMaster && row.master
+                            ? () => editMasterInstance(row.master!)
+                            : undefined
+                        }
                         teamLabel={
                           row.master ? teamDisplay(row.master.team) : undefined
                         }
@@ -2533,6 +2973,24 @@ function AccuracyCompareInner() {
           </>
         )}
       </div>
+
+      {/* Admin master instance editor */}
+      {editingMaster && master && (
+        <MasterEditModal
+          instance={editingMaster === "new" ? null : editingMaster}
+          isNew={editingMaster === "new"}
+          teamOptions={Array.from(
+            new Set(master.instances.map((i) => i.team).filter(Boolean))
+          )}
+          statCatalog={statCatalog}
+          playerCatalog={master.instances}
+          onSave={upsertMasterInstance}
+          onDelete={deleteMasterInstance}
+          onClose={() => setEditingMaster(null)}
+        />
+      )}
+
+
 
       {/* Split-screen review pop-up: video on the left half, both
           timelines (clickable) on the right half. */}
@@ -2770,6 +3228,11 @@ function AccuracyCompareInner() {
                           instance={masterInstance}
                           onSeek={seekVideo}
                           active={masterActive}
+                          onEdit={
+                            canEditMaster && masterInstance
+                              ? () => editMasterInstance(masterInstance)
+                              : undefined
+                          }
                           teamLabel={
                             masterInstance
                               ? teamDisplay(masterInstance.team)
@@ -3097,6 +3560,7 @@ function TimelineCell({
   active,
   flagged,
   onFlag,
+  onEdit,
   teamLabel,
 }: {
   instance: Instance | null;
@@ -3105,6 +3569,8 @@ function TimelineCell({
   active?: boolean;
   flagged?: boolean;
   onFlag?: (e: React.MouseEvent) => void;
+  /** Admin-only: edit this (master) instance. Renders a pencil button. */
+  onEdit?: () => void;
   /** Real club name to show instead of the canonical "Home"/"Away". */
   teamLabel?: string;
 }) {
@@ -3178,6 +3644,18 @@ function TimelineCell({
           {teamLabel ?? instance.team}
           {instance.playerNumber != null && ` #${instance.playerNumber}`}
         </span>
+        {onEdit && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit();
+            }}
+            title="Edit master instance"
+            className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+          >
+            <Pencil size={11} />
+          </button>
+        )}
       </div>
     </div>
   );

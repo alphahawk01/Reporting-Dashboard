@@ -1,4 +1,8 @@
 import { supabase } from "@/lib/supabase";
+import {
+    parseInstances,
+    compareInstances,
+} from "@/lib/comparison/xml-compare";
 import type {
     ComparisonResult,
     CategoryBreakdown,
@@ -109,6 +113,205 @@ export async function saveAccuracyCheck(
     }
 
     return data as AccuracyCheck;
+}
+
+export interface UpdateAccuracyCheckInput {
+    id: number;
+    /** The corrected master XML to store. */
+    xmlMaster: string;
+    /** The recomputed comparison result (master vs the check's analyst). */
+    result: ComparisonResult;
+}
+
+/**
+ * Update an EXISTING saved check in place after an admin has corrected the
+ * master (e.g. resolving a dispute where the master was wrong). Rewrites the
+ * stored master XML and every recomputed summary/breakdown column so the
+ * saved accuracy reflects the corrected master. The analyst XML is untouched.
+ */
+export async function updateAccuracyCheck(
+    input: UpdateAccuracyCheckInput
+): Promise<AccuracyCheck> {
+    const s = input.result.summary;
+
+    const row = {
+        accuracy: s.accuracy,
+        master_total: s.masterTotal,
+        analyst_total: s.analystTotal,
+        exact: s.exact,
+        wrong_stat: s.wrongStat,
+        wrong_player: s.wrongPlayer,
+        wrong_team: s.wrongTeam,
+        missed: s.missed,
+        extra: s.extra,
+        avg_time_drift: s.avgTimeDrift,
+
+        category_breakdown: input.result.byCategory ?? null,
+        team_breakdown: input.result.byTeam ?? null,
+
+        xml_master: input.xmlMaster,
+    };
+
+    const { data, error } = await supabase
+        .from("accuracy_checks")
+        .update(row)
+        .eq("id", input.id)
+        .select()
+        .single();
+
+    if (error) {
+        console.error("Failed updating accuracy check:", error);
+        throw new Error(error.message || "Failed updating accuracy check");
+    }
+
+    return data as AccuracyCheck;
+}
+
+export interface PropagateMasterResult {
+    /** How many checks were updated (including the source check). */
+    updated: number;
+    /** Distinct analyst names whose checks were re-graded. */
+    analysts: string[];
+}
+
+/**
+ * The master file is a single source of truth: correcting it should apply to
+ * EVERY check graded against that same master, not just the one being viewed.
+ *
+ * Given a corrected master XML and the master file name, this rewrites
+ * `xml_master` on every check with that `file_name_master` and RECOMPUTES each
+ * one's accuracy against ITS OWN analyst XML (the analyst side is untouched).
+ * So an admin corrects the master once — from any analyst's dispute — and all
+ * checks of that master reflect it; later corrections keep building on it.
+ *
+ * Matching key: `file_name_master` (the master file is always the same file).
+ */
+export async function propagateMasterCorrection(
+    fileNameMaster: string,
+    xmlMaster: string
+): Promise<PropagateMasterResult> {
+    // Every check for this master, with the analyst XML needed to re-grade.
+    const { data, error } = await supabase
+        .from("accuracy_checks")
+        .select("id, analyst_name, tolerance, xml_analyst, file_name_master")
+        .eq("file_name_master", fileNameMaster);
+
+    if (error) {
+        console.error("Failed loading checks for master:", error);
+        throw new Error(error.message || "Failed loading checks for master");
+    }
+
+    const master = parseInstances(xmlMaster);
+    const analysts = new Set<string>();
+    let updated = 0;
+
+    for (const row of (data ?? []) as {
+        id: number;
+        analyst_name: string;
+        tolerance: number | null;
+        xml_analyst: string | null;
+        file_name_master: string | null;
+    }[]) {
+        const analystInstances = row.xml_analyst
+            ? parseInstances(row.xml_analyst)
+            : [];
+        const tol = row.tolerance ?? 3;
+        // Recompute against this check's own analyst, using the corrected
+        // master. (compareInstances canonicalises teams internally.)
+        const result = compareInstances(
+            master,
+            analystInstances,
+            tol,
+            fileNameMaster
+        );
+        const s = result.summary;
+
+        const { error: upErr } = await supabase
+            .from("accuracy_checks")
+            .update({
+                accuracy: s.accuracy,
+                master_total: s.masterTotal,
+                analyst_total: s.analystTotal,
+                exact: s.exact,
+                wrong_stat: s.wrongStat,
+                wrong_player: s.wrongPlayer,
+                wrong_team: s.wrongTeam,
+                missed: s.missed,
+                extra: s.extra,
+                avg_time_drift: s.avgTimeDrift,
+                category_breakdown: result.byCategory ?? null,
+                team_breakdown: result.byTeam ?? null,
+                xml_master: xmlMaster,
+            })
+            .eq("id", row.id);
+
+        if (upErr) {
+            console.error(`Failed updating check ${row.id}:`, upErr);
+            throw new Error(upErr.message || "Failed propagating master");
+        }
+        updated += 1;
+        if (row.analyst_name) analysts.add(row.analyst_name);
+    }
+
+    return { updated, analysts: Array.from(analysts) };
+}
+
+/**
+ * Count how many checks share a master file (for a confirmation prompt before
+ * propagating a correction). Returns the count and the distinct analyst names.
+ */
+export async function getMasterCheckSiblings(
+    fileNameMaster: string
+): Promise<{ count: number; analysts: string[] }> {
+    const { data, error } = await supabase
+        .from("accuracy_checks")
+        .select("analyst_name")
+        .eq("file_name_master", fileNameMaster);
+    if (error) {
+        console.error("Failed counting master siblings:", error);
+        return { count: 0, analysts: [] };
+    }
+    const analysts = Array.from(
+        new Set(
+            (data ?? [])
+                .map((r) => (r as { analyst_name: string }).analyst_name)
+                .filter(Boolean)
+        )
+    );
+    return { count: data?.length ?? 0, analysts };
+}
+
+/**
+ * Subscribe to UPDATEs of a single accuracy check row (via Supabase Realtime).
+ * Fires `onUpdate` whenever the row changes (e.g. a corrected master saved
+ * from the Disputes page), so an open view can offer to reload. Returns an
+ * unsubscribe function.
+ *
+ * NOTE: Requires Realtime to be enabled for the `accuracy_checks` table in the
+ * Supabase dashboard (Database → Replication / Publications). Without it the
+ * callback simply never fires — the feature degrades gracefully.
+ */
+export function subscribeToAccuracyCheck(
+    id: number,
+    onUpdate: () => void
+): () => void {
+    const channel = supabase
+        .channel(`accuracy_check_${id}`)
+        .on(
+            "postgres_changes",
+            {
+                event: "UPDATE",
+                schema: "public",
+                table: "accuracy_checks",
+                filter: `id=eq.${id}`,
+            },
+            () => onUpdate()
+        )
+        .subscribe();
+
+    return () => {
+        supabase.removeChannel(channel);
+    };
 }
 
 export interface SavedMaster {
