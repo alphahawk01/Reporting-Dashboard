@@ -490,22 +490,30 @@ export async function getAccuracyChecksXml(
 ): Promise<Map<number, AccuracyCheckXml>> {
     const out = new Map<number, AccuracyCheckXml>();
     const unique = Array.from(new Set(ids));
-    const batchSize = 25; // keep each query small so it never times out
 
-    for (let i = 0; i < unique.length; i += batchSize) {
-        const batch = unique.slice(i, i + batchSize);
+    // Fetch ONE row per request. The XML blobs are large (1000s of instances
+    // each), so pulling many rows in a single query returns a multi-MB payload
+    // that hits Supabase/Postgres statement timeouts (observed 500s). A single
+    // row is small and reliable. A few requests run concurrently for speed, and
+    // a per-row failure is skipped (that check just shows no player accuracy)
+    // rather than failing the whole load.
+    const CONCURRENCY = 4;
+    const fetchOne = async (id: number) => {
         const { data, error } = await supabase
             .from("accuracy_checks")
             .select("id, xml_master, xml_analyst")
-            .in("id", batch);
-
+            .eq("id", id)
+            .single();
         if (error) {
-            console.error("Failed loading accuracy check XML:", error);
-            throw new Error(error.message || "Failed loading check XML");
+            console.error(`Failed loading XML for check ${id}:`, error);
+            return;
         }
-        for (const row of (data ?? []) as AccuracyCheckXml[]) {
-            out.set(row.id, row);
-        }
+        if (data) out.set(id, data as AccuracyCheckXml);
+    };
+
+    for (let i = 0; i < unique.length; i += CONCURRENCY) {
+        const slice = unique.slice(i, i + CONCURRENCY);
+        await Promise.all(slice.map(fetchOne));
     }
 
     return out;
