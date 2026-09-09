@@ -1482,9 +1482,15 @@ function AccuracyCompareInner() {
     if (!canonical) return null;
     const m = canonical.master.filter(inRange);
     const a = canonical.analyst.filter(inRange);
-    return compareInstances(m, a, tolerance);
+    // Pass the master file name so the (second) canonicalisation inside
+    // compareInstances assigns Home/Away the SAME way as `canonical` did.
+    // Without it, the heuristic can flip teams on the filtered subset, and
+    // then the player table (built from `canonical`) and the video review
+    // (built from `result.rows`) disagree on a player's team — so clicking a
+    // player-table cell matches no rows and the review timeline shows empty.
+    return compareInstances(m, a, tolerance, master?.name);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canonical, tolerance, effectiveRange]);
+  }, [canonical, tolerance, effectiveRange, master?.name]);
 
   const scopedResult = useMemo(() => {
     if (!canonical) return null;
@@ -1791,10 +1797,10 @@ function AccuracyCompareInner() {
   // Master is the gold standard; players only in the analyst are flagged.
   // Respects the active time-range + team filters.
   const playerTable = useMemo(() => {
-    if (!canonical) return [];
+    if (!result) return [];
 
     const inScope = (i: Instance) =>
-      inRange(i) && (teamFilter === "all" || i.team === teamFilter);
+      teamFilter === "all" || i.team === teamFilter;
 
     // key = "team|number"; keep display name + which side(s) it appears in.
     const rows = new Map<
@@ -1826,17 +1832,20 @@ function AccuracyCompareInner() {
       return r;
     };
 
-    for (const i of canonical.master) {
-      if (!inScope(i)) continue;
-      const r = ensure(i);
-      r.inMaster = true;
-      sportConfig.bump(r.master, i.stat.toLowerCase());
-    }
-    for (const i of canonical.analyst) {
-      if (!inScope(i)) continue;
-      const r = ensure(i);
-      r.inAnalyst = true;
-      sportConfig.bump(r.analyst, i.stat.toLowerCase());
+    // Source from result.rows (the SAME canonical instances the video review
+    // uses) so a player's team label here matches the review exactly — a
+    // player-table click then always finds its instances in the timeline.
+    for (const row of result.rows) {
+      if (row.master && inScope(row.master)) {
+        const r = ensure(row.master);
+        r.inMaster = true;
+        sportConfig.bump(r.master, row.master.stat.toLowerCase());
+      }
+      if (row.analyst && inScope(row.analyst)) {
+        const r = ensure(row.analyst);
+        r.inAnalyst = true;
+        sportConfig.bump(r.analyst, row.analyst.stat.toLowerCase());
+      }
     }
 
     return Array.from(rows.values())
@@ -1857,8 +1866,7 @@ function AccuracyCompareInner() {
         if (a.team !== b.team) return a.team.localeCompare(b.team);
         return (a.number ?? 999) - (b.number ?? 999);
       });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canonical, effectiveRange, teamFilter, sportConfig]);
+  }, [result, teamFilter, sportConfig]);
 
   // Real comparison teams have master instances and a proper name. Teams with
   // no master instances (analyst-only extras from a name mismatch, or an

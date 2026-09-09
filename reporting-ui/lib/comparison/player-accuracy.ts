@@ -167,8 +167,7 @@ export const FOOTBALL_GROUPS = {
   passing: {
     label: "Passing",
     parts: [
-      { key: "passSuccExThrough", label: "Pass succ" },
-      { key: "passUnsuccExThrough", label: "Pass unsucc" },
+      { key: "passesExThrough", label: "Player Passes" },
       { key: "totalThroughBalls", label: "Through balls" },
       { key: "crosses", label: "Crosses" },
     ],
@@ -235,6 +234,23 @@ export type PlayerAccuracy = {
   goalkeeper: AccuracyGroup;
 };
 
+// Is this stat one of the "pass" types (short/long/through, either outcome)?
+// Crosses are deliberately NOT passes here — they stay a separate line with
+// strict same-stat matching. Used for the Passing group's looser rule.
+function isPassStat(statLower: string): boolean {
+  const c = initFootballCounts();
+  bumpFootball(c, statLower);
+  return (
+    c.shortPassSucc +
+      c.shortPassUnsucc +
+      c.longPassSucc +
+      c.longPassUnsucc +
+      c.throughSucc +
+      c.throughUnsucc >
+    0
+  );
+}
+
 // Which derived football key does a single (lowercased) stat increment?
 // Runs the classifier on just this stat, then finds the first derived key
 // with a positive count. Used to map a raw stat label to a group part.
@@ -258,9 +274,20 @@ function partKeyForStat(
   return null;
 }
 
+// Part keys that use the LOOSER "any pass by the same player counts" rule
+// (Passing group). A master pass counts as exact when the paired analyst
+// instance is also a pass by the same player — regardless of the exact pass
+// type/outcome. Crosses are NOT in this set (strict same-stat).
+const LOOSE_PASS_PART_KEYS = new Set([
+  "passesExThrough",
+  "totalThroughBalls",
+]);
+
 // Build one group's EXACT-match result from the scoped comparison rows.
 // For every master instance whose stat belongs to this group, count it in the
 // matching part's `master`; if the row is an exact match, also count `exact`.
+// For pass parts, a looser rule applies (see LOOSE_PASS_PART_KEYS): any pass
+// by the same player at the matched moment counts as exact.
 function buildGroup(
   group: AccuracyGroupDef,
   rows: ComparisonRow[]
@@ -280,7 +307,25 @@ function buildGroup(
     const part = byKey.get(partKey);
     if (!part) continue;
     part.master += 1;
-    if (r.status === "exact") part.exact += 1;
+
+    if (r.status === "exact") {
+      part.exact += 1;
+    } else if (LOOSE_PASS_PART_KEYS.has(partKey)) {
+      // Looser pass rule: the analyst matched the same player at this moment
+      // with ANY pass type/outcome. The comparison pairs same-player+comparable
+      // stats as a `wrong_stat` row, so both sides are present here.
+      const m = r.master;
+      const a = r.analyst;
+      if (
+        a &&
+        a.playerNumber != null &&
+        m.playerNumber != null &&
+        a.playerNumber === m.playerNumber &&
+        isPassStat(a.stat.toLowerCase())
+      ) {
+        part.exact += 1;
+      }
+    }
   }
 
   const master = parts.reduce((s, p) => s + p.master, 0);
