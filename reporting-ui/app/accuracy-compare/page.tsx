@@ -1938,6 +1938,74 @@ function AccuracyCompareInner() {
     }
   }
 
+  // Override master: re-upload the SAME master file (now with external
+  // corrections) and replace it on the existing check(s) in place — without
+  // creating a new check. Propagates to every check of this master and
+  // re-grades each against its own analyst. Admin-only; needs a loaded check.
+  const overrideMasterInputRef = useRef<HTMLInputElement | null>(null);
+  const handleOverrideMaster = async (fileList: FileList | null) => {
+    const f = fileList?.[0];
+    if (!f || !master || loadedCheckId == null) return;
+    // Keep the master's stored file name as the identity (so it overrides the
+    // existing check), regardless of the uploaded file's name.
+    const fileName = master.name;
+    let text: string;
+    try {
+      text = await f.text();
+      const parsed = parseInstances(text);
+      if (parsed.length === 0) {
+        setSaveMsg("That file has no <instance> entries.");
+        return;
+      }
+    } catch {
+      setSaveMsg("Could not read that file.");
+      return;
+    }
+
+    let siblings = { count: 1, analysts: [] as string[] };
+    try {
+      siblings = await getMasterCheckSiblings(fileName);
+    } catch {
+      /* fall back */
+    }
+    const others = Math.max(0, siblings.count - 1);
+    const confirmed = window.confirm(
+      `Override the master for "${fileName}" with this file?\n\n` +
+        `This replaces the master on all ${siblings.count} check` +
+        `${siblings.count === 1 ? "" : "s"}` +
+        (others > 0
+          ? ` and re-grades ${others} other analyst check${
+              others === 1 ? "" : "s"
+            } (${siblings.analysts.join(", ")}).`
+          : ".") +
+        `\n\nNo new check is created. Continue?`
+    );
+    if (!confirmed) return;
+
+    setSavingMaster(true);
+    setMasterSaveMsg(null);
+    try {
+      const res = await propagateMasterCorrection(fileName, text);
+      // Reflect the new master in the current view immediately.
+      setMaster((cur) =>
+        cur ? { ...cur, instances: parseInstances(text), raw: text } : cur
+      );
+      setMasterSaveMsg(
+        `Master overridden across ${res.updated} check` +
+          `${res.updated === 1 ? "" : "s"}` +
+          (res.analysts.length ? ` (${res.analysts.join(", ")}).` : ".")
+      );
+    } catch (err) {
+      setMasterSaveMsg(
+        err instanceof Error ? err.message : "Failed to override master."
+      );
+    } finally {
+      setSavingMaster(false);
+      if (overrideMasterInputRef.current)
+        overrideMasterInputRef.current.value = "";
+    }
+  };
+
   return (
     <div className="min-h-full bg-slate-100 text-slate-900">
       <div className="mx-auto max-w-7xl p-6 lg:p-8">
@@ -2269,9 +2337,34 @@ function AccuracyCompareInner() {
                 <Save size={14} />
                 {saving ? "Saving..." : "Save accuracy check"}
               </button>
+              {canEditMaster && loadedCheckId != null && (
+                <>
+                  <input
+                    ref={overrideMasterInputRef}
+                    type="file"
+                    accept=".xml,text/xml,application/xml"
+                    className="hidden"
+                    onChange={(e) => handleOverrideMaster(e.target.files)}
+                  />
+                  <button
+                    onClick={() => overrideMasterInputRef.current?.click()}
+                    disabled={savingMaster}
+                    title="Replace the master XML on this check (and all checks of this master) with an updated file — no new check is created"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    <Upload size={14} />
+                    {savingMaster ? "Overriding..." : "Override master"}
+                  </button>
+                </>
+              )}
               {saveMsg && (
                 <span className="text-xs font-medium text-slate-600">
                   {saveMsg}
+                </span>
+              )}
+              {masterSaveMsg && (
+                <span className="w-full text-xs font-medium text-slate-600">
+                  {masterSaveMsg}
                 </span>
               )}
             </div>
