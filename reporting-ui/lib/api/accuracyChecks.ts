@@ -8,6 +8,10 @@ import type {
     CategoryBreakdown,
     TeamBreakdown,
 } from "@/lib/comparison/xml-compare";
+import {
+    computePlayerAccuracyByScope,
+    type StoredPlayerAccuracy,
+} from "@/lib/comparison/player-accuracy";
 
 /**
  * A saved accuracy check row (mirrors the accuracy_checks table).
@@ -48,6 +52,12 @@ export interface AccuracyCheck {
     // Sport the check was graded under ("afl" | "football"), so it
     // re-opens with the right player-stats table.
     sport: string | null;
+
+    // Precomputed Player Accuracy (both/home/away group results) so the
+    // "Checks by master fixture" table can render without re-fetching and
+    // re-parsing the raw XML. Recomputed on save/update/propagate. Null on
+    // older checks until backfilled.
+    player_accuracy: StoredPlayerAccuracy | null;
 }
 
 export interface SaveAccuracyCheckInput {
@@ -62,6 +72,34 @@ export interface SaveAccuracyCheckInput {
     fileNameAnalyst?: string | null;
     tolerance?: number | null;
     result: ComparisonResult;
+}
+
+/**
+ * Parse a check's master + analyst XML and precompute Player Accuracy for all
+ * scopes, for storage in `player_accuracy`. Returns null when XML is missing or
+ * unparsable (parseInstances needs the browser DOMParser).
+ */
+function computeStoredPlayerAccuracy(
+    xmlMaster: string | null | undefined,
+    xmlAnalyst: string | null | undefined,
+    tolerance: number | null | undefined,
+    fileNameMaster: string | null | undefined
+): StoredPlayerAccuracy | null {
+    if (!xmlMaster || !xmlAnalyst) return null;
+    try {
+        const master = parseInstances(xmlMaster);
+        const analyst = parseInstances(xmlAnalyst);
+        if (master.length === 0) return null;
+        return computePlayerAccuracyByScope(
+            master,
+            analyst,
+            tolerance ?? 3,
+            fileNameMaster ?? null
+        );
+    } catch (err) {
+        console.error("Failed precomputing player_accuracy:", err);
+        return null;
+    }
 }
 
 /**
@@ -99,6 +137,15 @@ export async function saveAccuracyCheck(
         xml_analyst: input.xmlAnalyst ?? null,
         video_url: input.videoUrl?.trim() || null,
         sport: input.sport ?? null,
+
+        // Precompute Player Accuracy (all scopes) so the fixture table reads a
+        // small stored field instead of re-parsing this check's XML.
+        player_accuracy: computeStoredPlayerAccuracy(
+            input.xmlMaster,
+            input.xmlAnalyst,
+            input.tolerance,
+            input.fileNameMaster
+        ),
     };
 
     const { data, error } = await supabase
@@ -226,6 +273,14 @@ export async function propagateMasterCorrection(
         );
         const s = result.summary;
 
+        // Precompute Player Accuracy (all scopes) from the corrected master.
+        const playerAccuracy = computePlayerAccuracyByScope(
+            master,
+            analystInstances,
+            tol,
+            fileNameMaster
+        );
+
         const { error: upErr } = await supabase
             .from("accuracy_checks")
             .update({
@@ -242,6 +297,7 @@ export async function propagateMasterCorrection(
                 category_breakdown: result.byCategory ?? null,
                 team_breakdown: result.byTeam ?? null,
                 xml_master: xmlMaster,
+                player_accuracy: playerAccuracy,
             })
             .eq("id", row.id);
 
@@ -439,7 +495,8 @@ const ACCURACY_CHECK_META_COLUMNS =
     "id, created_at, analyst_name, master_analyst_name, match_label, " +
     "file_name_master, file_name_analyst, tolerance, accuracy, master_total, " +
     "analyst_total, exact, wrong_stat, wrong_player, wrong_team, missed, extra, " +
-    "avg_time_drift, category_breakdown, team_breakdown, video_url, sport";
+    "avg_time_drift, category_breakdown, team_breakdown, video_url, sport, " +
+    "player_accuracy";
 
 /**
  * Like getAllAccuracyChecks but WITHOUT the xml_master/xml_analyst blobs.
@@ -517,6 +574,81 @@ export async function getAccuracyChecksXml(
     }
 
     return out;
+}
+
+export interface BackfillProgress {
+    done: number;
+    total: number;
+}
+
+/**
+ * One-time backfill: for every check missing `player_accuracy`, fetch its XML
+ * (one row at a time, so it never hits the statement-timeout that batching
+ * did), compute the stored Player Accuracy, and write it back. Safe to re-run —
+ * it only touches checks where the field is null. Reports progress via the
+ * optional callback. Admin-triggered from the Accuracy History page.
+ */
+export async function backfillPlayerAccuracy(
+    onProgress?: (p: BackfillProgress) => void
+): Promise<{ updated: number; skipped: number }> {
+    // Ids needing backfill (small query — no XML pulled here).
+    const { data, error } = await supabase
+        .from("accuracy_checks")
+        .select("id, tolerance, file_name_master")
+        .is("player_accuracy", null);
+
+    if (error) {
+        console.error("Failed listing checks to backfill:", error);
+        throw new Error(error.message || "Failed listing checks to backfill");
+    }
+
+    const rows = (data ?? []) as {
+        id: number;
+        tolerance: number | null;
+        file_name_master: string | null;
+    }[];
+    let updated = 0;
+    let skipped = 0;
+
+    for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        // Fetch this one check's XML (single row = small, reliable).
+        const { data: xmlRow, error: xmlErr } = await supabase
+            .from("accuracy_checks")
+            .select("xml_master, xml_analyst")
+            .eq("id", row.id)
+            .single();
+
+        if (!xmlErr && xmlRow) {
+            const pa = computeStoredPlayerAccuracy(
+                (xmlRow as AccuracyCheckXml).xml_master,
+                (xmlRow as AccuracyCheckXml).xml_analyst,
+                row.tolerance,
+                row.file_name_master
+            );
+            if (pa) {
+                const { error: upErr } = await supabase
+                    .from("accuracy_checks")
+                    .update({ player_accuracy: pa })
+                    .eq("id", row.id);
+                if (!upErr) {
+                    updated += 1;
+                } else {
+                    skipped += 1;
+                    console.error(`Backfill update failed ${row.id}:`, upErr);
+                }
+            } else {
+                skipped += 1;
+            }
+        } else {
+            skipped += 1;
+            if (xmlErr) console.error(`Backfill XML fetch failed ${row.id}:`, xmlErr);
+        }
+
+        onProgress?.({ done: i + 1, total: rows.length });
+    }
+
+    return { updated, skipped };
 }
 
 /**

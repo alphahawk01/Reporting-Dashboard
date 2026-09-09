@@ -2,6 +2,10 @@
 
 import Link from "next/link";
 import type { Computer } from "@/lib/api/computers";
+import {
+    ANALYST_LOCATIONS,
+    type AnalystLocation,
+} from "@/lib/api/analysts";
 
 interface AssignedComputer {
     id: number;
@@ -29,6 +33,14 @@ type Props = {
 
     affiliations: AnalystAffiliations;
 
+    /** name (lowercased) -> location, for the editable Location column. */
+    locationByName: Map<string, AnalystLocation>;
+
+    onLocationChange: (
+        analystName: string,
+        location: AnalystLocation | ""
+    ) => void;
+
     onHomeComputerChange: (
         analystId: number,
         computerId: string
@@ -53,6 +65,8 @@ export default function AnalystTable({
     analysts,
     computers,
     affiliations,
+    locationByName,
+    onLocationChange,
     onHomeComputerChange,
     onOfficeComputerChange,
     onDelete,
@@ -104,11 +118,20 @@ export default function AnalystTable({
 
 
                         <th className="
-                            w-[30%]
+                            w-[24%]
                             p-3
                             text-left
                         ">
                             Affiliated Teams
+                        </th>
+
+
+                        <th className="
+                            w-40
+                            p-3
+                            text-left
+                        ">
+                            Location
                         </th>
 
 
@@ -295,6 +318,56 @@ export default function AnalystTable({
                                             </div>
 
                                         )}
+
+                                    </td>
+
+
+                                    {/* LOCATION */}
+
+                                    <td className="p-4">
+
+                                        <select
+                                            value={
+                                                locationByName.get(
+                                                    analyst.name
+                                                        .trim()
+                                                        .toLowerCase()
+                                                ) ?? ""
+                                            }
+                                            onChange={event =>
+                                                onLocationChange(
+                                                    analyst.name,
+                                                    event.target.value as
+                                                        | AnalystLocation
+                                                        | ""
+                                                )
+                                            }
+                                            className="
+                                                w-36
+                                                rounded-lg
+                                                border
+                                                border-gray-300
+                                                px-3
+                                                py-2
+                                            "
+                                        >
+
+                                            <option value="">
+                                                —
+                                            </option>
+
+                                            {ANALYST_LOCATIONS.map(
+                                                loc => (
+                                                    <option
+                                                        key={loc}
+                                                        value={loc}
+                                                    >
+                                                        {loc}
+                                                    </option>
+                                                )
+                                            )}
+
+                                        </select>
 
                                     </td>
 

@@ -12,7 +12,12 @@
 // Accuracy Comparison page and the Accuracy History "Checks by master
 // fixture" table stay identical. Football only for now (AFL added later).
 
-import type { ComparisonRow } from "./xml-compare";
+import {
+  canonicaliseTeams,
+  compareInstances,
+  type ComparisonRow,
+  type Instance,
+} from "./xml-compare";
 
 // Open string->number map of football stat counts.
 export type FootballCounts = Record<string, number>;
@@ -371,4 +376,59 @@ export function computePlayerAccuracy(
   );
 
   return { overall, passing, offensive, defensive, goalkeeper };
+}
+
+// The three team scopes shown in the fixture table.
+export type PlayerAccuracyScope = "both" | "home" | "away";
+
+// Precomputed Player Accuracy for all three scopes — small enough to STORE on
+// the check (JSON column `player_accuracy`) so the fixture table can render
+// without re-fetching/parsing the raw XML. `football` flags whether the check
+// had any football stats (so non-football checks store an explicit marker
+// rather than being mistaken for "not computed yet").
+export type StoredPlayerAccuracy = {
+  football: boolean;
+  both: PlayerAccuracy;
+  home: PlayerAccuracy;
+  away: PlayerAccuracy;
+};
+
+/**
+ * Compute Player Accuracy for all three scopes (both/home/away) from raw
+ * master + analyst instances. Canonicalises teams (so home/away filtering
+ * works), then compares + groups per scope. This is what gets stored on the
+ * check at save/update/propagate time and read back by the fixture table.
+ */
+export function computePlayerAccuracyByScope(
+  masterInstances: Instance[],
+  analystInstances: Instance[],
+  tolerance: number,
+  masterFileName?: string | null
+): StoredPlayerAccuracy {
+  const canon = canonicaliseTeams(
+    masterInstances,
+    analystInstances,
+    tolerance,
+    masterFileName
+  );
+
+  const forScope = (scope: PlayerAccuracyScope): PlayerAccuracy => {
+    const inScope = (i: Instance) =>
+      scope === "both" || i.team.trim().toLowerCase() === scope;
+    const cmp = compareInstances(
+      canon.master.filter(inScope),
+      canon.analyst.filter(inScope),
+      tolerance,
+      masterFileName
+    );
+    return computePlayerAccuracy(cmp.rows);
+  };
+
+  const both = forScope("both");
+  return {
+    football: both.overall.master > 0,
+    both,
+    home: forScope("home"),
+    away: forScope("away"),
+  };
 }

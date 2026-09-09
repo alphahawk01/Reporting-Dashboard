@@ -5,6 +5,8 @@ import { X, UserPlus, Users } from "lucide-react";
 import {
     createAnalyst,
     createAnalystsBulk,
+    ANALYST_LOCATIONS,
+    type AnalystLocation,
     type NewAnalystEntry,
 } from "@/lib/api/analysts";
 
@@ -44,6 +46,7 @@ export default function AddAnalystModal({
     // Single
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
+    const [location, setLocation] = useState<AnalystLocation | "">("");
 
     // Bulk
     const [bulkText, setBulkText] = useState("");
@@ -57,6 +60,7 @@ export default function AddAnalystModal({
     function reset() {
         setName("");
         setEmail("");
+        setLocation("");
         setBulkText("");
         setError(null);
         setMessage(null);
@@ -80,10 +84,11 @@ export default function AddAnalystModal({
                     setError("Enter an analyst name.");
                     return;
                 }
-                await createAnalyst(clean, email);
+                await createAnalyst(clean, email, location || null);
                 setMessage(`Added "${clean}".`);
                 setName("");
                 setEmail("");
+                setLocation("");
             } else {
                 const entries = parseBulk(bulkText);
                 if (entries.length === 0) {
@@ -197,6 +202,32 @@ export default function AddAnalystModal({
                                     placeholder="e.g. corey@example.com"
                                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500"
                                 />
+                            </div>
+                            <div>
+                                <label className="mb-1 block text-xs font-medium text-slate-500">
+                                    Location{" "}
+                                    <span className="text-slate-400">
+                                        (optional)
+                                    </span>
+                                </label>
+                                <select
+                                    value={location}
+                                    onChange={(e) =>
+                                        setLocation(
+                                            e.target.value as
+                                                | AnalystLocation
+                                                | ""
+                                        )
+                                    }
+                                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500"
+                                >
+                                    <option value="">—</option>
+                                    {ANALYST_LOCATIONS.map((loc) => (
+                                        <option key={loc} value={loc}>
+                                            {loc}
+                                        </option>
+                                    ))}
+                                </select>
                             </div>
                         </>
                     ) : (

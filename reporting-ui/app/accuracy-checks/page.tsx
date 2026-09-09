@@ -22,6 +22,7 @@ import {
   countMasterChecks,
   summariseByAnalyst,
   deleteAccuracyCheck,
+  backfillPlayerAccuracy,
   type AccuracyCheckMeta,
 } from "@/lib/api/accuracyChecks";
 import {
@@ -40,6 +41,11 @@ import {
   computePlayerAccuracy,
   type PlayerAccuracy,
 } from "@/lib/comparison/player-accuracy";
+import {
+  getAnalystLocationMap,
+  ANALYST_LOCATIONS,
+  type AnalystLocation,
+} from "@/lib/api/analysts";
 import { useAuth } from "@/components/auth/AuthContext";
 import DisputesPanel from "@/components/DisputesPanel";
 import SportToggle, { type SportFilter } from "@/components/SportToggle";
@@ -62,37 +68,64 @@ function formatDate(iso: string) {
   });
 }
 
-// Pull the Home / Away accuracy out of a check's stored team breakdown.
-// Teams are canonicalised to "Home"/"Away" at comparison time, so we can
-// read them straight off team_breakdown without touching the schema.
-function homeAwayAccuracy(check: AccuracyCheckMeta): {
-  home: number | null;
-  away: number | null;
-} {
-  const find = (name: string) =>
-    check.team_breakdown?.find(
-      (t) => t.team.trim().toLowerCase() === name && t.masterTotal > 0
-    ) ?? null;
-  const home = find("home");
-  const away = find("away");
-  return {
-    home: home ? home.accuracy : null,
-    away: away ? away.accuracy : null,
-  };
+// Calendar-week key (ISO year-week) for grouping checks by week. Uses the
+// check's created_at date. Returns e.g. "2026-W37". Sortable as a string.
+function isoWeekKey(iso: string): string {
+  const d = new Date(iso);
+  // Shift to Thursday of the current week to get the ISO week number.
+  const date = new Date(
+    Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
+  );
+  const day = date.getUTCDay() || 7; // Mon=1..Sun=7
+  date.setUTCDate(date.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(
+    ((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7
+  );
+  return `${date.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+// Human label for a week key, showing the Monday date of that week.
+function weekLabel(key: string): string {
+  const m = key.match(/^(\d{4})-W(\d{2})$/);
+  if (!m) return key;
+  const year = parseInt(m[1], 10);
+  const week = parseInt(m[2], 10);
+  // Monday of ISO week 1 is the Monday of the week containing Jan 4.
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const jan4Day = jan4.getUTCDay() || 7;
+  const week1Mon = new Date(jan4);
+  week1Mon.setUTCDate(jan4.getUTCDate() - (jan4Day - 1));
+  const mon = new Date(week1Mon);
+  mon.setUTCDate(week1Mon.getUTCDate() + (week - 1) * 7);
+  const label = mon.toLocaleDateString("en-AU", {
+    day: "2-digit",
+    month: "short",
+  });
+  return `Week of ${label}`;
 }
 
 type TeamScope = "both" | "home" | "away";
 
 // Player Accuracy groups (Overall / Passing / Offensive / Defensive /
-// Goalkeeper) for a check, scoped to Both / Home / Away. Computed from the raw
-// instance counts using the SAME method as the Accuracy Comparison cards
-// (shared computePlayerAccuracy). Teams are canonicalised to Home/Away so the
-// scope filter works. Returns null when the XML isn't available yet.
+// Goalkeeper) for a check, scoped to Both / Home / Away.
+//
+// FAST PATH: use the precomputed `player_accuracy` stored on the check — no
+// XML fetch or parsing needed. FALLBACK: for older checks not yet backfilled,
+// compute from the raw XML (fetched on demand) exactly as before.
 function fixtureGroupAccuracy(
   check: AccuracyCheckMeta,
   scope: TeamScope,
   xml?: { xml_master: string | null; xml_analyst: string | null }
 ): PlayerAccuracy | null {
+  // Fast path: stored precomputed values.
+  const stored = check.player_accuracy;
+  if (stored) {
+    if (!stored.football) return null;
+    return stored[scope] ?? null;
+  }
+
+  // Fallback: compute from XML (only until this check is backfilled).
   if (!xml?.xml_master || !xml?.xml_analyst) return null;
   const master = parseInstances(xml.xml_master);
   const analyst = parseInstances(xml.xml_analyst);
@@ -102,18 +135,12 @@ function fixtureGroupAccuracy(
   const inScope = (i: Instance) =>
     scope === "both" || i.team.trim().toLowerCase() === scope;
 
-  // Exact-match player accuracy: compare the scoped instances, then group.
   const cmp = compareInstances(
     canon.master.filter(inScope),
     canon.analyst.filter(inScope),
     tol
   );
   const groups = computePlayerAccuracy(cmp.rows);
-
-  // Player Accuracy is football-only for now. The stored `sport` flag is
-  // unreliable (many checks have it null and default to AFL), so instead we
-  // detect football from the data: if the master has ZERO football stats
-  // across every group, treat it as non-football and show nothing.
   return groups.overall.master > 0 ? groups : null;
 }
 
@@ -126,6 +153,20 @@ const PLAYER_ACCURACY_COLUMNS = [
   { key: "defensive", label: "Defensive" },
   { key: "goalkeeper", label: "Goalkeeper" },
 ] as const;
+
+type PlayerAccuracyGroupKey = (typeof PLAYER_ACCURACY_COLUMNS)[number]["key"];
+
+// Read one Player Accuracy group's % from a check's STORED player_accuracy
+// (both-teams scope). Returns null when not computed yet or non-football.
+function storedGroupPct(
+  check: AccuracyCheckMeta,
+  key: PlayerAccuracyGroupKey
+): number | null {
+  const pa = check.player_accuracy;
+  if (!pa || !pa.football) return null;
+  const g = pa.both?.[key];
+  return g ? g.pct : null;
+}
 
 // One analyst's row within a master-fixture group. Holds the per-group
 // Player Accuracy for the active scope (key -> group result, or null when the
@@ -154,9 +195,22 @@ export default function AccuracyChecksPage() {
   const [loadingScopeXml, setLoadingScopeXml] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // One-time Player Accuracy backfill (admin) for older checks.
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillMsg, setBackfillMsg] = useState<string | null>(null);
   const [selectedAnalyst, setSelectedAnalyst] = useState<string>("");
   // Sport filter (all | afl | football), matching Accuracy Comparison.
   const [sportFilter, setSportFilter] = useState<SportFilter>("all");
+  // Top-level view: per-analyst history, all-analyst comparison, or by-location.
+  const [view, setView] = useState<"history" | "analysts" | "locations">(
+    "history"
+  );
+  // Week filter for the comparison tables ("all" = whole season).
+  const [weekFilter, setWeekFilter] = useState<string>("all");
+  // analyst name (lowercased) -> location, for the by-location comparison.
+  const [locationByName, setLocationByName] = useState<
+    Map<string, AnalystLocation>
+  >(new Map());
 
   // Effective sport per check: stored value, else inferred from the master
   // XML (so older checks without a sport are classified correctly).
@@ -251,6 +305,28 @@ export default function AccuracyChecksPage() {
     }
   }
 
+  // Admin: compute + store Player Accuracy for older checks that lack it, so
+  // the fixture columns render from the stored field (no per-view XML parsing).
+  async function handleBackfill() {
+    setBackfilling(true);
+    setBackfillMsg("Starting…");
+    try {
+      const res = await backfillPlayerAccuracy((p) =>
+        setBackfillMsg(`Processing ${p.done} / ${p.total}…`)
+      );
+      setBackfillMsg(
+        `Done. Updated ${res.updated}, skipped ${res.skipped}.`
+      );
+      await load();
+    } catch (err) {
+      setBackfillMsg(
+        err instanceof Error ? err.message : "Backfill failed."
+      );
+    } finally {
+      setBackfilling(false);
+    }
+  }
+
   // Wait until auth is ready (session restored) before loading, so the
   // analyst-scoping filter runs against the real user, not a half-loaded one.
   useEffect(() => {
@@ -258,6 +334,19 @@ export default function AccuracyChecksPage() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, user?.role, user?.analyst_name]);
+
+  // Load the analyst name -> location map once, for the by-location view.
+  useEffect(() => {
+    let cancelled = false;
+    getAnalystLocationMap()
+      .then((m) => {
+        if (!cancelled) setLocationByName(m);
+      })
+      .catch((err) => console.error("Failed loading location map:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const analystSummaries = useMemo(
     () => summariseByAnalyst(checks),
@@ -327,11 +416,11 @@ export default function AccuracyChecksPage() {
         case "masterBy":
           return (c.master_analyst_name || "").toLowerCase();
         case "overall":
-          return c.accuracy;
-        case "home":
-          return homeAwayAccuracy(c).home;
-        case "away":
-          return homeAwayAccuracy(c).away;
+        case "passing":
+        case "offensive":
+        case "defensive":
+        case "goalkeeper":
+          return storedGroupPct(c, key as PlayerAccuracyGroupKey);
         case "exactMaster":
           return c.master_total > 0 ? c.exact / c.master_total : 0;
         case "disputes":
@@ -353,15 +442,214 @@ export default function AccuracyChecksPage() {
     });
   }, [analystChecks, savedSort, openCounts]);
 
-  const analystRollup = useMemo(
-    () =>
-      analystSummaries.find(
-        (s) =>
-          s.analystName.trim().toLowerCase() ===
-          selectedAnalyst.trim().toLowerCase()
-      ),
-    [analystSummaries, selectedAnalyst]
-  );
+  // Average Player Accuracy per group (Overall/Passing/Offensive/Defensive/
+  // Goalkeeper) across the selected analyst's checks, from the stored
+  // player_accuracy (both-teams scope). Only checks that HAVE a value for a
+  // group count toward that group's average, so missing/non-football checks
+  // don't drag it down. null when the analyst has no computed groups yet.
+  const analystGroupAverages = useMemo(() => {
+    if (!selectedAnalyst) return null;
+    const sums = new Map<PlayerAccuracyGroupKey, { total: number; n: number }>();
+    for (const col of PLAYER_ACCURACY_COLUMNS) {
+      sums.set(col.key, { total: 0, n: 0 });
+    }
+    for (const c of analystChecks) {
+      for (const col of PLAYER_ACCURACY_COLUMNS) {
+        const v = storedGroupPct(c, col.key);
+        if (v == null) continue;
+        const e = sums.get(col.key)!;
+        e.total += v;
+        e.n += 1;
+      }
+    }
+    const out: Record<PlayerAccuracyGroupKey, number | null> = {
+      overall: null,
+      passing: null,
+      offensive: null,
+      defensive: null,
+      goalkeeper: null,
+    };
+    let any = false;
+    for (const col of PLAYER_ACCURACY_COLUMNS) {
+      const e = sums.get(col.key)!;
+      if (e.n > 0) {
+        out[col.key] = e.total / e.n;
+        any = true;
+      }
+    }
+    return any ? out : null;
+  }, [selectedAnalyst, analystChecks]);
+
+  // Distinct calendar weeks present in the (sport-filtered) checks, newest
+  // first, for the comparison-table week selector.
+  const availableWeeks = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of checks) set.add(isoWeekKey(c.created_at));
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [checks]);
+
+  // All-analyst comparison: for each analyst, the average of each Player
+  // Accuracy group across their checks (optionally filtered to one week).
+  // Also carries the check count so the table can show sample size.
+  const analystComparison = useMemo(() => {
+    const scoped =
+      weekFilter === "all"
+        ? checks
+        : checks.filter((c) => isoWeekKey(c.created_at) === weekFilter);
+
+    const byAnalyst = new Map<
+      string,
+      {
+        analyst: string;
+        checks: number;
+        sums: Map<PlayerAccuracyGroupKey, { total: number; n: number }>;
+      }
+    >();
+
+    for (const c of scoped) {
+      const name = c.analyst_name || "—";
+      let e = byAnalyst.get(name);
+      if (!e) {
+        const sums = new Map<
+          PlayerAccuracyGroupKey,
+          { total: number; n: number }
+        >();
+        for (const col of PLAYER_ACCURACY_COLUMNS)
+          sums.set(col.key, { total: 0, n: 0 });
+        e = { analyst: name, checks: 0, sums };
+        byAnalyst.set(name, e);
+      }
+      e.checks += 1;
+      for (const col of PLAYER_ACCURACY_COLUMNS) {
+        const v = storedGroupPct(c, col.key);
+        if (v == null) continue;
+        const s = e.sums.get(col.key)!;
+        s.total += v;
+        s.n += 1;
+      }
+    }
+
+    return Array.from(byAnalyst.values())
+      .map((e) => {
+        const groups: Record<PlayerAccuracyGroupKey, number | null> = {
+          overall: null,
+          passing: null,
+          offensive: null,
+          defensive: null,
+          goalkeeper: null,
+        };
+        for (const col of PLAYER_ACCURACY_COLUMNS) {
+          const s = e.sums.get(col.key)!;
+          groups[col.key] = s.n > 0 ? s.total / s.n : null;
+        }
+        return { analyst: e.analyst, checks: e.checks, groups };
+      })
+      .sort((a, b) => (b.groups.overall ?? -1) - (a.groups.overall ?? -1));
+  }, [checks, weekFilter]);
+
+  // Sort state for the comparison table.
+  const [comparisonSort, setComparisonSort] = useState<{
+    key: string;
+    dir: "asc" | "desc";
+  }>({ key: "overall", dir: "desc" });
+
+  function toggleComparisonSort(key: string) {
+    setComparisonSort((cur) =>
+      cur.key === key
+        ? { key, dir: cur.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: "desc" }
+    );
+  }
+
+  const sortedComparison = useMemo(() => {
+    const { key, dir } = comparisonSort;
+    const mult = dir === "asc" ? 1 : -1;
+    const val = (r: (typeof analystComparison)[number]): number | string | null => {
+      if (key === "analyst") return r.analyst.toLowerCase();
+      if (key === "checks") return r.checks;
+      return r.groups[key as PlayerAccuracyGroupKey];
+    };
+    return [...analystComparison].sort((a, b) => {
+      const av = val(a);
+      const bv = val(b);
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "string" && typeof bv === "string")
+        return av.localeCompare(bv) * mult;
+      return ((av as number) - (bv as number)) * mult;
+    });
+  }, [analystComparison, comparisonSort]);
+
+  // By-location comparison: group checks by the analyst's country (via the
+  // name->location map), averaging each Player Accuracy group. Names without a
+  // location fall into "Unknown". Respects the week filter.
+  const locationComparison = useMemo(() => {
+    const scoped =
+      weekFilter === "all"
+        ? checks
+        : checks.filter((c) => isoWeekKey(c.created_at) === weekFilter);
+
+    const byLoc = new Map<
+      string,
+      {
+        location: string;
+        checks: number;
+        analysts: Set<string>;
+        sums: Map<PlayerAccuracyGroupKey, { total: number; n: number }>;
+      }
+    >();
+
+    for (const c of scoped) {
+      const name = (c.analyst_name || "").trim();
+      const loc = locationByName.get(name.toLowerCase()) ?? "Unknown";
+      let e = byLoc.get(loc);
+      if (!e) {
+        const sums = new Map<
+          PlayerAccuracyGroupKey,
+          { total: number; n: number }
+        >();
+        for (const col of PLAYER_ACCURACY_COLUMNS)
+          sums.set(col.key, { total: 0, n: 0 });
+        e = { location: loc, checks: 0, analysts: new Set(), sums };
+        byLoc.set(loc, e);
+      }
+      e.checks += 1;
+      if (name) e.analysts.add(name.toLowerCase());
+      for (const col of PLAYER_ACCURACY_COLUMNS) {
+        const v = storedGroupPct(c, col.key);
+        if (v == null) continue;
+        const s = e.sums.get(col.key)!;
+        s.total += v;
+        s.n += 1;
+      }
+    }
+
+    const order = [...ANALYST_LOCATIONS, "Unknown"];
+    return Array.from(byLoc.values())
+      .map((e) => {
+        const groups: Record<PlayerAccuracyGroupKey, number | null> = {
+          overall: null,
+          passing: null,
+          offensive: null,
+          defensive: null,
+          goalkeeper: null,
+        };
+        for (const col of PLAYER_ACCURACY_COLUMNS) {
+          const s = e.sums.get(col.key)!;
+          groups[col.key] = s.n > 0 ? s.total / s.n : null;
+        }
+        return {
+          location: e.location,
+          checks: e.checks,
+          analysts: e.analysts.size,
+          groups,
+        };
+      })
+      .sort(
+        (a, b) => order.indexOf(a.location) - order.indexOf(b.location)
+      );
+  }, [checks, weekFilter, locationByName]);
 
   const [expandedFixture, setExpandedFixture] = useState<string | null>(null);
   const [fixtureSearch, setFixtureSearch] = useState("");
@@ -373,7 +661,11 @@ export default function AccuracyChecksPage() {
   // we lazily pull XML for the visible checks (batched) and cache it. The
   // light list load doesn't include XML, so fetch it here for all scopes.
   useEffect(() => {
+    // Only fetch XML for checks WITHOUT precomputed player_accuracy (older,
+    // not-yet-backfilled checks). Backfilled/new checks render from the stored
+    // field with no XML fetch at all.
     const missing = checks
+      .filter((c) => !c.player_accuracy)
       .map((c) => c.id)
       .filter((id) => !xmlById.has(id));
     if (missing.length === 0) return;
@@ -520,6 +812,39 @@ export default function AccuracyChecksPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {/* View tabs */}
+            <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1">
+              <button
+                onClick={() => setView("history")}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                  view === "history"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                History
+              </button>
+              <button
+                onClick={() => setView("analysts")}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                  view === "analysts"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                All analysts
+              </button>
+              <button
+                onClick={() => setView("locations")}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                  view === "locations"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                By location
+              </button>
+            </div>
             <SportToggle value={sportFilter} onChange={setSportFilter} />
             <Link
               href="/accuracy-compare"
@@ -546,6 +871,22 @@ export default function AccuracyChecksPage() {
             No {sportFilter === "afl" ? "Aussie Rules" : "Football"} checks
             saved yet.
           </div>
+        ) : view === "analysts" ? (
+          <AnalystComparisonTable
+            rows={sortedComparison}
+            sort={comparisonSort}
+            onSort={toggleComparisonSort}
+            weeks={availableWeeks}
+            weekFilter={weekFilter}
+            onWeekChange={setWeekFilter}
+          />
+        ) : view === "locations" ? (
+          <LocationComparisonTable
+            rows={locationComparison}
+            weeks={availableWeeks}
+            weekFilter={weekFilter}
+            onWeekChange={setWeekFilter}
+          />
         ) : (
           <div className="space-y-6">
             {/* Top: analyst picker + trend (left) and leaderboard (right) */}
@@ -573,49 +914,26 @@ export default function AccuracyChecksPage() {
                   ))}
                 </select>
 
-                {analystRollup && (
-                  <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-6">
-                    <Stat label="Checks" value={`${analystRollup.checks}`} />
-                    <Stat
-                      label="Avg accuracy"
-                      value={pct(analystRollup.avgAccuracy)}
-                      color={accColor(analystRollup.avgAccuracy)}
-                    />
-                    <Stat
-                      label="Latest"
-                      value={pct(analystRollup.latestAccuracy)}
-                      color={accColor(analystRollup.latestAccuracy)}
-                    />
-                    <Stat
-                      label="Avg home"
-                      value={
-                        analystRollup.avgHomeAccuracy != null
-                          ? pct(analystRollup.avgHomeAccuracy)
-                          : "—"
-                      }
-                      color={
-                        analystRollup.avgHomeAccuracy != null
-                          ? accColor(analystRollup.avgHomeAccuracy)
-                          : undefined
-                      }
-                    />
-                    <Stat
-                      label="Avg away"
-                      value={
-                        analystRollup.avgAwayAccuracy != null
-                          ? pct(analystRollup.avgAwayAccuracy)
-                          : "—"
-                      }
-                      color={
-                        analystRollup.avgAwayAccuracy != null
-                          ? accColor(analystRollup.avgAwayAccuracy)
-                          : undefined
-                      }
-                    />
-                    <Stat
-                      label="Exact / Master"
-                      value={`${analystRollup.totalExact}/${analystRollup.totalMaster}`}
-                    />
+                {/* Average Player Accuracy per group across this analyst's
+                    checks — same headers as the tables below. */}
+                {analystGroupAverages && (
+                  <div className="mt-4">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                      Avg player accuracy
+                    </p>
+                    <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+                      {PLAYER_ACCURACY_COLUMNS.map((col) => {
+                        const v = analystGroupAverages[col.key];
+                        return (
+                          <Stat
+                            key={col.key}
+                            label={col.label}
+                            value={v != null ? pct(v) : "—"}
+                            color={v != null ? accColor(v) : undefined}
+                          />
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </div>
@@ -731,30 +1049,19 @@ export default function AccuracyChecksPage() {
                             align="left"
                           />
                         </th>
-                        <th className="px-4 py-2.5 text-right">
-                          <SortHead
-                            label="Overall"
-                            col="overall"
-                            sort={savedSort}
-                            onSort={toggleSavedSort}
-                          />
-                        </th>
-                        <th className="px-4 py-2.5 text-right">
-                          <SortHead
-                            label="Home"
-                            col="home"
-                            sort={savedSort}
-                            onSort={toggleSavedSort}
-                          />
-                        </th>
-                        <th className="px-4 py-2.5 text-right">
-                          <SortHead
-                            label="Away"
-                            col="away"
-                            sort={savedSort}
-                            onSort={toggleSavedSort}
-                          />
-                        </th>
+                        {PLAYER_ACCURACY_COLUMNS.map((col) => (
+                          <th
+                            key={col.key}
+                            className="px-4 py-2.5 text-right"
+                          >
+                            <SortHead
+                              label={col.label}
+                              col={col.key}
+                              sort={savedSort}
+                              onSort={toggleSavedSort}
+                            />
+                          </th>
+                        ))}
                         <th className="px-4 py-2.5 text-right">
                           <SortHead
                             label="Exact/Master"
@@ -777,7 +1084,6 @@ export default function AccuracyChecksPage() {
                     </thead>
                     <tbody>
                       {sortedSavedChecks.map((c) => {
-                          const { home, away } = homeAwayAccuracy(c);
                           return (
                           <React.Fragment key={c.id}>
                           <tr
@@ -804,15 +1110,21 @@ export default function AccuracyChecksPage() {
                             <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
                               {c.master_analyst_name || "—"}
                             </td>
-                            <td className={`px-4 py-2.5 text-right font-semibold ${accColor(c.accuracy)}`}>
-                              {pct(c.accuracy)}
-                            </td>
-                            <td className={`px-4 py-2.5 text-right font-medium ${home != null ? accColor(home) : "text-slate-300"}`}>
-                              {home != null ? pct(home) : "—"}
-                            </td>
-                            <td className={`px-4 py-2.5 text-right font-medium ${away != null ? accColor(away) : "text-slate-300"}`}>
-                              {away != null ? pct(away) : "—"}
-                            </td>
+                            {PLAYER_ACCURACY_COLUMNS.map((col) => {
+                              const v = storedGroupPct(c, col.key);
+                              return (
+                                <td
+                                  key={col.key}
+                                  className={`px-4 py-2.5 text-right font-medium tabular-nums ${
+                                    v != null
+                                      ? accColor(v)
+                                      : "text-slate-300"
+                                  }`}
+                                >
+                                  {v != null ? pct(v) : "—"}
+                                </td>
+                              );
+                            })}
                             <td className="whitespace-nowrap px-4 py-2.5 text-right text-slate-600">
                               {c.exact}/{c.master_total}
                             </td>
@@ -856,7 +1168,7 @@ export default function AccuracyChecksPage() {
                           </tr>
                           {expandedCheck === c.id && (
                             <tr className="border-t border-slate-100 bg-slate-50/60">
-                              <td colSpan={selectedAnalyst ? 9 : 10} className="px-4 py-3">
+                              <td colSpan={selectedAnalyst ? 11 : 12} className="px-4 py-3">
                                 <DisputesPanel
                                   disputes={panelDisputes}
                                   canResolve={canResolve}
@@ -929,7 +1241,22 @@ export default function AccuracyChecksPage() {
                   placeholder="Search fixture or master…"
                   className="w-56 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none focus:border-slate-500"
                 />
+                {canResolve && (
+                  <button
+                    onClick={handleBackfill}
+                    disabled={backfilling}
+                    title="Precompute & store Player Accuracy for older checks so this table loads instantly"
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    {backfilling ? "Backfilling…" : "Backfill accuracy"}
+                  </button>
+                )}
               </div>
+              {backfillMsg && (
+                <span className="w-full text-xs text-slate-500">
+                  {backfillMsg}
+                </span>
+              )}
             </div>
 
             <div className="divide-y divide-slate-100">
@@ -1271,6 +1598,242 @@ function Stat({
       </div>
       <div className={`mt-0.5 text-lg font-bold ${color ?? "text-slate-800"}`}>
         {value}
+      </div>
+    </div>
+  );
+}
+
+// All-analyst comparison table: every analyst's average Player Accuracy per
+// group, sortable, with a calendar-week selector (default = whole season).
+type ComparisonRowData = {
+  analyst: string;
+  checks: number;
+  groups: Record<PlayerAccuracyGroupKey, number | null>;
+};
+
+function AnalystComparisonTable({
+  rows,
+  sort,
+  onSort,
+  weeks,
+  weekFilter,
+  onWeekChange,
+}: {
+  rows: ComparisonRowData[];
+  sort: { key: string; dir: "asc" | "desc" };
+  onSort: (key: string) => void;
+  weeks: string[];
+  weekFilter: string;
+  onWeekChange: (w: string) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-700">
+            All analysts — average player accuracy
+          </h2>
+          <p className="mt-0.5 text-xs text-slate-400">
+            Averaged across each analyst&apos;s checks
+            {weekFilter === "all" ? " (whole season)" : ""}.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-medium text-slate-500">Week</label>
+          <select
+            value={weekFilter}
+            onChange={(e) => onWeekChange(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 focus:border-slate-500 focus:outline-none"
+          >
+            <option value="all">All weeks</option>
+            {weeks.map((w) => (
+              <option key={w} value={w}>
+                {weekLabel(w)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="max-h-[600px] overflow-auto">
+        <table className="min-w-full text-sm">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-4 py-2.5">
+                <SortHead
+                  label="Analyst"
+                  col="analyst"
+                  sort={sort}
+                  onSort={onSort}
+                  align="left"
+                />
+              </th>
+              <th className="px-4 py-2.5 text-right">
+                <SortHead
+                  label="Checks"
+                  col="checks"
+                  sort={sort}
+                  onSort={onSort}
+                />
+              </th>
+              {PLAYER_ACCURACY_COLUMNS.map((col) => (
+                <th key={col.key} className="px-4 py-2.5 text-right">
+                  <SortHead
+                    label={col.label}
+                    col={col.key}
+                    sort={sort}
+                    onSort={onSort}
+                  />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr
+                key={r.analyst}
+                className="border-t border-slate-100 hover:bg-slate-50"
+              >
+                <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-800">
+                  {r.analyst}
+                </td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
+                  {r.checks}
+                </td>
+                {PLAYER_ACCURACY_COLUMNS.map((col) => {
+                  const v = r.groups[col.key];
+                  return (
+                    <td
+                      key={col.key}
+                      className={`px-4 py-2.5 text-right font-medium tabular-nums ${
+                        v != null ? accColor(v) : "text-slate-300"
+                      }`}
+                    >
+                      {v != null ? pct(v) : "—"}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td
+                  colSpan={2 + PLAYER_ACCURACY_COLUMNS.length}
+                  className="p-6 text-center text-sm text-slate-400"
+                >
+                  No checks for this week.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// By-location comparison: each country's average Player Accuracy per group,
+// with the same week selector. Read-only (few rows, no sorting needed).
+type LocationRowData = {
+  location: string;
+  checks: number;
+  analysts: number;
+  groups: Record<PlayerAccuracyGroupKey, number | null>;
+};
+
+function LocationComparisonTable({
+  rows,
+  weeks,
+  weekFilter,
+  onWeekChange,
+}: {
+  rows: LocationRowData[];
+  weeks: string[];
+  weekFilter: string;
+  onWeekChange: (w: string) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-700">
+            By location — average player accuracy
+          </h2>
+          <p className="mt-0.5 text-xs text-slate-400">
+            Averaged across all analysts in each country
+            {weekFilter === "all" ? " (whole season)" : ""}.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-medium text-slate-500">Week</label>
+          <select
+            value={weekFilter}
+            onChange={(e) => onWeekChange(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 focus:border-slate-500 focus:outline-none"
+          >
+            <option value="all">All weeks</option>
+            {weeks.map((w) => (
+              <option key={w} value={w}>
+                {weekLabel(w)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="overflow-auto">
+        <table className="min-w-full text-sm">
+          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-4 py-2.5">Location</th>
+              <th className="px-4 py-2.5 text-right">Analysts</th>
+              <th className="px-4 py-2.5 text-right">Checks</th>
+              {PLAYER_ACCURACY_COLUMNS.map((col) => (
+                <th key={col.key} className="px-4 py-2.5 text-right">
+                  {col.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.location} className="border-t border-slate-100">
+                <td className="whitespace-nowrap px-4 py-2.5 font-semibold text-slate-800">
+                  {r.location}
+                </td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
+                  {r.analysts}
+                </td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
+                  {r.checks}
+                </td>
+                {PLAYER_ACCURACY_COLUMNS.map((col) => {
+                  const v = r.groups[col.key];
+                  return (
+                    <td
+                      key={col.key}
+                      className={`px-4 py-2.5 text-right font-medium tabular-nums ${
+                        v != null ? accColor(v) : "text-slate-300"
+                      }`}
+                    >
+                      {v != null ? pct(v) : "—"}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td
+                  colSpan={3 + PLAYER_ACCURACY_COLUMNS.length}
+                  className="p-6 text-center text-sm text-slate-400"
+                >
+                  No checks for this week.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

@@ -246,17 +246,28 @@ export async function updateOfficeComputer(
 // trimmed and de-duplicated case-insensitively.
 // ======================================================================
 
+// Where an analyst is based. Used for cross-country accuracy comparison.
+export type AnalystLocation = "Australia" | "Philippines" | "Vietnam";
+export const ANALYST_LOCATIONS: AnalystLocation[] = [
+    "Australia",
+    "Philippines",
+    "Vietnam",
+];
+
 export interface PlatformAnalyst {
     id: number;
     name: string;
     email: string | null;
+    /** Country the analyst is based in (null until set). */
+    location: AnalystLocation | null;
     created_at: string;
 }
 
-/** A single entry to add (name required, email optional). */
+/** A single entry to add (name required, email + location optional). */
 export interface NewAnalystEntry {
     name: string;
     email?: string | null;
+    location?: AnalystLocation | null;
 }
 
 /** Result of a bulk add: how many were inserted vs skipped as duplicates. */
@@ -272,7 +283,7 @@ export interface BulkAddResult {
 export async function getPlatformAnalysts(): Promise<PlatformAnalyst[]> {
     const { data, error } = await supabase
         .from("analysts")
-        .select("id, name, email, created_at")
+        .select("id, name, email, location, created_at")
         .order("name", { ascending: true });
 
     if (error) {
@@ -289,15 +300,20 @@ export async function getPlatformAnalysts(): Promise<PlatformAnalyst[]> {
  */
 export async function createAnalyst(
     name: string,
-    email?: string | null
+    email?: string | null,
+    location?: AnalystLocation | null
 ): Promise<PlatformAnalyst> {
     const clean = name.trim();
     if (!clean) throw new Error("Analyst name is required.");
 
     const { data, error } = await supabase
         .from("analysts")
-        .insert({ name: clean, email: email?.trim() || null })
-        .select("id, name, email, created_at")
+        .insert({
+            name: clean,
+            email: email?.trim() || null,
+            location: location ?? null,
+        })
+        .select("id, name, email, location, created_at")
         .single();
 
     if (error) {
@@ -310,6 +326,44 @@ export async function createAnalyst(
     }
 
     return data as PlatformAnalyst;
+}
+
+/**
+ * Update an existing platform analyst's location. Used from Analyst
+ * Management to set/change where an analyst is based.
+ */
+export async function updateAnalystLocation(
+    id: number,
+    location: AnalystLocation | null
+): Promise<void> {
+    const { error } = await supabase
+        .from("analysts")
+        .update({ location })
+        .eq("id", id);
+
+    if (error) {
+        console.error("Failed updating analyst location:", error);
+        throw new Error(error.message || "Failed updating analyst location");
+    }
+}
+
+/**
+ * Map of analyst name (lowercased) -> location, from the shared `analysts`
+ * table. Used to attribute name-only accuracy checks to a country.
+ */
+export async function getAnalystLocationMap(): Promise<
+    Map<string, AnalystLocation>
+> {
+    const map = new Map<string, AnalystLocation>();
+    try {
+        const analysts = await getPlatformAnalysts();
+        for (const a of analysts) {
+            if (a.location) map.set(a.name.trim().toLowerCase(), a.location);
+        }
+    } catch (err) {
+        console.error("Failed building analyst location map:", err);
+    }
+    return map;
 }
 
 /**
@@ -327,7 +381,11 @@ export async function createAnalystsBulk(
         if (!name) continue;
         const key = name.toLowerCase();
         if (!byLower.has(key)) {
-            byLower.set(key, { name, email: e.email?.trim() || null });
+            byLower.set(key, {
+                name,
+                email: e.email?.trim() || null,
+                location: e.location ?? null,
+            });
         }
     }
 
@@ -354,7 +412,11 @@ export async function createAnalystsBulk(
     const { data, error } = await supabase
         .from("analysts")
         .insert(
-            toInsert.map((e) => ({ name: e.name, email: e.email ?? null }))
+            toInsert.map((e) => ({
+                name: e.name,
+                email: e.email ?? null,
+                location: e.location ?? null,
+            }))
         )
         .select("name");
 

@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 
 import {
     getAnalysts,
     getPlatformAnalysts,
+    createAnalyst,
+    updateAnalystLocation,
+    type AnalystLocation,
     updateHomeComputer,
     updateOfficeComputer,
     renameAnalyst,
@@ -102,6 +105,10 @@ export default function AnalystsPage() {
 
         try {
 
+            // Each source is individually caught so one failure (e.g. the
+            // .NET AutoDownload API being unreachable) doesn't blank the whole
+            // page — the Supabase platform analysts (and the Location column)
+            // still render.
             const [
                 analystData,
                 computerData,
@@ -109,9 +116,15 @@ export default function AnalystsPage() {
                 platformData,
             ] = await Promise.all([
 
-                getAnalysts(),
+                getAnalysts().catch((err) => {
+                    console.error("Failed loading .NET analysts:", err);
+                    return [] as Analyst[];
+                }),
 
-                getComputers(),
+                getComputers().catch((err) => {
+                    console.error("Failed loading computers:", err);
+                    return [] as Awaited<ReturnType<typeof getComputers>>;
+                }),
 
                 supabase
                     .from("analyst_team_affiliations")
@@ -141,9 +154,12 @@ export default function AnalystsPage() {
             if (
                 affiliationResult.error
             ) {
-
-                throw affiliationResult.error;
-
+                // Non-fatal: affiliations just won't show. Don't blank the
+                // whole page (which also carries analysts + locations).
+                console.error(
+                    "Failed loading affiliations:",
+                    affiliationResult.error
+                );
             }
 
 
@@ -616,6 +632,44 @@ export default function AnalystsPage() {
 
 
     // ==================================================
+    // LOCATION
+    // ==================================================
+
+    // name (lowercased) -> location, from the Supabase platform analysts.
+    const locationByName = useMemo(() => {
+        const m = new Map<string, AnalystLocation>();
+        for (const p of platformAnalysts) {
+            if (p.location) m.set(p.name.trim().toLowerCase(), p.location);
+        }
+        return m;
+    }, [platformAnalysts]);
+
+    // Set/clear an analyst's location. Location lives on the Supabase
+    // `analysts` table, so if this analyst isn't there yet (e.g. a .NET- or
+    // Deputy-only name), create the row first, then set the location.
+    async function changeLocation(
+        analystName: string,
+        location: AnalystLocation | ""
+    ) {
+        const key = analystName.trim().toLowerCase();
+        try {
+            let record = platformAnalysts.find(
+                (p) => p.name.trim().toLowerCase() === key
+            );
+            if (!record) {
+                // No Supabase row yet — create one so location can be stored.
+                record = await createAnalyst(analystName.trim(), null, null);
+            }
+            await updateAnalystLocation(record.id, location || null);
+            await load();
+        } catch (error: any) {
+            console.error("Failed updating location:", error);
+            alert(error?.message || "Failed updating location");
+        }
+    }
+
+
+    // ==================================================
     // CONFIRM REASSIGN
     // ==================================================
 
@@ -819,6 +873,12 @@ export default function AnalystsPage() {
                 }
                 affiliations={
                     affiliations
+                }
+                locationByName={
+                    locationByName
+                }
+                onLocationChange={
+                    changeLocation
                 }
                 onHomeComputerChange={
                     changeHomeComputer
