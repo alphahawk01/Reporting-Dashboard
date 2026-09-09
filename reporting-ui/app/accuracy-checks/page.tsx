@@ -36,6 +36,10 @@ import {
   compareInstances,
   type Instance,
 } from "@/lib/comparison/xml-compare";
+import {
+  computePlayerAccuracy,
+  type PlayerAccuracy,
+} from "@/lib/comparison/player-accuracy";
 import { useAuth } from "@/components/auth/AuthContext";
 import DisputesPanel from "@/components/DisputesPanel";
 import SportToggle, { type SportFilter } from "@/components/SportToggle";
@@ -79,68 +83,58 @@ function homeAwayAccuracy(check: AccuracyCheckMeta): {
 
 type TeamScope = "both" | "home" | "away";
 
-// Per-category accuracy for a check, scoped to Both / Home / Away. Computed
-// Both-teams category accuracy comes straight from the stored
-// category_breakdown (no XML needed — fast). Home/Away requires the raw XML
-// (the only place per-team-per-category data exists), which is fetched
-// on-demand and passed in as `xml`. Returns category -> {accuracy,exact,total}.
-function categoryAccuracy(
+// Player Accuracy groups (Overall / Passing / Offensive / Defensive /
+// Goalkeeper) for a check, scoped to Both / Home / Away. Computed from the raw
+// instance counts using the SAME method as the Accuracy Comparison cards
+// (shared computePlayerAccuracy). Teams are canonicalised to Home/Away so the
+// scope filter works. Returns null when the XML isn't available yet.
+function fixtureGroupAccuracy(
   check: AccuracyCheckMeta,
   scope: TeamScope,
   xml?: { xml_master: string | null; xml_analyst: string | null }
-): Record<string, { accuracy: number; exact: number; total: number }> {
-  // "Both" scope: use the precomputed breakdown stored on the check.
-  if (scope === "both") {
-    const out: Record<
-      string,
-      { accuracy: number; exact: number; total: number }
-    > = {};
-    for (const c of check.category_breakdown ?? []) {
-      out[c.category] = {
-        accuracy: c.accuracy,
-        exact: c.exact,
-        total: c.total,
-      };
-    }
-    return out;
-  }
-
-  // Home/Away scope: derive from the raw XML (must be supplied).
-  if (!xml?.xml_master || !xml?.xml_analyst) return {};
+): PlayerAccuracy | null {
+  if (!xml?.xml_master || !xml?.xml_analyst) return null;
   const master = parseInstances(xml.xml_master);
   const analyst = parseInstances(xml.xml_analyst);
   const tol = check.tolerance ?? 3;
   const canon = canonicaliseTeams(master, analyst, tol, check.file_name_master);
 
-  const wanted = scope; // "home" | "away"
-  const inScope = (i: Instance) => i.team.trim().toLowerCase() === wanted;
+  const inScope = (i: Instance) =>
+    scope === "both" || i.team.trim().toLowerCase() === scope;
 
-  const result = compareInstances(
+  // Exact-match player accuracy: compare the scoped instances, then group.
+  const cmp = compareInstances(
     canon.master.filter(inScope),
     canon.analyst.filter(inScope),
     tol
   );
+  const groups = computePlayerAccuracy(cmp.rows);
 
-  const out: Record<string, { accuracy: number; exact: number; total: number }> =
-    {};
-  for (const c of result.byCategory) {
-    out[c.category] = {
-      accuracy: c.accuracy,
-      exact: c.exact,
-      total: c.total,
-    };
-  }
-  return out;
+  // Player Accuracy is football-only for now. The stored `sport` flag is
+  // unreliable (many checks have it null and default to AFL), so instead we
+  // detect football from the data: if the master has ZERO football stats
+  // across every group, treat it as non-football and show nothing.
+  return groups.overall.master > 0 ? groups : null;
 }
 
-// One analyst's row within a master-fixture group.
+// The Player Accuracy group columns shown in the fixture table, in order.
+// These mirror the cards on the Accuracy Comparison page.
+const PLAYER_ACCURACY_COLUMNS = [
+  { key: "overall", label: "Overall" },
+  { key: "passing", label: "Passing" },
+  { key: "offensive", label: "Offensive" },
+  { key: "defensive", label: "Defensive" },
+  { key: "goalkeeper", label: "Goalkeeper" },
+] as const;
+
+// One analyst's row within a master-fixture group. Holds the per-group
+// Player Accuracy for the active scope (key -> group result, or null when the
+// XML isn't available yet / the check has no football data).
 type FixtureRow = {
   check: AccuracyCheckMeta;
   analyst: string;
   date: string;
-  overallAcc: number;
-  // Per-category accuracy for the active scope: category -> accuracy (0..1).
-  categories: Record<string, number>;
+  groups: PlayerAccuracy | null;
 };
 
 export default function AccuracyChecksPage() {
@@ -303,6 +297,62 @@ export default function AccuracyChecksPage() {
     [analystChecks]
   );
 
+  // Sort state for the "Saved checks" table. Defaults to newest first.
+  const [savedSort, setSavedSort] = useState<{
+    key: string;
+    dir: "asc" | "desc";
+  }>({ key: "date", dir: "desc" });
+
+  function toggleSavedSort(key: string) {
+    setSavedSort((cur) =>
+      cur.key === key
+        ? { key, dir: cur.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: "asc" }
+    );
+  }
+
+  // Apply the active sort to the saved-checks rows. String columns sort
+  // case-insensitively; numeric columns numerically; nulls sink to the bottom.
+  const sortedSavedChecks = useMemo(() => {
+    const { key, dir } = savedSort;
+    const mult = dir === "asc" ? 1 : -1;
+    const val = (c: AccuracyCheckMeta): number | string | null => {
+      switch (key) {
+        case "date":
+          return new Date(c.created_at).getTime();
+        case "match":
+          return (c.match_label || "").toLowerCase();
+        case "analyst":
+          return (c.analyst_name || "").toLowerCase();
+        case "masterBy":
+          return (c.master_analyst_name || "").toLowerCase();
+        case "overall":
+          return c.accuracy;
+        case "home":
+          return homeAwayAccuracy(c).home;
+        case "away":
+          return homeAwayAccuracy(c).away;
+        case "exactMaster":
+          return c.master_total > 0 ? c.exact / c.master_total : 0;
+        case "disputes":
+          return openCounts[c.id] ?? 0;
+        default:
+          return null;
+      }
+    };
+    return [...analystChecks].sort((a, b) => {
+      const av = val(a);
+      const bv = val(b);
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "string" && typeof bv === "string") {
+        return av.localeCompare(bv) * mult;
+      }
+      return ((av as number) - (bv as number)) * mult;
+    });
+  }, [analystChecks, savedSort, openCounts]);
+
   const analystRollup = useMemo(
     () =>
       analystSummaries.find(
@@ -318,12 +368,11 @@ export default function AccuracyChecksPage() {
   // Both / Home / Away scope for the category accuracy columns.
   const [fixtureScope, setFixtureScope] = useState<TeamScope>("both");
 
-  // Home/Away category columns need raw XML (per-team data), which the light
-  // list load doesn't fetch. When the user picks Home/Away, lazily pull XML
-  // for the visible checks (batched) and cache it. "Both" uses the stored
-  // breakdown and needs nothing.
+  // The Player Accuracy columns (Overall / Passing / Offensive / Defensive /
+  // Goalkeeper) are computed from the raw instance counts for every scope, so
+  // we lazily pull XML for the visible checks (batched) and cache it. The
+  // light list load doesn't include XML, so fetch it here for all scopes.
   useEffect(() => {
-    if (fixtureScope === "both") return;
     const missing = checks
       .map((c) => c.id)
       .filter((id) => !xmlById.has(id));
@@ -364,8 +413,9 @@ export default function AccuracyChecksPage() {
     );
   }
 
-  // Group checks by master fixture, computing per-category accuracy for the
-  // active scope (recomputed from the stored XML so Home/Away work).
+  // Group checks by master fixture, computing the Player Accuracy groups
+  // (Overall / Passing / Offensive / Defensive / Goalkeeper) for the active
+  // scope from the stored XML — same method as the Accuracy Comparison cards.
   const masterFixtureGroups = useMemo(() => {
     const map = new Map<
       string,
@@ -374,7 +424,6 @@ export default function AccuracyChecksPage() {
         label: string;
         masterBy: string | null;
         rows: FixtureRow[];
-        categories: Set<string>;
       }
     >();
 
@@ -389,36 +438,21 @@ export default function AccuracyChecksPage() {
           label: c.file_name_master || c.match_label || key,
           masterBy: c.master_analyst_name ?? null,
           rows: [],
-          categories: new Set(),
         };
         map.set(key, g);
-      }
-      const cats = categoryAccuracy(c, fixtureScope, xmlById.get(c.id));
-      const flat: Record<string, number> = {};
-      for (const [cat, v] of Object.entries(cats)) {
-        flat[cat] = v.accuracy;
-        g.categories.add(cat);
       }
       g.rows.push({
         check: c,
         analyst: c.analyst_name,
         date: c.created_at,
-        overallAcc: c.accuracy,
-        categories: flat,
+        groups: fixtureGroupAccuracy(c, fixtureScope, xmlById.get(c.id)),
       });
     }
 
-    return Array.from(map.values())
-      .map((g) => ({
-        ...g,
-        categoryList: Array.from(g.categories).sort((a, b) =>
-          a.localeCompare(b)
-        ),
-      }))
-      .sort(
-        (a, b) =>
-          b.rows.length - a.rows.length || a.label.localeCompare(b.label)
-      );
+    return Array.from(map.values()).sort(
+      (a, b) =>
+        b.rows.length - a.rows.length || a.label.localeCompare(b.label)
+    );
   }, [checks, fixtureScope, xmlById]);
 
   function sortFixtureRows(rows: FixtureRow[]): FixtureRow[] {
@@ -427,9 +461,9 @@ export default function AccuracyChecksPage() {
     const val = (r: FixtureRow): number | string | null => {
       if (key === "analyst") return r.analyst.toLowerCase();
       if (key === "date") return new Date(r.date).getTime();
-      if (key === "overallAcc") return r.overallAcc;
-      // Otherwise it's a category name.
-      return r.categories[key] ?? null;
+      // Otherwise it's one of the Player Accuracy group keys.
+      const g = r.groups?.[key as keyof PlayerAccuracy];
+      return g ? g.pct : null;
     };
     return [...rows].sort((a, b) => {
       const av = val(a);
@@ -654,32 +688,95 @@ export default function AccuracyChecksPage() {
                 <h2 className="border-b border-slate-100 p-5 text-sm font-semibold text-slate-700">
                   Saved checks
                 </h2>
-                <div className="overflow-x-auto">
+                {/* Scroll region sized to ~10 rows; header stays pinned. */}
+                <div className="max-h-[460px] overflow-auto">
                   <table className="min-w-full text-sm">
-                    <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                    <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                       <tr>
-                        <th className="px-4 py-2.5">Date</th>
-                        <th className="px-4 py-2.5">Match</th>
+                        <th className="px-4 py-2.5">
+                          <SortHead
+                            label="Date"
+                            col="date"
+                            sort={savedSort}
+                            onSort={toggleSavedSort}
+                            align="left"
+                          />
+                        </th>
+                        <th className="px-4 py-2.5">
+                          <SortHead
+                            label="Match"
+                            col="match"
+                            sort={savedSort}
+                            onSort={toggleSavedSort}
+                            align="left"
+                          />
+                        </th>
                         {!selectedAnalyst && (
-                          <th className="px-4 py-2.5">Analyst</th>
+                          <th className="px-4 py-2.5">
+                            <SortHead
+                              label="Analyst"
+                              col="analyst"
+                              sort={savedSort}
+                              onSort={toggleSavedSort}
+                              align="left"
+                            />
+                          </th>
                         )}
-                        <th className="px-4 py-2.5">Master by</th>
-                        <th className="px-4 py-2.5 text-right">Overall</th>
-                        <th className="px-4 py-2.5 text-right">Home</th>
-                        <th className="px-4 py-2.5 text-right">Away</th>
-                        <th className="px-4 py-2.5 text-right">Exact/Master</th>
-                        <th className="px-4 py-2.5 text-center">Disputes</th>
+                        <th className="px-4 py-2.5">
+                          <SortHead
+                            label="Master by"
+                            col="masterBy"
+                            sort={savedSort}
+                            onSort={toggleSavedSort}
+                            align="left"
+                          />
+                        </th>
+                        <th className="px-4 py-2.5 text-right">
+                          <SortHead
+                            label="Overall"
+                            col="overall"
+                            sort={savedSort}
+                            onSort={toggleSavedSort}
+                          />
+                        </th>
+                        <th className="px-4 py-2.5 text-right">
+                          <SortHead
+                            label="Home"
+                            col="home"
+                            sort={savedSort}
+                            onSort={toggleSavedSort}
+                          />
+                        </th>
+                        <th className="px-4 py-2.5 text-right">
+                          <SortHead
+                            label="Away"
+                            col="away"
+                            sort={savedSort}
+                            onSort={toggleSavedSort}
+                          />
+                        </th>
+                        <th className="px-4 py-2.5 text-right">
+                          <SortHead
+                            label="Exact/Master"
+                            col="exactMaster"
+                            sort={savedSort}
+                            onSort={toggleSavedSort}
+                          />
+                        </th>
+                        <th className="px-4 py-2.5 text-center">
+                          <SortHead
+                            label="Disputes"
+                            col="disputes"
+                            sort={savedSort}
+                            onSort={toggleSavedSort}
+                            align="center"
+                          />
+                        </th>
                         <th className="px-4 py-2.5"></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {[...analystChecks]
-                        .sort(
-                          (a, b) =>
-                            new Date(b.created_at).getTime() -
-                            new Date(a.created_at).getTime()
-                        )
-                        .map((c) => {
+                      {sortedSavedChecks.map((c) => {
                           const { home, away } = homeAwayAccuracy(c);
                           return (
                           <React.Fragment key={c.id}>
@@ -884,23 +981,18 @@ export default function AccuracyChecksPage() {
                                   align="left"
                                 />
                               </th>
-                              <th className="border-l border-slate-200 py-2 px-3 text-center">
-                                <SortHead
-                                  label="Overall"
-                                  col="overallAcc"
-                                  sort={fixtureSort}
-                                  onSort={toggleFixtureSort}
-                                  align="center"
-                                />
-                              </th>
-                              {g.categoryList.map((cat) => (
+                              {PLAYER_ACCURACY_COLUMNS.map((col, idx) => (
                                 <th
-                                  key={cat}
-                                  className="py-2 px-3 text-center"
+                                  key={col.key}
+                                  className={`py-2 px-3 text-center ${
+                                    idx === 0
+                                      ? "border-l border-slate-200"
+                                      : ""
+                                  }`}
                                 >
                                   <SortHead
-                                    label={cat}
-                                    col={cat}
+                                    label={col.label}
+                                    col={col.key}
                                     sort={fixtureSort}
                                     onSort={toggleFixtureSort}
                                     align="center"
@@ -923,19 +1015,23 @@ export default function AccuracyChecksPage() {
                                 <td className="whitespace-nowrap py-2 pr-4 text-slate-600">
                                   {formatDate(r.date)}
                                 </td>
-                                <td
-                                  className={`border-l border-slate-200 py-2 px-3 text-center font-semibold tabular-nums ${accColor(
-                                    r.overallAcc
-                                  )}`}
-                                >
-                                  {pct(r.overallAcc)}
-                                </td>
-                                {g.categoryList.map((cat) => {
-                                  const v = r.categories[cat];
+                                {PLAYER_ACCURACY_COLUMNS.map((col, idx) => {
+                                  const grp =
+                                    r.groups?.[col.key as keyof PlayerAccuracy];
+                                  const v = grp ? grp.pct : null;
                                   return (
                                     <td
-                                      key={cat}
-                                      className={`py-2 px-3 text-center font-medium tabular-nums ${
+                                      key={col.key}
+                                      title={
+                                        grp
+                                          ? `${grp.exact}/${grp.master} exact`
+                                          : undefined
+                                      }
+                                      className={`py-2 px-3 text-center tabular-nums ${
+                                        idx === 0
+                                          ? "border-l border-slate-200 font-semibold"
+                                          : "font-medium"
+                                      } ${
                                         v != null
                                           ? accColor(v)
                                           : "text-slate-300"
@@ -949,10 +1045,11 @@ export default function AccuracyChecksPage() {
                             ))}
                           </tbody>
                         </table>
-                        {g.categoryList.length === 0 && (
+                        {g.rows.every((r) => r.groups == null) && (
                           <p className="pt-2 text-xs text-slate-400">
-                            Category breakdown needs the saved XML; older checks
-                            may not have it.
+                            {loadingScopeXml
+                              ? "Loading player accuracy…"
+                              : "Player accuracy needs the saved XML; older checks may not have it."}
                           </p>
                         )}
                       </div>

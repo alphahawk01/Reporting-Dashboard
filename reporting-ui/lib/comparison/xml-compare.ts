@@ -353,6 +353,79 @@ export function parseInstances(xml: string): Instance[] {
   return instances;
 }
 
+/** Escape a string for safe inclusion in XML text/nodes. */
+function escapeXml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+/**
+ * Serialize instances back into SportsCode-style XML — the inverse of
+ * parseInstances. Used after an admin edits the master so the change can be
+ * persisted (stored `xml_master`) and downloaded as a corrected .xml file.
+ *
+ * Emits <file><ALL_INSTANCES><instance>… with ID/start/end/code and <label>
+ * groups for Team, Player and the stat (group = the stat's category). This
+ * round-trips through parseInstances: team/player/stat/category/time/id are
+ * all preserved. `mid` is derived on re-parse, so it isn't stored.
+ */
+export function serializeInstances(instances: Instance[]): string {
+  const rows = [...instances].sort((a, b) => a.start - b.start);
+  const lines: string[] = [];
+  lines.push(`<?xml version="1.0" encoding="UTF-8"?>`);
+  lines.push(`<file>`);
+  lines.push(`  <ALL_INSTANCES>`);
+  for (const i of rows) {
+    lines.push(`    <instance>`);
+    lines.push(`      <ID>${escapeXml(i.id)}</ID>`);
+    lines.push(`      <start>${i.start}</start>`);
+    lines.push(`      <end>${i.end}</end>`);
+    lines.push(`      <code>${escapeXml(i.code)}</code>`);
+    if (i.team) {
+      lines.push(`      <label>`);
+      lines.push(`        <group>Team</group>`);
+      lines.push(`        <text>${escapeXml(i.team)}</text>`);
+      lines.push(`      </label>`);
+    }
+    if (i.playerRaw) {
+      lines.push(`      <label>`);
+      lines.push(`        <group>Player</group>`);
+      lines.push(`        <text>${escapeXml(i.playerRaw)}</text>`);
+      lines.push(`      </label>`);
+    }
+    if (i.stat) {
+      lines.push(`      <label>`);
+      lines.push(`        <group>${escapeXml(i.category || "Action")}</group>`);
+      lines.push(`        <text>${escapeXml(i.stat)}</text>`);
+      lines.push(`      </label>`);
+    }
+    lines.push(`    </instance>`);
+  }
+  lines.push(`  </ALL_INSTANCES>`);
+  lines.push(`</file>`);
+  return lines.join("\n");
+}
+
+/**
+ * Build the `code` string for an instance from its team + player, matching the
+ * "<Team> - #<number>. <name>" convention parseInstances reads the jersey
+ * number from. Used when adding/editing so the derived playerNumber is stable.
+ */
+export function buildCode(
+  team: string,
+  playerNumber: number | null,
+  playerName: string
+): string {
+  const num = playerNumber != null ? `#${playerNumber}` : "";
+  const namePart = playerName.trim();
+  const right = [num, namePart].filter(Boolean).join(". ");
+  return right ? `${team} - ${right}` : team;
+}
+
 function normTeam(t: string): string {
   return t.toLowerCase().replace(/\s+/g, " ").trim();
 }
@@ -482,6 +555,19 @@ const STAT_PREFERENCES: Record<string, string[]> = {
   // --- On-ball possession ---
   touch: ["touch", "carries", "dribbles successful", "dribbles unsuccessful"],
   carries: ["carries", "touch", "dribbles successful", "dribbles unsuccessful"],
+  // --- Dribbles (succ/unsucc are the same action, different outcome) ---
+  "dribbles successful": [
+    "dribbles successful",
+    "dribbles unsuccessful",
+    "carries",
+    "touch",
+  ],
+  "dribbles unsuccessful": [
+    "dribbles unsuccessful",
+    "dribbles successful",
+    "carries",
+    "touch",
+  ],
 };
 
 /**

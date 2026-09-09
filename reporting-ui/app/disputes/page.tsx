@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Flag, ChevronDown, ChevronRight, X as XIcon, Check, Clock } from "lucide-react";
+import {
+    Flag,
+    ChevronDown,
+    ChevronRight,
+    X as XIcon,
+    Check,
+    Clock,
+    Pencil,
+    Plus,
+    Save,
+} from "lucide-react";
 import {
     getAllDisputes,
     resolveDispute,
@@ -10,16 +20,20 @@ import {
 import {
     getAccuracyChecksMeta,
     getAccuracyCheckById,
+    propagateMasterCorrection,
+    getMasterCheckSiblings,
     type AccuracyCheckMeta,
+    type AccuracyCheck,
 } from "@/lib/api/accuracyChecks";
 import {
     parseInstances,
     compareInstances,
     canonicaliseTeams,
+    serializeInstances,
     formatTime,
-    type ComparisonRow,
     type Instance,
 } from "@/lib/comparison/xml-compare";
+import MasterEditModal from "@/components/MasterEditModal";
 import { useAuth } from "@/components/auth/AuthContext";
 import DisputesPanel from "@/components/DisputesPanel";
 import SportToggle, { type SportFilter } from "@/components/SportToggle";
@@ -343,6 +357,7 @@ export default function DisputesPage() {
                     videoUrl={reviewing.videoUrl}
                     canResolve={canResolve}
                     onResolve={handleResolve}
+                    onSaved={load}
                     onClose={() => setReviewing(null)}
                 />
             )}
@@ -361,11 +376,25 @@ function fmtClock(t: number | null): string {
     return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+// Colour-coded status badges, matching the Accuracy Comparison timeline.
+const STATUS_BADGE: Record<string, { label: string; badge: string }> = {
+    exact: { label: "Exact", badge: "bg-emerald-100 text-emerald-700" },
+    wrong_stat: { label: "Wrong stat", badge: "bg-amber-100 text-amber-700" },
+    wrong_player: {
+        label: "Wrong player",
+        badge: "bg-orange-100 text-orange-700",
+    },
+    wrong_team: { label: "Wrong team", badge: "bg-red-100 text-red-700" },
+    missed: { label: "Missed", badge: "bg-slate-200 text-slate-700" },
+    extra: { label: "Extra", badge: "bg-purple-100 text-purple-700" },
+};
+
 function DisputeReviewModal({
     dispute: d,
     videoUrl,
     canResolve,
     onResolve,
+    onSaved,
     onClose,
 }: {
     dispute: Dispute;
@@ -376,50 +405,49 @@ function DisputeReviewModal({
         status: "confirmed" | "denied",
         note: string | null
     ) => void | Promise<void>;
+    /** Called after a corrected master is saved, so the page can refresh. */
+    onSaved?: () => void | Promise<void>;
     onClose: () => void;
 }) {
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const activeRowRef = useRef<HTMLDivElement | null>(null);
     const [note, setNote] = useState("");
     const [videoTime, setVideoTime] = useState(0);
-    const [rows, setRows] = useState<ComparisonRow[]>([]);
     const [loadingRows, setLoadingRows] = useState(true);
-    // Real club names for the canonical Home/Away sides (from the master).
-    const [teamNames, setTeamNames] = useState<{
-        home: string | null;
-        away: string | null;
-    }>({ home: null, away: null });
 
-    // Load + parse the check's stored XML to build both timelines.
+    // The loaded check + its instances. Master is EDITABLE (admins can correct
+    // a wrong master to resolve a dispute); analyst is read-only. Editing the
+    // master recomputes the timeline live and can be saved back in place.
+    const [check, setCheck] = useState<AccuracyCheck | null>(null);
+    const [masterInstances, setMasterInstances] = useState<Instance[]>([]);
+    const [analystInstances, setAnalystInstances] = useState<Instance[]>([]);
+    const [fileNameMaster, setFileNameMaster] = useState<string | null>(null);
+    const tol = check?.tolerance ?? 3;
+
+    // Editing state.
+    const [editing, setEditing] = useState<Instance | "new" | null>(null);
+    const [dirty, setDirty] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [saveMsg, setSaveMsg] = useState<string | null>(null);
+
+    // Load + parse the check's stored XML.
     useEffect(() => {
         let cancelled = false;
         (async () => {
             setLoadingRows(true);
             try {
-                const check = await getAccuracyCheckById(d.check_id);
-                if (!check || cancelled) return;
-                const master = check.xml_master
-                    ? parseInstances(check.xml_master)
-                    : [];
-                const analyst = check.xml_analyst
-                    ? parseInstances(check.xml_analyst)
-                    : [];
-                const tol = check.tolerance ?? 3;
-                const canon = canonicaliseTeams(
-                    master,
-                    analyst,
-                    tol,
-                    check.file_name_master
+                const c = await getAccuracyCheckById(d.check_id);
+                if (!c || cancelled) return;
+                setCheck(c);
+                setFileNameMaster(c.file_name_master);
+                setMasterInstances(
+                    c.xml_master ? parseInstances(c.xml_master) : []
                 );
-                const result = compareInstances(
-                    canon.master,
-                    canon.analyst,
-                    tol
+                setAnalystInstances(
+                    c.xml_analyst ? parseInstances(c.xml_analyst) : []
                 );
-                if (!cancelled) {
-                    setRows(result.rows);
-                    setTeamNames(canon.displayNames);
-                }
+                setDirty(false);
+                setSaveMsg(null);
             } catch (err) {
                 console.error("Failed building dispute timeline:", err);
             } finally {
@@ -447,6 +475,26 @@ function DisputeReviewModal({
         else v.addEventListener("loadedmetadata", seek, { once: true });
     }, [d.code_time, videoUrl]);
 
+    // Canonicalise + compare the (possibly edited) master against the analyst.
+    // Recomputes whenever the master instances change, so an edit updates the
+    // timeline and the disputed-row highlighting live.
+    const canon = useMemo(
+        () =>
+            canonicaliseTeams(
+                masterInstances,
+                analystInstances,
+                tol,
+                fileNameMaster
+            ),
+        [masterInstances, analystInstances, tol, fileNameMaster]
+    );
+    const result = useMemo(
+        () => compareInstances(canon.master, canon.analyst, tol),
+        [canon, tol]
+    );
+    const rows = result.rows;
+    const teamNames = canon.displayNames;
+
     // Keep the disputed / active row in view.
     useEffect(() => {
         activeRowRef.current?.scrollIntoView({
@@ -462,6 +510,123 @@ function DisputeReviewModal({
         if (key === "away" && teamNames.away) return teamNames.away;
         return canonTeam;
     };
+
+    // ---- Master editing (admin only) ------------------------------------
+    // Open the editor for a master row. Rows carry the CANONICAL instance
+    // (Home/Away); resolve back to the ORIGINAL by id so the modal shows the
+    // real club name and edits keep the real naming.
+    const openEdit = (canonical: Instance) => {
+        const original =
+            masterInstances.find((i) => i.id === canonical.id) ?? canonical;
+        setEditing(original);
+    };
+
+    const upsertMaster = (inst: Instance) => {
+        setMasterInstances((cur) => {
+            const exists = cur.some((i) => i.id === inst.id);
+            const next = exists
+                ? cur.map((i) => (i.id === inst.id ? inst : i))
+                : [...cur, inst];
+            // Re-parse from serialized XML so instances normalise exactly like
+            // a fresh load (mid, playerNumber from code, etc.).
+            return parseInstances(serializeInstances(next));
+        });
+        setDirty(true);
+        setSaveMsg(null);
+        setEditing(null);
+    };
+
+    const deleteMaster = (id: string) => {
+        setMasterInstances((cur) =>
+            parseInstances(serializeInstances(cur.filter((i) => i.id !== id)))
+        );
+        setDirty(true);
+        setSaveMsg(null);
+        setEditing(null);
+    };
+
+    // Save the corrected master back to the check in place (Option A): rewrite
+    // xml_master and the recomputed summary/breakdowns so the analyst's stored
+    // accuracy reflects the corrected master.
+    const saveCorrectedMaster = async () => {
+        if (!check) return;
+        const fileName = check.file_name_master;
+        if (!fileName) {
+            setSaveMsg("This check has no master file name to propagate to.");
+            return;
+        }
+
+        // The master is shared: this correction re-grades EVERY check of this
+        // master. Confirm the blast radius before writing.
+        let siblings = { count: 1, analysts: [check.analyst_name] };
+        try {
+            siblings = await getMasterCheckSiblings(fileName);
+        } catch {
+            // fall back to just this check
+        }
+        const others = Math.max(0, siblings.count - 1);
+        const confirmed = window.confirm(
+            `Correcting this master updates all ${siblings.count} check` +
+                `${siblings.count === 1 ? "" : "s"} of "${fileName}"` +
+                (others > 0
+                    ? ` and re-grades ${others} other analyst check${
+                          others === 1 ? "" : "s"
+                      } (${siblings.analysts.join(", ")}).`
+                    : ".") +
+                `\n\nContinue?`
+        );
+        if (!confirmed) return;
+
+        setSaving(true);
+        setSaveMsg(null);
+        try {
+            const xmlMaster = serializeInstances(masterInstances);
+            // Propagate to every check of this master; each is recomputed
+            // against its own analyst XML (the master is the shared source).
+            const res = await propagateMasterCorrection(fileName, xmlMaster);
+            setDirty(false);
+            setSaveMsg(
+                `Saved. Master corrected across ${res.updated} check` +
+                    `${res.updated === 1 ? "" : "s"}` +
+                    (res.analysts.length
+                        ? ` (${res.analysts.join(", ")}).`
+                        : ".")
+            );
+            // Refresh the disputes page so its list/meta reflect the new master.
+            await onSaved?.();
+        } catch (err) {
+            setSaveMsg(
+                err instanceof Error ? err.message : "Failed to save."
+            );
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    // Dropdown catalogs for the edit modal (from the loaded instances).
+    const statCatalog = useMemo(() => {
+        const map = new Map<string, { stat: string; category: string }>();
+        const add = (i: Instance) => {
+            const stat = i.stat.trim();
+            if (!stat) return;
+            const key = stat.toLowerCase();
+            if (!map.has(key))
+                map.set(key, { stat, category: i.category.trim() });
+        };
+        for (const i of masterInstances) add(i);
+        for (const i of analystInstances) add(i);
+        return Array.from(map.values()).sort((a, b) =>
+            a.stat.localeCompare(b.stat)
+        );
+    }, [masterInstances, analystInstances]);
+
+    const teamOptions = useMemo(
+        () =>
+            Array.from(
+                new Set(masterInstances.map((i) => i.team).filter(Boolean))
+            ),
+        [masterInstances]
+    );
 
     const seekTo = (seconds: number) => {
         const v = videoRef.current;
@@ -527,6 +692,38 @@ function DisputeReviewModal({
 
                     {/* Timelines */}
                     <div className="flex min-h-0 flex-col border-t border-slate-700 lg:border-l lg:border-t-0">
+                        {canResolve && (
+                            <div className="flex flex-wrap items-center gap-2 border-b border-slate-700 bg-slate-800/60 px-3 py-2">
+                                <span className="text-[11px] font-semibold text-amber-300">
+                                    Master editing
+                                </span>
+                                <span className="text-[11px] text-slate-400">
+                                    Correct a mis-coded master to resolve this
+                                    dispute.
+                                </span>
+                                <div className="ml-auto flex items-center gap-2">
+                                    <button
+                                        onClick={() => setEditing("new")}
+                                        className="inline-flex items-center gap-1 rounded-lg border border-slate-600 bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-slate-200 hover:bg-slate-700"
+                                    >
+                                        <Plus size={12} /> Add
+                                    </button>
+                                    <button
+                                        onClick={saveCorrectedMaster}
+                                        disabled={!dirty || saving}
+                                        className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
+                                    >
+                                        <Save size={12} />{" "}
+                                        {saving ? "Saving…" : "Save corrected"}
+                                    </button>
+                                </div>
+                                {saveMsg && (
+                                    <span className="w-full text-[11px] text-slate-400">
+                                        {saveMsg}
+                                    </span>
+                                )}
+                            </div>
+                        )}
                         <div className="grid grid-cols-[124px_1fr_1fr] border-b border-slate-700 bg-slate-800 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                             <div className="p-2.5">Status</div>
                             <div className="border-l border-slate-700 p-2.5">
@@ -574,17 +771,33 @@ function DisputeReviewModal({
                                             }`}
                                         >
                                             <div className="flex items-center px-2 py-1">
-                                                <span className="whitespace-nowrap text-[11px] font-semibold capitalize text-slate-500">
-                                                    {row.status.replace(
-                                                        "_",
-                                                        " "
-                                                    )}
+                                                <span
+                                                    className={`inline-flex items-center whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
+                                                        STATUS_BADGE[row.status]
+                                                            ?.badge ??
+                                                        "bg-slate-200 text-slate-700"
+                                                    }`}
+                                                >
+                                                    {STATUS_BADGE[row.status]
+                                                        ?.label ??
+                                                        row.status.replace(
+                                                            "_",
+                                                            " "
+                                                        )}
                                                 </span>
                                             </div>
                                             <MiniCell
                                                 inst={row.master}
                                                 onSeek={seekTo}
                                                 active={mActive}
+                                                onEdit={
+                                                    canResolve && row.master
+                                                        ? () =>
+                                                              openEdit(
+                                                                  row.master!
+                                                              )
+                                                        : undefined
+                                                }
                                                 teamLabel={
                                                     row.master
                                                         ? teamDisplay(
@@ -679,6 +892,22 @@ function DisputeReviewModal({
                     )}
                 </div>
             </div>
+
+            {/* Admin master instance editor (layers above the review pop-up) */}
+            {editing && (
+                <div onClick={(e) => e.stopPropagation()}>
+                    <MasterEditModal
+                        instance={editing === "new" ? null : editing}
+                        isNew={editing === "new"}
+                        teamOptions={teamOptions}
+                        statCatalog={statCatalog}
+                        playerCatalog={masterInstances}
+                        onSave={upsertMaster}
+                        onDelete={deleteMaster}
+                        onClose={() => setEditing(null)}
+                    />
+                </div>
+            )}
         </div>
     );
 }
@@ -688,11 +917,14 @@ function MiniCell({
     inst,
     onSeek,
     active,
+    onEdit,
     teamLabel,
 }: {
     inst: Instance | null;
     onSeek: (seconds: number) => void;
     active?: boolean;
+    /** Admin-only: edit this (master) instance. Renders a pencil button. */
+    onEdit?: () => void;
     /** Real club name to show instead of the canonical "Home"/"Away". */
     teamLabel?: string;
 }) {
@@ -736,6 +968,18 @@ function MiniCell({
                     {teamLabel ?? inst.team}
                     {inst.playerNumber != null ? ` #${inst.playerNumber}` : ""}
                 </span>
+                {onEdit && (
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onEdit();
+                        }}
+                        title="Edit master instance"
+                        className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                    >
+                        <Pencil size={11} />
+                    </button>
+                )}
             </div>
         </div>
     );
