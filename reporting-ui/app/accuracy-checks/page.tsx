@@ -35,6 +35,7 @@ import {
   parseInstances,
   canonicaliseTeams,
   compareInstances,
+  parseHomeAwayFromFileName,
   type Instance,
 } from "@/lib/comparison/xml-compare";
 import {
@@ -147,14 +148,41 @@ function fixtureGroupAccuracy(
 // The Player Accuracy group columns shown in the fixture table, in order.
 // These mirror the cards on the Accuracy Comparison page.
 const PLAYER_ACCURACY_COLUMNS = [
-  { key: "overall", label: "Overall" },
-  { key: "passing", label: "Passing" },
-  { key: "offensive", label: "Offensive" },
-  { key: "defensive", label: "Defensive" },
-  { key: "goalkeeper", label: "Goalkeeper" },
+  { key: "overall", label: "Overall", short: "OVR" },
+  { key: "passing", label: "Passing", short: "PASS" },
+  { key: "offensive", label: "Offensive", short: "OFF" },
+  { key: "defensive", label: "Defensive", short: "DEF" },
+  { key: "goalkeeper", label: "Goalkeeper", short: "GK" },
 ] as const;
 
 type PlayerAccuracyGroupKey = (typeof PLAYER_ACCURACY_COLUMNS)[number]["key"];
+
+// Club/suffix tokens that should always render fully uppercase.
+const ALWAYS_UPPER_TOKENS = new Set(["fc", "sc"]);
+
+// Title-case a team name (each word capitalised) for a professional look.
+// Club suffixes like FC/SC are always uppercased, and tokens with digits
+// (U15, U15B) are left as-is.
+function titleCaseTeam(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .map((w) => {
+      if (ALWAYS_UPPER_TOKENS.has(w.toLowerCase())) return w.toUpperCase();
+      // Leave tokens containing digits (age groups like U15) as-is.
+      if (/\d/.test(w)) return w;
+      return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    })
+    .join(" ");
+}
+
+// "Home v Away" for a check, from its master file name. Falls back to the
+// saved match label, then a dash.
+function matchTeamsLabel(check: AccuracyCheckMeta): string {
+  const teams = parseHomeAwayFromFileName(check.file_name_master);
+  if (teams) return `${titleCaseTeam(teams[0])} v ${titleCaseTeam(teams[1])}`;
+  return check.match_label || "—";
+}
 
 // Read one Player Accuracy group's % from a check's STORED player_accuracy
 // (both-teams scope). Returns null when not computed yet or non-football.
@@ -410,7 +438,7 @@ export default function AccuracyChecksPage() {
         case "date":
           return new Date(c.created_at).getTime();
         case "match":
-          return (c.match_label || "").toLowerCase();
+          return matchTeamsLabel(c).toLowerCase();
         case "analyst":
           return (c.analyst_name || "").toLowerCase();
         case "masterBy":
@@ -1006,12 +1034,13 @@ export default function AccuracyChecksPage() {
                 <h2 className="border-b border-slate-100 p-5 text-sm font-semibold text-slate-700">
                   Saved checks
                 </h2>
-                {/* Scroll region sized to ~10 rows; header stays pinned. */}
-                <div className="max-h-[460px] overflow-auto">
-                  <table className="min-w-full text-sm">
+                {/* Scroll region sized to ~10 rows; header stays pinned.
+                    Vertical-only scroll — columns are sized to fit width. */}
+                <div className="max-h-[460px] overflow-y-auto">
+                  <table className="w-full table-fixed text-xs">
                     <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                       <tr>
-                        <th className="px-4 py-2.5">
+                        <th className="w-24 px-2.5 py-2">
                           <SortHead
                             label="Date"
                             col="date"
@@ -1020,7 +1049,7 @@ export default function AccuracyChecksPage() {
                             align="left"
                           />
                         </th>
-                        <th className="px-4 py-2.5">
+                        <th className="w-40 px-2.5 py-2">
                           <SortHead
                             label="Match"
                             col="match"
@@ -1030,7 +1059,7 @@ export default function AccuracyChecksPage() {
                           />
                         </th>
                         {!selectedAnalyst && (
-                          <th className="px-4 py-2.5">
+                          <th className="w-28 px-2.5 py-2">
                             <SortHead
                               label="Analyst"
                               col="analyst"
@@ -1040,7 +1069,7 @@ export default function AccuracyChecksPage() {
                             />
                           </th>
                         )}
-                        <th className="px-4 py-2.5">
+                        <th className="w-28 px-2.5 py-2">
                           <SortHead
                             label="Master by"
                             col="masterBy"
@@ -1052,34 +1081,35 @@ export default function AccuracyChecksPage() {
                         {PLAYER_ACCURACY_COLUMNS.map((col) => (
                           <th
                             key={col.key}
-                            className="px-4 py-2.5 text-right"
+                            title={col.label}
+                            className="w-14 px-2 py-2 text-right"
                           >
                             <SortHead
-                              label={col.label}
+                              label={col.short}
                               col={col.key}
                               sort={savedSort}
                               onSort={toggleSavedSort}
                             />
                           </th>
                         ))}
-                        <th className="px-4 py-2.5 text-right">
+                        <th className="w-20 px-2 py-2 text-right">
                           <SortHead
-                            label="Exact/Master"
+                            label="Ex/Mas"
                             col="exactMaster"
                             sort={savedSort}
                             onSort={toggleSavedSort}
                           />
                         </th>
-                        <th className="px-4 py-2.5 text-center">
+                        <th className="w-16 px-2 py-2 text-center">
                           <SortHead
-                            label="Disputes"
+                            label="Disp"
                             col="disputes"
                             sort={savedSort}
                             onSort={toggleSavedSort}
                             align="center"
                           />
                         </th>
-                        <th className="px-4 py-2.5"></th>
+                        <th className="w-8 px-1 py-2"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1091,23 +1121,23 @@ export default function AccuracyChecksPage() {
                             className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
                             title="Open full accuracy check in Accuracy Comparison"
                           >
-                            <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
+                            <td className="whitespace-nowrap px-2.5 py-2 text-slate-600">
                               {formatDate(c.created_at)}
                             </td>
-                            <td className="px-4 py-2.5 text-slate-700">
+                            <td className="px-2.5 py-2 text-slate-700">
                               <span
-                                className="block max-w-[420px] truncate"
-                                title={c.match_label || undefined}
+                                className="block truncate"
+                                title={matchTeamsLabel(c)}
                               >
-                                {c.match_label || "—"}
+                                {matchTeamsLabel(c)}
                               </span>
                             </td>
                             {!selectedAnalyst && (
-                              <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-700">
+                              <td className="truncate px-2.5 py-2 font-medium text-slate-700">
                                 {c.analyst_name || "—"}
                               </td>
                             )}
-                            <td className="whitespace-nowrap px-4 py-2.5 text-slate-600">
+                            <td className="truncate px-2.5 py-2 text-slate-600">
                               {c.master_analyst_name || "—"}
                             </td>
                             {PLAYER_ACCURACY_COLUMNS.map((col) => {
@@ -1115,7 +1145,7 @@ export default function AccuracyChecksPage() {
                               return (
                                 <td
                                   key={col.key}
-                                  className={`px-4 py-2.5 text-right font-medium tabular-nums ${
+                                  className={`px-2 py-2 text-right font-medium tabular-nums ${
                                     v != null
                                       ? accColor(v)
                                       : "text-slate-300"
@@ -1125,10 +1155,10 @@ export default function AccuracyChecksPage() {
                                 </td>
                               );
                             })}
-                            <td className="whitespace-nowrap px-4 py-2.5 text-right text-slate-600">
+                            <td className="whitespace-nowrap px-2 py-2 text-right text-slate-600">
                               {c.exact}/{c.master_total}
                             </td>
-                            <td className="px-4 py-2.5 text-center">
+                            <td className="px-2 py-2 text-center">
                               {(openCounts[c.id] ?? 0) > 0 ? (
                                 <button
                                   onClick={(e) => {
@@ -1153,13 +1183,13 @@ export default function AccuracyChecksPage() {
                                 </button>
                               )}
                             </td>
-                            <td className="px-4 py-2.5 text-right">
+                            <td className="px-1 py-2 text-center">
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleDelete(c.id);
                                 }}
-                                className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                                className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
                                 title="Delete check"
                               >
                                 <Trash2 size={14} />
@@ -1570,7 +1600,7 @@ function SortHead({
   return (
     <button
       onClick={() => onSort(col)}
-      className={`inline-flex w-full items-center gap-1 font-semibold uppercase tracking-wide transition hover:text-slate-800 ${
+      className={`inline-flex w-full items-center gap-0.5 whitespace-nowrap font-semibold uppercase transition hover:text-slate-800 ${
         active ? "text-slate-800" : "text-slate-500"
       } ${justify}`}
     >
@@ -1659,7 +1689,7 @@ function AnalystComparisonTable({
         <table className="min-w-full text-sm">
           <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-4 py-2.5">
+              <th className="px-2.5 py-2">
                 <SortHead
                   label="Analyst"
                   col="analyst"
@@ -1668,7 +1698,7 @@ function AnalystComparisonTable({
                   align="left"
                 />
               </th>
-              <th className="px-4 py-2.5 text-right">
+              <th className="px-2.5 py-2 text-right">
                 <SortHead
                   label="Checks"
                   col="checks"
@@ -1677,7 +1707,7 @@ function AnalystComparisonTable({
                 />
               </th>
               {PLAYER_ACCURACY_COLUMNS.map((col) => (
-                <th key={col.key} className="px-4 py-2.5 text-right">
+                <th key={col.key} className="px-2.5 py-2 text-right">
                   <SortHead
                     label={col.label}
                     col={col.key}
@@ -1694,10 +1724,10 @@ function AnalystComparisonTable({
                 key={r.analyst}
                 className="border-t border-slate-100 hover:bg-slate-50"
               >
-                <td className="whitespace-nowrap px-4 py-2.5 font-medium text-slate-800">
+                <td className="whitespace-nowrap px-2.5 py-2 font-medium text-slate-800">
                   {r.analyst}
                 </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
+                <td className="px-2.5 py-2 text-right tabular-nums text-slate-600">
                   {r.checks}
                 </td>
                 {PLAYER_ACCURACY_COLUMNS.map((col) => {
@@ -1705,7 +1735,7 @@ function AnalystComparisonTable({
                   return (
                     <td
                       key={col.key}
-                      className={`px-4 py-2.5 text-right font-medium tabular-nums ${
+                      className={`px-2.5 py-2 text-right font-medium tabular-nums ${
                         v != null ? accColor(v) : "text-slate-300"
                       }`}
                     >
@@ -1785,11 +1815,11 @@ function LocationComparisonTable({
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-4 py-2.5">Location</th>
-              <th className="px-4 py-2.5 text-right">Analysts</th>
-              <th className="px-4 py-2.5 text-right">Checks</th>
+              <th className="px-2.5 py-2">Location</th>
+              <th className="px-2.5 py-2 text-right">Analysts</th>
+              <th className="px-2.5 py-2 text-right">Checks</th>
               {PLAYER_ACCURACY_COLUMNS.map((col) => (
-                <th key={col.key} className="px-4 py-2.5 text-right">
+                <th key={col.key} className="px-2.5 py-2 text-right">
                   {col.label}
                 </th>
               ))}
@@ -1798,13 +1828,13 @@ function LocationComparisonTable({
           <tbody>
             {rows.map((r) => (
               <tr key={r.location} className="border-t border-slate-100">
-                <td className="whitespace-nowrap px-4 py-2.5 font-semibold text-slate-800">
+                <td className="whitespace-nowrap px-2.5 py-2 font-semibold text-slate-800">
                   {r.location}
                 </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
+                <td className="px-2.5 py-2 text-right tabular-nums text-slate-600">
                   {r.analysts}
                 </td>
-                <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
+                <td className="px-2.5 py-2 text-right tabular-nums text-slate-600">
                   {r.checks}
                 </td>
                 {PLAYER_ACCURACY_COLUMNS.map((col) => {
@@ -1812,7 +1842,7 @@ function LocationComparisonTable({
                   return (
                     <td
                       key={col.key}
-                      className={`px-4 py-2.5 text-right font-medium tabular-nums ${
+                      className={`px-2.5 py-2 text-right font-medium tabular-nums ${
                         v != null ? accColor(v) : "text-slate-300"
                       }`}
                     >

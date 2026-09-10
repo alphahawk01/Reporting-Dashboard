@@ -47,6 +47,7 @@ import {
   parseInstances,
   compareInstances,
   canonicaliseTeams,
+  parseHomeAwayFromFileName,
   formatTime,
   parseTime,
   serializeInstances,
@@ -1412,14 +1413,27 @@ function AccuracyCompareInner() {
   // until the user types their own label.
   useEffect(() => {
     if (labelEdited) return;
-    if (!gradedAnalyst || !analyst?.name) {
+    if (!gradedAnalyst) {
       setMatchLabel("");
       return;
     }
     const analystNoSpaces = gradedAnalyst.replace(/\s+/g, "");
-    const fileNoExt = analyst.name.replace(/\.xml$/i, "");
-    setMatchLabel(`${analystNoSpaces}_${fileNoExt}`);
-  }, [gradedAnalyst, analyst, labelEdited]);
+    // Prefer a short "Analyst_Home_v_Away" label using the team names parsed
+    // from the master file name. Fall back to the analyst file name if the
+    // teams can't be determined.
+    const teams = parseHomeAwayFromFileName(master?.name);
+    if (teams) {
+      const clean = (t: string) => t.trim().replace(/\s+/g, "");
+      setMatchLabel(
+        `${analystNoSpaces}_${clean(teams[0])}_v_${clean(teams[1])}`
+      );
+    } else if (analyst?.name) {
+      const fileNoExt = analyst.name.replace(/\.xml$/i, "");
+      setMatchLabel(`${analystNoSpaces}_${fileNoExt}`);
+    } else {
+      setMatchLabel("");
+    }
+  }, [gradedAnalyst, analyst, master, labelEdited]);
 
   const analystWindow = useMemo(() => {
     const files = [master, analyst].filter(
@@ -2320,7 +2334,7 @@ function AccuracyCompareInner() {
                   setLabelEdited(true);
                   setMatchLabel(e.target.value);
                 }}
-                placeholder="Match label (auto: AnalystName_FileName)"
+                placeholder="Match label (auto: Analyst_Home_v_Away)"
                 className="min-w-[240px] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-500 focus:outline-none"
               />
               <div className="text-xs text-slate-500">
