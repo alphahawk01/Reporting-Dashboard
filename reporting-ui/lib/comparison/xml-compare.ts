@@ -204,7 +204,22 @@ function codeTime(stat: string, start: number, end: number): number {
     // window is expected to be long enough — don't clamp to end).
     return start + rule.offset;
   }
-  return (start + end) / 2;
+  const mid = (start + end) / 2;
+  // "Shot Saved" is coded slightly late, so nudge it 2s EARLIER. Checked
+  // before the generic "save" rule below (which shifts keeper "Saves" later).
+  if (s.includes("shot saved")) return mid - 2;
+  // These stats are coded slightly early relative to the actual moment, so
+  // nudge their code time 2s later (relative to the window midpoint) to line
+  // up. "foul" covers both "Foul" and "Fouls Drawn".
+  if (
+    s.includes("touch") ||
+    s.includes("foul") ||
+    s.includes("claim") ||
+    s.includes("save")
+  ) {
+    return mid + 2;
+  }
+  return mid;
 }
 
 /**
@@ -530,13 +545,40 @@ const STAT_PREFERENCES: Record<string, string[]> = {
     "intercepts",
     "clearances",
     "ground duels won",
+    "tackles successful",
+    "tackles unsuccessful",
   ],
-  "ground duels won": ["ground duels won", "ball recoverys"],
-  intercepts: ["intercepts", "ball recoverys", "clearances"],
+  "ground duels won": ["ground duels won", "ball recoverys", "tackles successful", "tackles unsuccessful"],
+  intercepts: [
+    "intercepts",
+    "ball recoverys",
+    "clearances",
+    "tackles successful",
+    "tackles unsuccessful",
+  ],
+  // --- Tackles (defensive actions; comparable with other ball-winning stats) ---
+  "tackles successful": [
+    "tackles successful",
+    "tackles unsuccessful",
+    "intercepts",
+    "ball recoverys",
+    "clearances",
+    "ground duels won",
+  ],
+  "tackles unsuccessful": [
+    "tackles unsuccessful",
+    "tackles successful",
+    "intercepts",
+    "ball recoverys",
+    "clearances",
+    "ground duels won",
+  ],
   clearances: [
     "clearances",
     "intercepts",
     "ball recoverys",
+    "tackles successful",
+    "tackles unsuccessful",
     "blocks",
     "long passes successful",
     "long passes unsuccessful",
@@ -552,6 +594,15 @@ const STAT_PREFERENCES: Record<string, string[]> = {
   catches: ["catches", "claims", "saves"],
   claims: ["claims", "catches", "saves"],
   saves: ["saves", "catches", "claims"],
+  // --- Goal kicks (succ/unsucc are the same action, different outcome) ---
+  "goal kicks successful": [
+    "goal kicks successful",
+    "goal kicks unsuccessful",
+  ],
+  "goal kicks unsuccessful": [
+    "goal kicks unsuccessful",
+    "goal kicks successful",
+  ],
   // --- On-ball possession ---
   touch: ["touch", "carries", "dribbles successful", "dribbles unsuccessful"],
   carries: ["carries", "touch", "dribbles successful", "dribbles unsuccessful"],

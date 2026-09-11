@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import {
   saveAccuracyCheck,
+  updateAccuracyCheck,
   getAccuracyCheckById,
   getSavedMasters,
   propagateMasterCorrection,
@@ -610,30 +611,6 @@ function exportPlayerCsv(rows: PlayerRow[], cols: PlayerCol[], fileName: string)
   a.download = fileName;
   a.click();
   URL.revokeObjectURL(url);
-}
-
-function StatCard({
-  label,
-  value,
-  sub,
-  accent,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  accent?: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
-        {label}
-      </p>
-      <p className={`mt-1 text-2xl font-bold ${accent ?? "text-slate-900"}`}>
-        {value}
-      </p>
-      {sub && <p className="text-xs text-slate-500">{sub}</p>}
-    </div>
-  );
 }
 
 // A Player Accuracy card: shows the group's exact-match %, the exact/master
@@ -1711,25 +1688,6 @@ function AccuracyCompareInner() {
     reviewClipsRef.current = reviewClips;
   }, [reviewClips]);
 
-  // Summary that reflects the active team/category/stat filters (NOT the
-  // status filter, so the cards show the full breakdown of the scope).
-  const scopedSummary = useMemo(() => {
-    const count = (s: MatchStatus) =>
-      statScopedRows.filter((r) => r.status === s).length;
-    const exact = count("exact");
-    const masterTotal = statScopedRows.filter((r) => r.master).length;
-    return {
-      accuracy: masterTotal > 0 ? exact / masterTotal : 0,
-      exact,
-      masterTotal,
-      wrongStat: count("wrong_stat"),
-      wrongPlayer: count("wrong_player"),
-      wrongTeam: count("wrong_team"),
-      missed: count("missed"),
-      extra: count("extra"),
-    };
-  }, [statScopedRows]);
-
   // Player Accuracy cards (football): volume of the analyst's coded stats vs
   // the master's, grouped into Overall / Passing / Offensive / Defensive /
   // Goalkeeper via the shared computePlayerAccuracy (single source of truth,
@@ -1954,6 +1912,42 @@ function AccuracyCompareInner() {
       console.error(err);
       setSaveMsg(
         err instanceof Error ? err.message : "Failed to save accuracy check."
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Update the currently-loaded saved check IN PLACE (no new row). Only
+  // available when a check was opened from history (loadedCheckId set).
+  async function handleUpdateCheck() {
+    if (!result || loadedCheckId == null) return;
+    if (!gradedAnalyst) {
+      setSaveMsg("Select the analyst being graded first.");
+      return;
+    }
+    try {
+      setSaving(true);
+      setSaveMsg(null);
+      await updateAccuracyCheck({
+        id: loadedCheckId,
+        xmlMaster: master?.raw ?? "",
+        xmlAnalyst: analyst?.raw ?? null,
+        result,
+        analystName: gradedAnalyst,
+        masterAnalystName: masterAnalyst || null,
+        matchLabel: matchLabel || null,
+        fileNameMaster: master?.name ?? null,
+        fileNameAnalyst: analyst?.name ?? null,
+        tolerance,
+        videoUrl: videoUrl || null,
+        sport,
+      });
+      setSaveMsg("Updated this check (no new check created).");
+    } catch (err) {
+      console.error(err);
+      setSaveMsg(
+        err instanceof Error ? err.message : "Failed to update accuracy check."
       );
     } finally {
       setSaving(false);
@@ -2351,13 +2345,25 @@ function AccuracyCompareInner() {
                   </>
                 )}
               </div>
+              {loadedCheckId != null && (
+                <button
+                  onClick={handleUpdateCheck}
+                  disabled={saving || !gradedAnalyst}
+                  title="Overwrite the check you opened (no new check is created)"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  <Save size={14} />
+                  {saving ? "Updating..." : "Update this check"}
+                </button>
+              )}
               <button
                 onClick={handleSaveCheck}
                 disabled={saving || !gradedAnalyst}
+                title="Create a new saved check"
                 className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition ${ACCENT_BG} hover:opacity-90 disabled:cursor-not-allowed disabled:bg-slate-300`}
               >
                 <Save size={14} />
-                {saving ? "Saving..." : "Save accuracy check"}
+                {saving ? "Saving..." : "Save as new check"}
               </button>
               {canEditMaster && loadedCheckId != null && (
                 <>
@@ -2426,28 +2432,6 @@ function AccuracyCompareInner() {
                 </button>
               </div>
             )}
-
-            {/* Summary cards — reflect the active team/category/stat filter */}
-            <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
-              <StatCard
-                label="Accuracy"
-                value={`${(scopedSummary.accuracy * 100).toFixed(1)}%`}
-                accent={
-                  scopedSummary.accuracy >= 0.9
-                    ? "text-emerald-600"
-                    : scopedSummary.accuracy >= 0.7
-                      ? "text-amber-600"
-                      : "text-red-600"
-                }
-                sub={`${scopedSummary.exact}/${scopedSummary.masterTotal} exact`}
-              />
-              <StatCard label="Exact" value={`${scopedSummary.exact}`} accent="text-emerald-600" />
-              <StatCard label="Wrong stat" value={`${scopedSummary.wrongStat}`} accent="text-amber-600" />
-              <StatCard label="Wrong player" value={`${scopedSummary.wrongPlayer}`} accent="text-orange-600" />
-              <StatCard label="Wrong team" value={`${scopedSummary.wrongTeam}`} accent="text-red-600" />
-              <StatCard label="Missed" value={`${scopedSummary.missed}`} accent="text-slate-600" />
-              <StatCard label="Extra" value={`${scopedSummary.extra}`} accent="text-purple-600" />
-            </div>
 
             {/* Player Accuracy — analyst's coded volume vs master, grouped.
                 Passing (passes + crosses), Offensive (shots + goals),

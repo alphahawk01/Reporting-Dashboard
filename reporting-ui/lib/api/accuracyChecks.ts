@@ -168,20 +168,36 @@ export interface UpdateAccuracyCheckInput {
     xmlMaster: string;
     /** The recomputed comparison result (master vs the check's analyst). */
     result: ComparisonResult;
+    /**
+     * Optional full-check fields. When provided (e.g. from the "Update check"
+     * button on the comparison page), these are written too so an in-place
+     * update fully mirrors a fresh save. Omit them (e.g. from the dispute
+     * master-correction flow) to only rewrite master XML + summary.
+     */
+    masterAnalystName?: string | null;
+    analystName?: string | null;
+    matchLabel?: string | null;
+    fileNameMaster?: string | null;
+    fileNameAnalyst?: string | null;
+    tolerance?: number | null;
+    xmlAnalyst?: string | null;
+    videoUrl?: string | null;
+    sport?: string | null;
 }
 
 /**
- * Update an EXISTING saved check in place after an admin has corrected the
- * master (e.g. resolving a dispute where the master was wrong). Rewrites the
- * stored master XML and every recomputed summary/breakdown column so the
- * saved accuracy reflects the corrected master. The analyst XML is untouched.
+ * Update an EXISTING saved check in place (no new row). Always rewrites the
+ * master XML and recomputed summary/breakdowns + precomputed player_accuracy.
+ * Any optional full-check fields provided (label, analysts, video, etc.) are
+ * updated too, so this can serve both the dispute master-correction flow and
+ * a full "Update check" from the comparison page.
  */
 export async function updateAccuracyCheck(
     input: UpdateAccuracyCheckInput
 ): Promise<AccuracyCheck> {
     const s = input.result.summary;
 
-    const row = {
+    const row: Record<string, unknown> = {
         accuracy: s.accuracy,
         master_total: s.masterTotal,
         analyst_total: s.analystTotal,
@@ -197,7 +213,35 @@ export async function updateAccuracyCheck(
         team_breakdown: input.result.byTeam ?? null,
 
         xml_master: input.xmlMaster,
+
+        // Recompute stored player accuracy from the (possibly edited) master
+        // vs the analyst XML (prefer the passed analyst XML, else master-only
+        // won't compute — the compare page always passes both).
+        player_accuracy: computeStoredPlayerAccuracy(
+            input.xmlMaster,
+            input.xmlAnalyst,
+            input.tolerance,
+            input.fileNameMaster
+        ),
     };
+
+    // Only overwrite these when explicitly provided.
+    if (input.masterAnalystName !== undefined)
+        row.master_analyst_name = input.masterAnalystName?.trim() || null;
+    if (input.analystName !== undefined)
+        row.analyst_name = input.analystName?.trim() || null;
+    if (input.matchLabel !== undefined)
+        row.match_label = input.matchLabel?.trim() || null;
+    if (input.fileNameMaster !== undefined)
+        row.file_name_master = input.fileNameMaster ?? null;
+    if (input.fileNameAnalyst !== undefined)
+        row.file_name_analyst = input.fileNameAnalyst ?? null;
+    if (input.tolerance !== undefined) row.tolerance = input.tolerance ?? null;
+    if (input.xmlAnalyst !== undefined)
+        row.xml_analyst = input.xmlAnalyst ?? null;
+    if (input.videoUrl !== undefined)
+        row.video_url = input.videoUrl?.trim() || null;
+    if (input.sport !== undefined) row.sport = input.sport ?? null;
 
     const { data, error } = await supabase
         .from("accuracy_checks")

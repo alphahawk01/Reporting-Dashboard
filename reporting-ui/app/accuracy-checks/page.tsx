@@ -196,6 +196,39 @@ function storedGroupPct(
   return g ? g.pct : null;
 }
 
+// Average each Player Accuracy group across a set of checks (both-teams scope).
+// Only checks with a value for a group count toward its average, so
+// missing/non-football checks don't drag it down. Values are null when no
+// check has a computed value for that group.
+function averageGroups(
+  checks: AccuracyCheckMeta[]
+): Record<PlayerAccuracyGroupKey, number | null> {
+  const sums = new Map<PlayerAccuracyGroupKey, { total: number; n: number }>();
+  for (const col of PLAYER_ACCURACY_COLUMNS)
+    sums.set(col.key, { total: 0, n: 0 });
+  for (const c of checks) {
+    for (const col of PLAYER_ACCURACY_COLUMNS) {
+      const v = storedGroupPct(c, col.key);
+      if (v == null) continue;
+      const s = sums.get(col.key)!;
+      s.total += v;
+      s.n += 1;
+    }
+  }
+  const out: Record<PlayerAccuracyGroupKey, number | null> = {
+    overall: null,
+    passing: null,
+    offensive: null,
+    defensive: null,
+    goalkeeper: null,
+  };
+  for (const col of PLAYER_ACCURACY_COLUMNS) {
+    const s = sums.get(col.key)!;
+    if (s.n > 0) out[col.key] = s.total / s.n;
+  }
+  return out;
+}
+
 // One analyst's row within a master-fixture group. Holds the per-group
 // Player Accuracy for the active scope (key -> group result, or null when the
 // XML isn't available yet / the check has no football data).
@@ -679,6 +712,10 @@ export default function AccuracyChecksPage() {
       );
   }, [checks, weekFilter, locationByName]);
 
+  // Overall averages across ALL (sport-filtered) checks, for the History
+  // summary cards.
+  const overallAverages = useMemo(() => averageGroups(checks), [checks]);
+
   const [expandedFixture, setExpandedFixture] = useState<string | null>(null);
   const [fixtureSearch, setFixtureSearch] = useState("");
   // Both / Home / Away scope for the category accuracy columns.
@@ -917,6 +954,30 @@ export default function AccuracyChecksPage() {
           />
         ) : (
           <div className="space-y-6">
+            {/* Overall averages across all checks */}
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Overall averages{" "}
+                <span className="font-normal normal-case text-slate-400">
+                  (across {checks.length} check
+                  {checks.length === 1 ? "" : "s"})
+                </span>
+              </p>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                {PLAYER_ACCURACY_COLUMNS.map((col) => {
+                  const v = overallAverages[col.key];
+                  return (
+                    <Stat
+                      key={col.key}
+                      label={col.label}
+                      value={v != null ? pct(v) : "—"}
+                      color={v != null ? accColor(v) : undefined}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Top: analyst picker + trend (left) and leaderboard (right) */}
             <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,1fr)]">
             {/* LEFT: analyst picker + trend */}
@@ -1401,6 +1462,45 @@ export default function AccuracyChecksPage() {
                               </tr>
                             ))}
                           </tbody>
+                          <tfoot>
+                            <tr className="border-t-2 border-slate-300 bg-slate-50 font-semibold text-slate-800">
+                              <td className="py-2 pr-4" colSpan={2}>
+                                Average ({g.rows.length} check
+                                {g.rows.length === 1 ? "" : "s"})
+                              </td>
+                              {PLAYER_ACCURACY_COLUMNS.map((col, idx) => {
+                                // Average the visible per-row group %s (honours
+                                // the active Both/Home/Away scope).
+                                let total = 0;
+                                let n = 0;
+                                for (const r of g.rows) {
+                                  const grp =
+                                    r.groups?.[col.key as keyof PlayerAccuracy];
+                                  if (grp) {
+                                    total += grp.pct;
+                                    n += 1;
+                                  }
+                                }
+                                const v = n > 0 ? total / n : null;
+                                return (
+                                  <td
+                                    key={col.key}
+                                    className={`py-2 px-3 text-center tabular-nums ${
+                                      idx === 0
+                                        ? "border-l border-slate-200"
+                                        : ""
+                                    } ${
+                                      v != null
+                                        ? accColor(v)
+                                        : "text-slate-300"
+                                    }`}
+                                  >
+                                    {v != null ? pct(v) : "—"}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          </tfoot>
                         </table>
                         {g.rows.every((r) => r.groups == null) && (
                           <p className="pt-2 text-xs text-slate-400">
