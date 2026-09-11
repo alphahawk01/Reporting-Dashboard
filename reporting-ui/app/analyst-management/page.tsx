@@ -9,6 +9,7 @@ import {
     createAnalyst,
     updateAnalystLocation,
     updatePlatformAnalystName,
+    mergeAnalysts,
     type AnalystLocation,
     updateHomeComputer,
     updateOfficeComputer,
@@ -52,6 +53,12 @@ export default function AnalystsPage() {
         useState<PlatformAnalyst[]>([]);
 
     const [addOpen, setAddOpen] = useState(false);
+    // Merge duplicate analysts (source -> target).
+    const [mergeOpen, setMergeOpen] = useState(false);
+    const [mergeSource, setMergeSource] = useState("");
+    const [mergeTarget, setMergeTarget] = useState("");
+    const [merging, setMerging] = useState(false);
+    const [mergeMsg, setMergeMsg] = useState<string | null>(null);
 
     const [computers, setComputers] =
         useState<Computer[]>([]);
@@ -774,6 +781,35 @@ export default function AnalystsPage() {
         }
     }
 
+    async function confirmMerge() {
+        if (!mergeSource || !mergeTarget) {
+            setMergeMsg("Pick both a duplicate and the analyst to keep.");
+            return;
+        }
+        if (mergeSource === mergeTarget) {
+            setMergeMsg("Pick two different analysts.");
+            return;
+        }
+        setMerging(true);
+        setMergeMsg(null);
+        try {
+            const res = await mergeAnalysts(mergeSource, mergeTarget);
+            setMergeMsg(
+                `Merged "${mergeSource}" into "${mergeTarget}". ` +
+                    `${res.checksReassigned} check${
+                        res.checksReassigned === 1 ? "" : "s"
+                    } reassigned.`
+            );
+            setMergeSource("");
+            setMergeTarget("");
+            await load();
+        } catch (err: any) {
+            setMergeMsg(err?.message || "Failed to merge analysts.");
+        } finally {
+            setMerging(false);
+        }
+    }
+
 
     // ==================================================
     // LOADING
@@ -852,6 +888,29 @@ export default function AnalystsPage() {
                         "
                     >
                         <UserPlus size={16} /> Add analyst
+                    </button>
+
+                    <button
+                        onClick={() => {
+                            setMergeMsg(null);
+                            setMergeOpen(true);
+                        }}
+                        className="
+                            inline-flex
+                            items-center
+                            gap-1.5
+                            rounded-lg
+                            border
+                            border-slate-300
+                            bg-white
+                            px-4
+                            py-2
+                            font-medium
+                            text-slate-700
+                            hover:bg-slate-50
+                        "
+                    >
+                        Merge
                     </button>
 
                     <Link
@@ -960,6 +1019,87 @@ export default function AnalystsPage() {
                 onClose={() => setAddOpen(false)}
                 onSaved={load}
             />
+
+            {/* MERGE MODAL */}
+            {mergeOpen && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+                    onClick={() => setMergeOpen(false)}
+                >
+                    <div
+                        className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h2 className="mb-1 text-lg font-bold text-slate-900">
+                            Merge analysts
+                        </h2>
+                        <p className="mb-4 text-xs text-slate-500">
+                            Combine a duplicate into the analyst you want to
+                            keep. The duplicate&apos;s checks, team affiliations
+                            and location move to the kept analyst, then the
+                            duplicate is removed.
+                        </p>
+
+                        <label className="mb-1 block text-xs font-medium text-slate-500">
+                            Duplicate to remove
+                        </label>
+                        <select
+                            value={mergeSource}
+                            onChange={(e) => setMergeSource(e.target.value)}
+                            className="mb-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500"
+                        >
+                            <option value="">Select analyst…</option>
+                            {mergedAnalysts.map((a) => (
+                                <option key={`s-${a.id}`} value={a.name}>
+                                    {a.name}
+                                </option>
+                            ))}
+                        </select>
+
+                        <label className="mb-1 block text-xs font-medium text-slate-500">
+                            Keep (merge into)
+                        </label>
+                        <select
+                            value={mergeTarget}
+                            onChange={(e) => setMergeTarget(e.target.value)}
+                            className="mb-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500"
+                        >
+                            <option value="">Select analyst…</option>
+                            {mergedAnalysts
+                                .filter((a) => a.name !== mergeSource)
+                                .map((a) => (
+                                    <option key={`t-${a.id}`} value={a.name}>
+                                        {a.name}
+                                    </option>
+                                ))}
+                        </select>
+
+                        {mergeMsg && (
+                            <p className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                                {mergeMsg}
+                            </p>
+                        )}
+
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setMergeOpen(false)}
+                                className="flex-1 rounded-lg border border-slate-300 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                            >
+                                Close
+                            </button>
+                            <button
+                                onClick={confirmMerge}
+                                disabled={
+                                    merging || !mergeSource || !mergeTarget
+                                }
+                                className="flex-1 rounded-lg bg-blue-600 py-2.5 text-sm font-semibold text-white hover:bg-blue-500 disabled:bg-slate-300"
+                            >
+                                {merging ? "Merging…" : "Merge"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* RENAME MODAL */}
             {renameModal.open && (

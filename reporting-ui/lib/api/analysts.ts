@@ -374,6 +374,131 @@ export async function updatePlatformAnalystName(
     return true;
 }
 
+export interface MergeAnalystsResult {
+    checksReassigned: number;
+    affiliationsReassigned: number;
+}
+
+/**
+ * Merge a duplicate analyst (source) into another (target), by name. Used to
+ * fix name mismatches (e.g. "Will Purssey" -> "William Purssey"):
+ *   - Reassigns accuracy_checks (analyst_name AND master_analyst_name) from
+ *     the source name to the target name, so historical checks attribute to
+ *     the target.
+ *   - Moves team affiliations to the target (skipping ones the target already
+ *     has, to avoid duplicates).
+ *   - Gives the target the source's location if the target has none.
+ *   - Deletes the source row from the `analysts` table.
+ * Matching is case-insensitive. `.NET` records are not touched (separate data
+ * source); this fixes the Supabase side that checks + location use.
+ */
+export async function mergeAnalysts(
+    sourceName: string,
+    targetName: string
+): Promise<MergeAnalystsResult> {
+    const src = sourceName.trim();
+    const tgt = targetName.trim();
+    if (!src || !tgt) throw new Error("Both analysts are required.");
+    if (src.toLowerCase() === tgt.toLowerCase())
+        throw new Error("Source and target are the same analyst.");
+
+    // 1) Reassign accuracy_checks.analyst_name (graded) source -> target.
+    let checksReassigned = 0;
+    {
+        const { data, error } = await supabase
+            .from("accuracy_checks")
+            .update({ analyst_name: tgt })
+            .ilike("analyst_name", src)
+            .select("id");
+        if (error) {
+            console.error("Merge: failed reassigning checks:", error);
+            throw new Error(error.message || "Failed reassigning checks");
+        }
+        checksReassigned = data?.length ?? 0;
+    }
+
+    // 1b) Reassign master_analyst_name where the source coded the master.
+    {
+        const { error } = await supabase
+            .from("accuracy_checks")
+            .update({ master_analyst_name: tgt })
+            .ilike("master_analyst_name", src);
+        if (error) {
+            console.error("Merge: failed reassigning master names:", error);
+            throw new Error(error.message || "Failed reassigning master names");
+        }
+    }
+
+    // 2) Move team affiliations, skipping any the target already has.
+    let affiliationsReassigned = 0;
+    {
+        const { data: srcAff } = await supabase
+            .from("analyst_team_affiliations")
+            .select("team_id")
+            .ilike("analyst_name", src);
+        const { data: tgtAff } = await supabase
+            .from("analyst_team_affiliations")
+            .select("team_id")
+            .ilike("analyst_name", tgt);
+        const tgtTeamIds = new Set(
+            (tgtAff ?? []).map((r) => (r as { team_id: number }).team_id)
+        );
+        const toMove = (srcAff ?? [])
+            .map((r) => (r as { team_id: number }).team_id)
+            .filter((id) => !tgtTeamIds.has(id));
+
+        // Point the non-duplicate ones at the target...
+        for (const teamId of toMove) {
+            const { error } = await supabase
+                .from("analyst_team_affiliations")
+                .update({ analyst_name: tgt })
+                .ilike("analyst_name", src)
+                .eq("team_id", teamId);
+            if (!error) affiliationsReassigned += 1;
+        }
+        // ...then remove any remaining source affiliations (duplicates).
+        await supabase
+            .from("analyst_team_affiliations")
+            .delete()
+            .ilike("analyst_name", src);
+    }
+
+    // 3) Carry location to the target if it has none.
+    {
+        const fetchRow = async (name: string) => {
+            const { data } = await supabase
+                .from("analysts")
+                .select("id, name, location")
+                .ilike("name", name)
+                .limit(1);
+            return (data?.[0] as PlatformAnalyst | undefined) ?? undefined;
+        };
+        const srcRow = await fetchRow(src);
+        const tgtRow = await fetchRow(tgt);
+
+        if (tgtRow && !tgtRow.location && srcRow?.location) {
+            await supabase
+                .from("analysts")
+                .update({ location: srcRow.location })
+                .eq("id", tgtRow.id);
+        }
+
+        // 4) Delete the source analysts row.
+        if (srcRow) {
+            const { error } = await supabase
+                .from("analysts")
+                .delete()
+                .eq("id", srcRow.id);
+            if (error) {
+                console.error("Merge: failed deleting source analyst:", error);
+                throw new Error(error.message || "Failed deleting source analyst");
+            }
+        }
+    }
+
+    return { checksReassigned, affiliationsReassigned };
+}
+
 /**
  * Update an existing platform analyst's location. Used from Analyst
  * Management to set/change where an analyst is based.
