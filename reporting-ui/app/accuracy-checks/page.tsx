@@ -4,7 +4,16 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { Trophy, History, Trash2, X, Flag, Sparkles } from "lucide-react";
+import {
+  Trophy,
+  History,
+  Trash2,
+  X,
+  Flag,
+  Sparkles,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 
 // Accuracy trend chart pulls in recharts — load lazily so recharts stays out
 // of this page's initial bundle and only downloads when a trend is shown.
@@ -741,13 +750,39 @@ export default function AccuracyChecksPage() {
         ? checks
         : checks.filter((c) => isoWeekKey(c.created_at) === weekFilter);
 
+    // Per-analyst accumulator, grouped under each location, so a location row
+    // can expand to show every analyst that belongs to it.
+    type Sums = Map<PlayerAccuracyGroupKey, { total: number; n: number }>;
+    const newSums = (): Sums => {
+      const s: Sums = new Map();
+      for (const col of PLAYER_ACCURACY_COLUMNS)
+        s.set(col.key, { total: 0, n: 0 });
+      return s;
+    };
+    const finalizeGroups = (
+      sums: Sums
+    ): Record<PlayerAccuracyGroupKey, number | null> => {
+      const groups: Record<PlayerAccuracyGroupKey, number | null> = {
+        overall: null,
+        passing: null,
+        offensive: null,
+        defensive: null,
+        goalkeeper: null,
+      };
+      for (const col of PLAYER_ACCURACY_COLUMNS) {
+        const s = sums.get(col.key)!;
+        groups[col.key] = s.n > 0 ? s.total / s.n : null;
+      }
+      return groups;
+    };
+
     const byLoc = new Map<
       string,
       {
         location: string;
         checks: number;
-        analysts: Set<string>;
-        sums: Map<PlayerAccuracyGroupKey, { total: number; n: number }>;
+        sums: Sums;
+        analysts: Map<string, { analyst: string; checks: number; sums: Sums }>;
       }
     >();
 
@@ -756,45 +791,53 @@ export default function AccuracyChecksPage() {
       const loc = locationByName.get(name.toLowerCase()) ?? "Unknown";
       let e = byLoc.get(loc);
       if (!e) {
-        const sums = new Map<
-          PlayerAccuracyGroupKey,
-          { total: number; n: number }
-        >();
-        for (const col of PLAYER_ACCURACY_COLUMNS)
-          sums.set(col.key, { total: 0, n: 0 });
-        e = { location: loc, checks: 0, analysts: new Set(), sums };
+        e = {
+          location: loc,
+          checks: 0,
+          sums: newSums(),
+          analysts: new Map(),
+        };
         byLoc.set(loc, e);
       }
       e.checks += 1;
-      if (name) e.analysts.add(name.toLowerCase());
+
+      // Per-analyst bucket within this location.
+      const analystKey = name || "—";
+      let a = e.analysts.get(analystKey);
+      if (!a) {
+        a = { analyst: analystKey, checks: 0, sums: newSums() };
+        e.analysts.set(analystKey, a);
+      }
+      a.checks += 1;
+
       for (const col of PLAYER_ACCURACY_COLUMNS) {
         const v = storedGroupPct(c, col.key);
         if (v == null) continue;
         const s = e.sums.get(col.key)!;
         s.total += v;
         s.n += 1;
+        const as = a.sums.get(col.key)!;
+        as.total += v;
+        as.n += 1;
       }
     }
 
     const order = [...ANALYST_LOCATIONS, "Unknown"];
     return Array.from(byLoc.values())
       .map((e) => {
-        const groups: Record<PlayerAccuracyGroupKey, number | null> = {
-          overall: null,
-          passing: null,
-          offensive: null,
-          defensive: null,
-          goalkeeper: null,
-        };
-        for (const col of PLAYER_ACCURACY_COLUMNS) {
-          const s = e.sums.get(col.key)!;
-          groups[col.key] = s.n > 0 ? s.total / s.n : null;
-        }
+        const analystRows = Array.from(e.analysts.values())
+          .map((a) => ({
+            analyst: a.analyst,
+            checks: a.checks,
+            groups: finalizeGroups(a.sums),
+          }))
+          .sort((a, b) => (b.groups.overall ?? -1) - (a.groups.overall ?? -1));
         return {
           location: e.location,
           checks: e.checks,
           analysts: e.analysts.size,
-          groups,
+          groups: finalizeGroups(e.sums),
+          analystRows,
         };
       })
       .sort(
@@ -1068,9 +1111,9 @@ export default function AccuracyChecksPage() {
               </div>
             </div>
 
-            {/* Top: analyst picker + trend (left) and leaderboard (right) */}
+            {/* Top: analyst picker (left) and leaderboard (right) */}
             <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,1fr)]">
-            {/* LEFT: analyst picker + trend */}
+            {/* LEFT: analyst picker */}
             <div className="space-y-6">
               {/* Analyst picker */}
               <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1116,55 +1159,6 @@ export default function AccuracyChecksPage() {
                   </div>
                 )}
               </div>
-
-              {/* Trend chart */}
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-sm font-semibold text-slate-700">
-                    Accuracy trend
-                  </h2>
-                  {selectedAnalyst && (
-                    <div className="flex flex-wrap items-center gap-1">
-                      {PLAYER_ACCURACY_COLUMNS.map((col) => (
-                        <button
-                          key={col.key}
-                          onClick={() => setTrendGroup(col.key)}
-                          className={`rounded-md px-2 py-1 text-[11px] font-semibold transition ${
-                            trendGroup === col.key
-                              ? "bg-slate-900 text-white"
-                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                          }`}
-                        >
-                          {col.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {!selectedAnalyst ? (
-                  <p className="text-sm text-slate-400">
-                    Select an analyst to see their accuracy trend.
-                  </p>
-                ) : trendData.length < 2 ? (
-                  <p className="text-sm text-slate-400">
-                    Need at least 2 saved checks to show a trend.
-                  </p>
-                ) : (
-                  <div className="h-64">
-                    <AccuracyTrendChart data={trendData} />
-                  </div>
-                )}
-              </div>
-
-              {/* Recommendations: top problem stats for the analyst */}
-              {selectedAnalyst && analystRecommendations && (
-                <RecommendationsPanel
-                  data={analystRecommendations}
-                  threshold={PROBLEM_THRESHOLD}
-                  analyst={selectedAnalyst}
-                  onOpenCheck={openCheck}
-                />
-              )}
             </div>
 
             {/* RIGHT: master-checks leaderboard */}
@@ -1207,6 +1201,55 @@ export default function AccuracyChecksPage() {
               </div>
             </div>
             </div>
+
+            {/* Trend chart — full width */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold text-slate-700">
+                  Accuracy trend
+                </h2>
+                {selectedAnalyst && (
+                  <div className="flex flex-wrap items-center gap-1">
+                    {PLAYER_ACCURACY_COLUMNS.map((col) => (
+                      <button
+                        key={col.key}
+                        onClick={() => setTrendGroup(col.key)}
+                        className={`rounded-md px-2 py-1 text-[11px] font-semibold transition ${
+                          trendGroup === col.key
+                            ? "bg-slate-900 text-white"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        {col.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {!selectedAnalyst ? (
+                <p className="text-sm text-slate-400">
+                  Select an analyst to see their accuracy trend.
+                </p>
+              ) : trendData.length < 2 ? (
+                <p className="text-sm text-slate-400">
+                  Need at least 2 saved checks to show a trend.
+                </p>
+              ) : (
+                <div className="h-64">
+                  <AccuracyTrendChart data={trendData} />
+                </div>
+              )}
+            </div>
+
+            {/* Recommendations: top problem stats for the analyst — full width */}
+            {selectedAnalyst && analystRecommendations && (
+              <RecommendationsPanel
+                data={analystRecommendations}
+                threshold={PROBLEM_THRESHOLD}
+                analyst={selectedAnalyst}
+                onOpenCheck={openCheck}
+              />
+            )}
 
             {/* Saved checks — full width */}
             <div>
@@ -1903,30 +1946,21 @@ function RecommendationsPanel({
           {data.stats.map((s, i) => (
             <li
               key={s.label}
-              className="rounded-xl border border-slate-100 bg-slate-50 p-3"
+              className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3"
             >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-semibold text-slate-800">
-                  {i + 1}. {s.label}
-                  <span className="ml-1.5 text-xs font-normal text-slate-400">
-                    {s.group}
-                  </span>
+              {/* Stat + group */}
+              <span className="shrink-0 text-sm font-semibold text-slate-800">
+                {i + 1}. {s.label}
+                <span className="ml-1.5 text-xs font-normal text-slate-400">
+                  {s.group}
                 </span>
-                <span
-                  className={`text-sm font-bold tabular-nums ${accColor(
-                    s.pct
-                  )}`}
-                >
-                  {(s.pct * 100).toFixed(1)}%
-                  <span className="ml-1 text-xs font-normal text-slate-400">
-                    ({s.exact}/{s.master})
-                  </span>
-                </span>
-              </div>
+              </span>
+
+              {/* Worst check — same line */}
               {s.worst && (
                 <button
                   onClick={() => onOpenCheck(s.worst!.checkId)}
-                  className="mt-1.5 block w-full text-left text-xs text-slate-500 hover:text-slate-700"
+                  className="min-w-0 flex-1 truncate text-left text-xs text-slate-500 hover:text-slate-700"
                   title="Open this check"
                 >
                   Struggled most in{" "}
@@ -1943,6 +1977,23 @@ function RecommendationsPanel({
                   ({s.worst.exact}/{s.worst.master})
                 </button>
               )}
+
+              {/* Overall accuracy — right aligned */}
+              <span className="ml-auto flex shrink-0 items-baseline gap-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  Total
+                </span>
+                <span
+                  className={`text-sm font-bold tabular-nums ${accColor(
+                    s.pct
+                  )}`}
+                >
+                  {(s.pct * 100).toFixed(1)}%
+                  <span className="ml-1 text-xs font-normal text-slate-400">
+                    ({s.exact}/{s.master})
+                  </span>
+                </span>
+              </span>
             </li>
           ))}
         </ol>
@@ -2082,11 +2133,17 @@ function AnalystComparisonTable({
 
 // By-location comparison: each country's average Player Accuracy per group,
 // with the same week selector. Read-only (few rows, no sorting needed).
+type LocationAnalystRow = {
+  analyst: string;
+  checks: number;
+  groups: Record<PlayerAccuracyGroupKey, number | null>;
+};
 type LocationRowData = {
   location: string;
   checks: number;
   analysts: number;
   groups: Record<PlayerAccuracyGroupKey, number | null>;
+  analystRows: LocationAnalystRow[];
 };
 
 function LocationComparisonTable({
@@ -2100,6 +2157,16 @@ function LocationComparisonTable({
   weekFilter: string;
   onWeekChange: (w: string) => void;
 }) {
+  // Which location rows are expanded to show their analysts.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (loc: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(loc)) next.delete(loc);
+      else next.add(loc);
+      return next;
+    });
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
@@ -2109,7 +2176,8 @@ function LocationComparisonTable({
           </h2>
           <p className="mt-0.5 text-xs text-slate-400">
             Averaged across all analysts in each country
-            {weekFilter === "all" ? " (whole season)" : ""}.
+            {weekFilter === "all" ? " (whole season)" : ""}. Click a location to
+            see its analysts.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -2133,6 +2201,7 @@ function LocationComparisonTable({
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
+              <th className="w-6 px-2.5 py-2" />
               <th className="px-2.5 py-2">Location</th>
               <th className="px-2.5 py-2 text-right">Analysts</th>
               <th className="px-2.5 py-2 text-right">Checks</th>
@@ -2144,36 +2213,96 @@ function LocationComparisonTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.location} className="border-t border-slate-100">
-                <td className="whitespace-nowrap px-2.5 py-2 font-semibold text-slate-800">
-                  {r.location}
-                </td>
-                <td className="px-2.5 py-2 text-right tabular-nums text-slate-600">
-                  {r.analysts}
-                </td>
-                <td className="px-2.5 py-2 text-right tabular-nums text-slate-600">
-                  {r.checks}
-                </td>
-                {PLAYER_ACCURACY_COLUMNS.map((col) => {
-                  const v = r.groups[col.key];
-                  return (
-                    <td
-                      key={col.key}
-                      className={`px-2.5 py-2 text-right font-medium tabular-nums ${
-                        v != null ? accColor(v) : "text-slate-300"
-                      }`}
-                    >
-                      {v != null ? pct(v) : "—"}
+            {rows.map((r) => {
+              const isOpen = expanded.has(r.location);
+              return (
+                <React.Fragment key={r.location}>
+                  <tr
+                    onClick={() => toggle(r.location)}
+                    className="cursor-pointer border-t border-slate-100 transition hover:bg-slate-50"
+                  >
+                    <td className="px-2.5 py-2 align-middle text-slate-400">
+                      {isOpen ? (
+                        <ChevronDown size={14} />
+                      ) : (
+                        <ChevronRight size={14} />
+                      )}
                     </td>
-                  );
-                })}
-              </tr>
-            ))}
+                    <td className="whitespace-nowrap px-2.5 py-2 font-semibold text-slate-800">
+                      {r.location}
+                    </td>
+                    <td className="px-2.5 py-2 text-right tabular-nums text-slate-600">
+                      {r.analysts}
+                    </td>
+                    <td className="px-2.5 py-2 text-right tabular-nums text-slate-600">
+                      {r.checks}
+                    </td>
+                    {PLAYER_ACCURACY_COLUMNS.map((col) => {
+                      const v = r.groups[col.key];
+                      return (
+                        <td
+                          key={col.key}
+                          className={`px-2.5 py-2 text-right font-medium tabular-nums ${
+                            v != null ? accColor(v) : "text-slate-300"
+                          }`}
+                        >
+                          {v != null ? pct(v) : "—"}
+                        </td>
+                      );
+                    })}
+                  </tr>
+
+                  {/* Expanded: one row per analyst in this location. */}
+                  {isOpen &&
+                    (r.analystRows.length === 0 ? (
+                      <tr className="bg-slate-50/60">
+                        <td />
+                        <td
+                          colSpan={3 + PLAYER_ACCURACY_COLUMNS.length}
+                          className="px-2.5 py-2 text-xs text-slate-400"
+                        >
+                          No analysts for this location.
+                        </td>
+                      </tr>
+                    ) : (
+                      r.analystRows.map((a) => (
+                        <tr
+                          key={`${r.location}-${a.analyst}`}
+                          className="border-t border-slate-50 bg-slate-50/60"
+                        >
+                          <td />
+                          <td className="whitespace-nowrap px-2.5 py-2 pl-6 text-slate-600">
+                            {a.analyst}
+                          </td>
+                          <td className="px-2.5 py-2 text-right tabular-nums text-slate-400">
+                            —
+                          </td>
+                          <td className="px-2.5 py-2 text-right tabular-nums text-slate-500">
+                            {a.checks}
+                          </td>
+                          {PLAYER_ACCURACY_COLUMNS.map((col) => {
+                            const v = a.groups[col.key];
+                            return (
+                              <td
+                                key={col.key}
+                                className={`px-2.5 py-2 text-right tabular-nums ${
+                                  v != null ? accColor(v) : "text-slate-300"
+                                }`}
+                              >
+                                {v != null ? pct(v) : "—"}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))
+                    ))}
+                </React.Fragment>
+              );
+            })}
             {rows.length === 0 && (
               <tr>
                 <td
-                  colSpan={3 + PLAYER_ACCURACY_COLUMNS.length}
+                  colSpan={4 + PLAYER_ACCURACY_COLUMNS.length}
                   className="p-6 text-center text-sm text-slate-400"
                 >
                   No checks for this week.
