@@ -8,6 +8,7 @@ import {
     getPlatformAnalysts,
     createAnalyst,
     updateAnalystLocation,
+    updatePlatformAnalystName,
     type AnalystLocation,
     updateHomeComputer,
     updateOfficeComputer,
@@ -87,11 +88,13 @@ export default function AnalystsPage() {
         useState<{
             open: boolean;
             analystId: number;
+            currentName: string;
             firstName: string;
             lastName: string;
         }>({
             open: false,
             analystId: 0,
+            currentName: "",
             firstName: "",
             lastName: "",
         });
@@ -726,18 +729,43 @@ export default function AnalystsPage() {
         setRenameModal({
             open: true,
             analystId,
+            currentName,
             firstName,
             lastName,
         });
     }
 
     async function confirmRename() {
+        const newName = [
+            renameModal.firstName.trim(),
+            renameModal.lastName.trim(),
+        ]
+            .filter(Boolean)
+            .join(" ");
         try {
-            await renameAnalyst(
-                renameModal.analystId,
-                renameModal.firstName.trim() || undefined,
-                renameModal.lastName.trim() || undefined
-            );
+            // Update the .NET analyst record (positive ids only — platform-only
+            // rows have synthetic negative ids the .NET API doesn't know).
+            if (renameModal.analystId > 0) {
+                await renameAnalyst(
+                    renameModal.analystId,
+                    renameModal.firstName.trim() || undefined,
+                    renameModal.lastName.trim() || undefined
+                );
+            }
+
+            // Also update the SUPABASE analysts name — this is what accuracy
+            // checks match on, so keeping it in sync fixes name-mismatch issues
+            // (e.g. "Will" -> "William"). Non-fatal if it fails.
+            if (newName && newName !== renameModal.currentName.trim()) {
+                try {
+                    await updatePlatformAnalystName(
+                        renameModal.currentName,
+                        newName
+                    );
+                } catch (e: any) {
+                    console.error("Failed syncing platform analyst name:", e);
+                }
+            }
 
             setRenameModal(curr => ({ ...curr, open: false }));
             await load();

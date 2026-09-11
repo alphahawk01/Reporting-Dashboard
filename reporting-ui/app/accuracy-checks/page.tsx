@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { Trophy, History, Trash2, X, Flag } from "lucide-react";
+import { Trophy, History, Trash2, X, Flag, Sparkles } from "lucide-react";
 
 // Accuracy trend chart pulls in recharts — load lazily so recharts stays out
 // of this page's initial bundle and only downloads when a trend is shown.
@@ -437,14 +437,27 @@ export default function AccuracyChecksPage() {
       );
   }, [checks, selectedAnalyst]);
 
+  // Which Player Accuracy group the trend chart plots.
+  const [trendGroup, setTrendGroup] =
+    useState<PlayerAccuracyGroupKey>("overall");
+
   const trendData = useMemo(
     () =>
-      analystChecks.map((c, i) => ({
-        idx: i + 1,
-        label: c.match_label || formatDate(c.created_at),
-        accuracy: Number((c.accuracy * 100).toFixed(1)),
-      })),
-    [analystChecks]
+      analystChecks
+        .map((c, i) => {
+          // Plot the selected Player Accuracy group (Overall/Passing/…). Skip
+          // checks with no stored value for that group so the line is clean.
+          const v = storedGroupPct(c, trendGroup);
+          if (v == null) return null;
+          return {
+            idx: i + 1,
+            label: matchTeamsLabel(c),
+            accuracy: Number((v * 100).toFixed(1)),
+          };
+        })
+        .filter((p): p is NonNullable<typeof p> => p != null)
+        .map((p, i) => ({ ...p, idx: i + 1 })),
+    [analystChecks, trendGroup]
   );
 
   // Sort state for the "Saved checks" table. Defaults to newest first.
@@ -539,6 +552,83 @@ export default function AccuracyChecksPage() {
       }
     }
     return any ? out : null;
+  }, [selectedAnalyst, analystChecks]);
+
+  // Problem-area analysis for the selected analyst: the 3–5 stats most in need
+  // of improvement, each with the specific check they struggled with most.
+  // Rule-based (no LLM), from the stored player_accuracy (both scope) — instant.
+  const PROBLEM_THRESHOLD = 0.7; // below 70% = needs significant improvement
+  const analystRecommendations = useMemo(() => {
+    if (!selectedAnalyst) return null;
+
+    // stat label -> aggregate + which group it belongs to + worst check.
+    type Agg = {
+      label: string;
+      group: string;
+      master: number;
+      exact: number;
+      // Worst single check for this stat (lowest %, needs enough volume).
+      worst: {
+        checkId: number;
+        label: string;
+        date: string;
+        pct: number;
+        exact: number;
+        master: number;
+      } | null;
+    };
+    const byStat = new Map<string, Agg>();
+
+    for (const c of analystChecks) {
+      const pa = c.player_accuracy;
+      if (!pa || !pa.football) continue;
+      for (const col of PLAYER_ACCURACY_COLUMNS) {
+        if (col.key === "overall") continue;
+        const grp = pa.both?.[col.key];
+        if (!grp) continue;
+        for (const part of grp.parts) {
+          if (part.master <= 0) continue;
+          let e = byStat.get(part.label);
+          if (!e) {
+            e = {
+              label: part.label,
+              group: col.label,
+              master: 0,
+              exact: 0,
+              worst: null,
+            };
+            byStat.set(part.label, e);
+          }
+          e.master += part.master;
+          e.exact += part.exact;
+          // Track the worst check for this stat — needs a little volume
+          // (>=3 master events) so a single 0/1 doesn't dominate.
+          const checkPct = part.exact / part.master;
+          if (
+            part.master >= 3 &&
+            (e.worst == null || checkPct < e.worst.pct)
+          ) {
+            e.worst = {
+              checkId: c.id,
+              label: matchTeamsLabel(c),
+              date: c.created_at,
+              pct: checkPct,
+              exact: part.exact,
+              master: part.master,
+            };
+          }
+        }
+      }
+    }
+
+    const stats = Array.from(byStat.values())
+      .map((e) => ({ ...e, pct: e.exact / e.master }))
+      .filter((s) => s.pct < PROBLEM_THRESHOLD)
+      .sort((a, b) => a.pct - b.pct)
+      .slice(0, 5);
+
+    if (stats.length === 0) return { stats: [] as typeof stats };
+    return { stats };
   }, [selectedAnalyst, analystChecks]);
 
   // Distinct calendar weeks present in the (sport-filtered) checks, newest
@@ -1029,9 +1119,28 @@ export default function AccuracyChecksPage() {
 
               {/* Trend chart */}
               <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h2 className="mb-3 text-sm font-semibold text-slate-700">
-                  Accuracy trend
-                </h2>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-sm font-semibold text-slate-700">
+                    Accuracy trend
+                  </h2>
+                  {selectedAnalyst && (
+                    <div className="flex flex-wrap items-center gap-1">
+                      {PLAYER_ACCURACY_COLUMNS.map((col) => (
+                        <button
+                          key={col.key}
+                          onClick={() => setTrendGroup(col.key)}
+                          className={`rounded-md px-2 py-1 text-[11px] font-semibold transition ${
+                            trendGroup === col.key
+                              ? "bg-slate-900 text-white"
+                              : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                          }`}
+                        >
+                          {col.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 {!selectedAnalyst ? (
                   <p className="text-sm text-slate-400">
                     Select an analyst to see their accuracy trend.
@@ -1046,6 +1155,16 @@ export default function AccuracyChecksPage() {
                   </div>
                 )}
               </div>
+
+              {/* Recommendations: top problem stats for the analyst */}
+              {selectedAnalyst && analystRecommendations && (
+                <RecommendationsPanel
+                  data={analystRecommendations}
+                  threshold={PROBLEM_THRESHOLD}
+                  analyst={selectedAnalyst}
+                  onOpenCheck={openCheck}
+                />
+              )}
             </div>
 
             {/* RIGHT: master-checks leaderboard */}
@@ -1729,6 +1848,105 @@ function Stat({
       <div className={`mt-0.5 text-lg font-bold ${color ?? "text-slate-800"}`}>
         {value}
       </div>
+    </div>
+  );
+}
+
+// ---- Recommendations (rule-based problem-area analysis) ----------------
+type RecStat = {
+  label: string;
+  group: string;
+  master: number;
+  exact: number;
+  pct: number;
+  worst: {
+    checkId: number;
+    label: string;
+    date: string;
+    pct: number;
+    exact: number;
+    master: number;
+  } | null;
+};
+type RecData = { stats: RecStat[] };
+
+// Panel under the trend chart: the analyst's top 3–5 stats to work on, each
+// with its overall accuracy and the specific check they struggled with most.
+function RecommendationsPanel({
+  data,
+  threshold,
+  analyst,
+  onOpenCheck,
+}: {
+  data: RecData;
+  threshold: number;
+  analyst: string;
+  onOpenCheck: (id: number) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-700">
+        <Sparkles size={16} className="text-violet-500" /> Recommendations
+      </h2>
+      <p className="mb-4 text-xs text-slate-400">
+        Top stats {analyst} should focus on (below{" "}
+        {(threshold * 100).toFixed(0)}%), averaged across their checks.
+      </p>
+
+      {data.stats.length === 0 ? (
+        <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-xs font-medium text-emerald-700">
+          No problem areas below {(threshold * 100).toFixed(0)}%. Solid across
+          the board.
+        </div>
+      ) : (
+        <ol className="space-y-3">
+          {data.stats.map((s, i) => (
+            <li
+              key={s.label}
+              className="rounded-xl border border-slate-100 bg-slate-50 p-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-slate-800">
+                  {i + 1}. {s.label}
+                  <span className="ml-1.5 text-xs font-normal text-slate-400">
+                    {s.group}
+                  </span>
+                </span>
+                <span
+                  className={`text-sm font-bold tabular-nums ${accColor(
+                    s.pct
+                  )}`}
+                >
+                  {(s.pct * 100).toFixed(1)}%
+                  <span className="ml-1 text-xs font-normal text-slate-400">
+                    ({s.exact}/{s.master})
+                  </span>
+                </span>
+              </div>
+              {s.worst && (
+                <button
+                  onClick={() => onOpenCheck(s.worst!.checkId)}
+                  className="mt-1.5 block w-full text-left text-xs text-slate-500 hover:text-slate-700"
+                  title="Open this check"
+                >
+                  Struggled most in{" "}
+                  <span className="font-medium text-slate-700 underline decoration-dotted">
+                    {s.worst.label}
+                  </span>{" "}
+                  <span className="text-slate-400">
+                    ({formatDate(s.worst.date)})
+                  </span>{" "}
+                  —{" "}
+                  <span className={`font-semibold ${accColor(s.worst.pct)}`}>
+                    {(s.worst.pct * 100).toFixed(0)}%
+                  </span>{" "}
+                  ({s.worst.exact}/{s.worst.master})
+                </button>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import {
   ComposedChart,
   Bar,
+  Cell,
   Line,
   XAxis,
   YAxis,
@@ -16,6 +17,14 @@ export type TrendPoint = {
   label: string;
   accuracy: number;
 };
+
+// Bar fill by the same % bands used across the tables:
+//   >= 90% green, >= 70% amber, else red. (accuracy is 0–100 here.)
+function bandColor(accuracy: number): string {
+  if (accuracy >= 90) return "#059669"; // emerald-600
+  if (accuracy >= 70) return "#d97706"; // amber-600
+  return "#dc2626"; // red-600
+}
 
 // Least-squares linear trend line over the accuracy points. Returns a `trend`
 // value per point so recharts can draw a straight line through the columns.
@@ -70,10 +79,13 @@ export default function AccuracyTrendChart({ data }: { data: TrendPoint[] }) {
         <Bar
           dataKey="accuracy"
           name="Accuracy"
-          fill="#dc2626"
           radius={[3, 3, 0, 0]}
           maxBarSize={48}
-        />
+        >
+          {chartData.map((d) => (
+            <Cell key={d.idx} fill={bandColor(d.accuracy)} />
+          ))}
+        </Bar>
         <Line
           type="linear"
           dataKey="trend"

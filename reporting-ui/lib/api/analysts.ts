@@ -329,6 +329,52 @@ export async function createAnalyst(
 }
 
 /**
+ * Rename a platform analyst (Supabase `analysts` table) by matching the
+ * current name (case-insensitive). Used so that renaming in Analyst Management
+ * keeps the Supabase name — which is what accuracy checks match on — in sync.
+ * If no matching row exists, one is created with the new name so the analyst
+ * is present in the shared table. Returns true if a row was updated/created.
+ */
+export async function updatePlatformAnalystName(
+    currentName: string,
+    newName: string
+): Promise<boolean> {
+    const clean = newName.trim();
+    if (!clean) return false;
+
+    // Find the existing row by the current name (case-insensitive).
+    const { data: existing, error: findErr } = await supabase
+        .from("analysts")
+        .select("id")
+        .ilike("name", currentName.trim())
+        .limit(1);
+
+    if (findErr) {
+        console.error("Failed finding analyst to rename:", findErr);
+        throw new Error(findErr.message || "Failed finding analyst");
+    }
+
+    if (existing && existing.length > 0) {
+        const id = (existing[0] as { id: number }).id;
+        const { error } = await supabase
+            .from("analysts")
+            .update({ name: clean })
+            .eq("id", id);
+        if (error) {
+            if (error.code === "23505")
+                throw new Error(`"${clean}" already exists.`);
+            console.error("Failed renaming analyst:", error);
+            throw new Error(error.message || "Failed renaming analyst");
+        }
+        return true;
+    }
+
+    // No existing row — create one under the new name so it's in the table.
+    await createAnalyst(clean);
+    return true;
+}
+
+/**
  * Update an existing platform analyst's location. Used from Analyst
  * Management to set/change where an analyst is based.
  */
