@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
     Flag,
     ChevronDown,
     ChevronRight,
+    ChevronsUpDown,
+    ArrowUp,
+    ArrowDown,
     X as XIcon,
     Check,
     Clock,
@@ -31,6 +34,7 @@ import {
     canonicaliseTeams,
     serializeInstances,
     formatTime,
+    parseHomeAwayFromFileName,
     type Instance,
 } from "@/lib/comparison/xml-compare";
 import MasterEditModal from "@/components/MasterEditModal";
@@ -44,10 +48,29 @@ type CheckGroup = {
     checkId: number;
     label: string;
     analyst: string;
+    masterBy: string;
     date: string | null;
     disputes: Dispute[];
     openCount: number;
 };
+
+// Club suffixes that stay fully uppercase in a title-cased team name.
+const ALWAYS_UPPER_TOKENS = new Set(["fc", "sc"]);
+
+// Title-case a team name (each word capitalised) for a professional look.
+// Club suffixes like FC/SC are always uppercased, and tokens with digits
+// (U15, U15B) are left as-is. Kept identical to the Saved checks table.
+function titleCaseTeam(name: string): string {
+    return name
+        .trim()
+        .split(/\s+/)
+        .map((w) => {
+            if (ALWAYS_UPPER_TOKENS.has(w.toLowerCase())) return w.toUpperCase();
+            if (/\d/.test(w)) return w;
+            return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+        })
+        .join(" ");
+}
 
 export default function DisputesPage() {
     const { user, ready } = useAuth();
@@ -60,6 +83,20 @@ export default function DisputesPage() {
     const [expanded, setExpanded] = useState<Set<number>>(new Set());
     const [search, setSearch] = useState("");
     const [sportFilter, setSportFilter] = useState<SportFilter>("all");
+    // Analyst filter for the table ("all" = every analyst).
+    const [analystFilter, setAnalystFilter] = useState<string>("all");
+    // Sortable columns for the fixture table.
+    const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" }>({
+        key: "open",
+        dir: "desc",
+    });
+    function toggleSort(key: string) {
+        setSort((cur) =>
+            cur.key === key
+                ? { key, dir: cur.dir === "asc" ? "desc" : "asc" }
+                : { key, dir: key === "date" || key === "match" || key === "analyst" ? "asc" : "desc" }
+        );
+    }
 
     // Self-contained review pop-up (Option B): the disputed instance's video
     // clip + inline resolve, without leaving the Disputes page.
@@ -131,9 +168,15 @@ export default function DisputesPage() {
         return m;
     }, [checks]);
 
+    // Match title, identical to the Saved checks table (Accuracy History):
+    // "Home v Away" title-cased from the master file name, falling back to the
+    // saved match label, then the analyst file, then the check id.
     function labelFor(checkId: number): string {
         const c = checkById.get(checkId);
         if (!c) return `Check #${checkId}`;
+        const teams = parseHomeAwayFromFileName(c.file_name_master);
+        if (teams)
+            return `${titleCaseTeam(teams[0])} v ${titleCaseTeam(teams[1])}`;
         return (
             c.match_label ||
             `${c.analyst_name}${
@@ -165,17 +208,26 @@ export default function DisputesPage() {
             byCheck.set(d.check_id, arr);
         }
 
+        // Match search only targets the match label now that analyst has its
+        // own dropdown.
         const q = search.trim().toLowerCase();
         const result: CheckGroup[] = [];
         for (const [checkId, ds] of byCheck.entries()) {
             const c = checkById.get(checkId);
             const label = labelFor(checkId);
             const analyst = c?.analyst_name ?? "";
-            if (q && !`${label} ${analyst}`.toLowerCase().includes(q)) continue;
+            const masterBy = c?.master_analyst_name ?? "";
+            if (q && !label.toLowerCase().includes(q)) continue;
+            if (
+                analystFilter !== "all" &&
+                analyst.trim().toLowerCase() !== analystFilter.trim().toLowerCase()
+            )
+                continue;
             result.push({
                 checkId,
                 label,
                 analyst,
+                masterBy,
                 date: c?.created_at ?? null,
                 disputes: ds.sort(
                     (a, b) =>
@@ -184,15 +236,58 @@ export default function DisputesPage() {
                 openCount: ds.filter((d) => d.status === "open").length,
             });
         }
-        // Checks with open disputes first, then most disputes, then newest.
+
+        // Apply the selected column sort. Secondary/tertiary keys keep the
+        // ordering stable and useful (open first, then volume, then date).
+        const dir = sort.dir === "asc" ? 1 : -1;
+        const cmpStr = (a: string, b: string) =>
+            a.localeCompare(b, undefined, { sensitivity: "base" });
         return result.sort((a, b) => {
-            if (a.openCount !== b.openCount) return b.openCount - a.openCount;
-            if (a.disputes.length !== b.disputes.length)
-                return b.disputes.length - a.disputes.length;
-            return (b.date ?? "").localeCompare(a.date ?? "");
+            switch (sort.key) {
+                case "date":
+                    return dir * (a.date ?? "").localeCompare(b.date ?? "");
+                case "match":
+                    return dir * cmpStr(a.label, b.label);
+                case "analyst":
+                    return dir * cmpStr(a.analyst, b.analyst);
+                case "masterBy":
+                    return dir * cmpStr(a.masterBy, b.masterBy);
+                case "total":
+                    return dir * (a.disputes.length - b.disputes.length);
+                case "open":
+                default:
+                    if (a.openCount !== b.openCount)
+                        return dir * (a.openCount - b.openCount);
+                    if (a.disputes.length !== b.disputes.length)
+                        return dir * (a.disputes.length - b.disputes.length);
+                    return dir * (a.date ?? "").localeCompare(b.date ?? "");
+            }
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [disputes, checkById, sportByCheck, filter, search, sportFilter]);
+    }, [
+        disputes,
+        checkById,
+        sportByCheck,
+        filter,
+        search,
+        sportFilter,
+        analystFilter,
+        sort,
+    ]);
+
+    // Distinct analysts present in the (sport/status-filtered) disputes, for
+    // the Analyst dropdown. Built independent of the analyst filter itself.
+    const analystOptions = useMemo(() => {
+        const set = new Set<string>();
+        for (const d of disputes) {
+            const c = checkById.get(d.check_id);
+            const name = c?.analyst_name?.trim();
+            if (name) set.add(name);
+        }
+        return Array.from(set).sort((a, b) =>
+            a.localeCompare(b, undefined, { sensitivity: "base" })
+        );
+    }, [disputes, checkById]);
 
     function toggle(checkId: number) {
         setExpanded((prev) => {
@@ -244,22 +339,22 @@ export default function DisputesPage() {
 
     return (
         <div className="min-h-full bg-slate-100 text-slate-900">
-            <div className="mx-auto max-w-4xl p-6 lg:p-8">
+            <div className="mx-auto max-w-6xl p-6 lg:p-8">
                 <div className="mb-6">
                     <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
                         <Flag size={26} /> Disputes
                     </h1>
                     <p className="mt-2 text-sm text-slate-600">
-                        Grouped by accuracy check.{" "}
+                        One row per fixture — click to expand its disputes.{" "}
                         <span className="font-semibold text-amber-600">
                             {counts.open} open
                         </span>{" "}
-                        · {counts.total} total across {groups.length} check
+                        · {counts.total} total across {groups.length} fixture
                         {groups.length === 1 ? "" : "s"}.
                     </p>
                 </div>
 
-                {/* Filter + search */}
+                {/* Filters: sport · status · analyst · match search */}
                 <div className="mb-4 flex flex-wrap items-center gap-2">
                     <SportToggle value={sportFilter} onChange={setSportFilter} />
                     <div className="flex items-center gap-1.5">
@@ -277,10 +372,23 @@ export default function DisputesPage() {
                             </button>
                         ))}
                     </div>
+                    <select
+                        value={analystFilter}
+                        onChange={(e) => setAnalystFilter(e.target.value)}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none focus:border-slate-500"
+                        aria-label="Filter by analyst"
+                    >
+                        <option value="all">All analysts</option>
+                        {analystOptions.map((name) => (
+                            <option key={name} value={name}>
+                                {name}
+                            </option>
+                        ))}
+                    </select>
                     <input
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Search check or analyst…"
+                        placeholder="Search match…"
                         className="ml-auto w-56 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none focus:border-slate-500"
                     />
                 </div>
@@ -290,63 +398,127 @@ export default function DisputesPage() {
                         No {filter === "all" ? "" : filter} disputes.
                     </div>
                 ) : (
-                    <div className="space-y-2">
-                        {groups.map((g) => {
-                            const isOpen = expanded.has(g.checkId);
-                            return (
-                                <div
-                                    key={g.checkId}
-                                    className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
-                                >
-                                    <button
-                                        onClick={() => toggle(g.checkId)}
-                                        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50"
-                                    >
-                                        {isOpen ? (
-                                            <ChevronDown
-                                                size={16}
-                                                className="shrink-0 text-slate-400"
-                                            />
-                                        ) : (
-                                            <ChevronRight
-                                                size={16}
-                                                className="shrink-0 text-slate-400"
-                                            />
-                                        )}
-                                        <div className="min-w-0 flex-1">
-                                            <p className="truncate text-sm font-semibold text-slate-800">
-                                                {g.label}
-                                            </p>
-                                            <p className="truncate text-xs text-slate-500">
-                                                {g.analyst}
-                                                {g.date
-                                                    ? ` · ${fmtDate(g.date)}`
-                                                    : ""}
-                                            </p>
-                                        </div>
-                                        {g.openCount > 0 && (
-                                            <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-700">
-                                                {g.openCount} open
-                                            </span>
-                                        )}
-                                        <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
-                                            {g.disputes.length} total
-                                        </span>
-                                    </button>
-
-                                    {isOpen && (
-                                        <div className="border-t border-slate-100 bg-slate-50/60 p-3">
-                                            <DisputesPanel
-                                                disputes={g.disputes}
-                                                canResolve={canResolve}
-                                                onResolve={handleResolve}
-                                                onOpen={openInReview}
-                                            />
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
+                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                        <table className="w-full border-collapse text-sm">
+                            <thead>
+                                <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                    <th className="w-8 px-3 py-2.5" />
+                                    <SortHeader
+                                        label="Date"
+                                        col="date"
+                                        sort={sort}
+                                        onSort={toggleSort}
+                                        className="w-28"
+                                    />
+                                    <SortHeader
+                                        label="Match"
+                                        col="match"
+                                        sort={sort}
+                                        onSort={toggleSort}
+                                    />
+                                    <SortHeader
+                                        label="Analyst"
+                                        col="analyst"
+                                        sort={sort}
+                                        onSort={toggleSort}
+                                        className="w-40"
+                                    />
+                                    <SortHeader
+                                        label="Master by"
+                                        col="masterBy"
+                                        sort={sort}
+                                        onSort={toggleSort}
+                                        className="w-40"
+                                    />
+                                    <SortHeader
+                                        label="Open"
+                                        col="open"
+                                        sort={sort}
+                                        onSort={toggleSort}
+                                        className="w-20 text-right"
+                                        align="right"
+                                    />
+                                    <SortHeader
+                                        label="Total"
+                                        col="total"
+                                        sort={sort}
+                                        onSort={toggleSort}
+                                        className="w-20 text-right"
+                                        align="right"
+                                    />
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {groups.map((g) => {
+                                    const isOpen = expanded.has(g.checkId);
+                                    return (
+                                        <Fragment key={g.checkId}>
+                                            <tr
+                                                onClick={() => toggle(g.checkId)}
+                                                className={`cursor-pointer border-b border-slate-100 transition hover:bg-slate-50 ${
+                                                    isOpen ? "bg-slate-50" : ""
+                                                }`}
+                                            >
+                                                <td className="px-3 py-2.5 align-middle text-slate-400">
+                                                    {isOpen ? (
+                                                        <ChevronDown size={16} />
+                                                    ) : (
+                                                        <ChevronRight size={16} />
+                                                    )}
+                                                </td>
+                                                <td className="whitespace-nowrap px-3 py-2.5 align-middle text-slate-600">
+                                                    {g.date ? fmtDate(g.date) : "—"}
+                                                </td>
+                                                <td className="px-3 py-2.5 align-middle">
+                                                    <span className="block max-w-[22rem] truncate font-semibold text-slate-800">
+                                                        {g.label}
+                                                    </span>
+                                                </td>
+                                                <td className="px-3 py-2.5 align-middle text-slate-700">
+                                                    <span className="block truncate">
+                                                        {g.analyst || "—"}
+                                                    </span>
+                                                </td>
+                                                <td className="px-3 py-2.5 align-middle text-slate-600">
+                                                    <span className="block truncate">
+                                                        {g.masterBy || "—"}
+                                                    </span>
+                                                </td>
+                                                <td className="px-3 py-2.5 text-right align-middle">
+                                                    {g.openCount > 0 ? (
+                                                        <span className="inline-block rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-700">
+                                                            {g.openCount}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-slate-400">
+                                                            0
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="px-3 py-2.5 text-right align-middle font-semibold text-slate-700">
+                                                    {g.disputes.length}
+                                                </td>
+                                            </tr>
+                                            {isOpen && (
+                                                <tr className="border-b border-slate-100">
+                                                    <td
+                                                        colSpan={7}
+                                                        className="bg-slate-50/60 p-3"
+                                                    >
+                                                        <DisputesPanel
+                                                            disputes={g.disputes}
+                                                            canResolve={canResolve}
+                                                            onResolve={handleResolve}
+                                                            onOpen={openInReview}
+                                                        />
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </Fragment>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
                     </div>
                 )}
             </div>
@@ -362,6 +534,47 @@ export default function DisputesPage() {
                 />
             )}
         </div>
+    );
+}
+
+// Sortable column header for the fixtures table.
+function SortHeader({
+    label,
+    col,
+    sort,
+    onSort,
+    className = "",
+    align = "left",
+}: {
+    label: string;
+    col: string;
+    sort: { key: string; dir: "asc" | "desc" };
+    onSort: (key: string) => void;
+    className?: string;
+    align?: "left" | "right";
+}) {
+    const active = sort.key === col;
+    return (
+        <th className={`px-3 py-2.5 ${className}`}>
+            <button
+                type="button"
+                onClick={() => onSort(col)}
+                className={`inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide transition hover:text-slate-700 ${
+                    active ? "text-slate-700" : "text-slate-500"
+                } ${align === "right" ? "flex-row-reverse" : ""}`}
+            >
+                {label}
+                {active ? (
+                    sort.dir === "asc" ? (
+                        <ArrowUp size={12} />
+                    ) : (
+                        <ArrowDown size={12} />
+                    )
+                ) : (
+                    <ChevronsUpDown size={12} className="text-slate-300" />
+                )}
+            </button>
+        </th>
     );
 }
 
