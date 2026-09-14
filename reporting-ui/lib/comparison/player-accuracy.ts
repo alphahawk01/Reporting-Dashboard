@@ -182,7 +182,6 @@ export const FOOTBALL_GROUPS = {
     parts: [
       { key: "shots", label: "Shots" },
       { key: "goals", label: "Goals" },
-      { key: "dribbles", label: "Dribbles" },
     ],
   },
   defensive: {
@@ -192,9 +191,6 @@ export const FOOTBALL_GROUPS = {
       { key: "interceptions", label: "Interceptions" },
       { key: "clearances", label: "Clearances" },
       { key: "blocks", label: "Blocks" },
-      { key: "ballRecoveries", label: "Ball recoveries" },
-      { key: "groundDuels", label: "Ground duels" },
-      { key: "aerialDuels", label: "Aerial duels" },
     ],
   },
   goalkeeper: {

@@ -32,6 +32,7 @@ import {
   summariseByAnalyst,
   deleteAccuracyCheck,
   backfillPlayerAccuracy,
+  recomputeAllPlayerAccuracy,
   type AccuracyCheckMeta,
 } from "@/lib/api/accuracyChecks";
 import {
@@ -391,6 +392,36 @@ export default function AccuracyChecksPage() {
     } catch (err) {
       setBackfillMsg(
         err instanceof Error ? err.message : "Backfill failed."
+      );
+    } finally {
+      setBackfilling(false);
+    }
+  }
+
+  // Admin: recompute + overwrite Player Accuracy for EVERY check. Needed after
+  // the Player Accuracy grouping changes (stats added/removed from a group) so
+  // every stored value reflects the new grouping, not just null ones.
+  async function handleRecomputeAll() {
+    if (
+      !window.confirm(
+        "Recompute Player Accuracy for ALL checks? This overwrites every " +
+          "check's stored accuracy from its XML and may take a while."
+      )
+    )
+      return;
+    setBackfilling(true);
+    setBackfillMsg("Starting…");
+    try {
+      const res = await recomputeAllPlayerAccuracy((p) =>
+        setBackfillMsg(`Processing ${p.done} / ${p.total}…`)
+      );
+      setBackfillMsg(
+        `Done. Recomputed ${res.updated}, skipped ${res.skipped}.`
+      );
+      await load();
+    } catch (err) {
+      setBackfillMsg(
+        err instanceof Error ? err.message : "Recompute failed."
       );
     } finally {
       setBackfilling(false);
@@ -1495,14 +1526,24 @@ export default function AccuracyChecksPage() {
                   className="w-56 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none focus:border-slate-500"
                 />
                 {canResolve && (
-                  <button
-                    onClick={handleBackfill}
-                    disabled={backfilling}
-                    title="Precompute & store Player Accuracy for older checks so this table loads instantly"
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                  >
-                    {backfilling ? "Backfilling…" : "Backfill accuracy"}
-                  </button>
+                  <>
+                    <button
+                      onClick={handleBackfill}
+                      disabled={backfilling}
+                      title="Precompute & store Player Accuracy for older checks so this table loads instantly"
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                    >
+                      {backfilling ? "Backfilling…" : "Backfill accuracy"}
+                    </button>
+                    <button
+                      onClick={handleRecomputeAll}
+                      disabled={backfilling}
+                      title="Recompute Player Accuracy for ALL checks (use after the accuracy grouping changes)"
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                    >
+                      {backfilling ? "Working…" : "Recompute all"}
+                    </button>
+                  </>
                 )}
               </div>
               {backfillMsg && (
@@ -2167,6 +2208,55 @@ function LocationComparisonTable({
       return next;
     });
 
+  // Sort state. `key === null` keeps the incoming (natural location) order.
+  const [sort, setSort] = useState<{
+    key: string | null;
+    dir: "asc" | "desc";
+  }>({ key: null, dir: "desc" });
+
+  const toggleSort = (key: string) =>
+    setSort((cur) =>
+      cur.key === key
+        ? { key, dir: cur.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: "desc" }
+    );
+
+  // Sorting reorders the ANALYSTS WITHIN each location (the location rows keep
+  // their natural order). Clicking a header sorts every location's expanded
+  // analyst list by that column.
+  const sortedRows = useMemo(() => {
+    if (!sort.key) return rows;
+    const { key, dir } = sort;
+    const mult = dir === "asc" ? 1 : -1;
+    const val = (a: LocationAnalystRow): number | string | null => {
+      if (key === "location") return a.analyst.toLowerCase();
+      if (key === "analysts") return a.analyst.toLowerCase();
+      if (key === "checks") return a.checks;
+      return a.groups[key as PlayerAccuracyGroupKey];
+    };
+    const cmp = (a: LocationAnalystRow, b: LocationAnalystRow) => {
+      const av = val(a);
+      const bv = val(b);
+      // Nulls (no data) always sort last, regardless of direction.
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "string" || typeof bv === "string") {
+        return String(av).localeCompare(String(bv)) * mult;
+      }
+      return (av - bv) * mult;
+    };
+    return rows.map((r) => ({
+      ...r,
+      analystRows: [...r.analystRows].sort(cmp),
+    }));
+  }, [rows, sort]);
+
+  // Sort state and toggle for the SortHead component, which expects a
+  // non-null key. When no explicit sort is chosen it points at a sentinel so
+  // no header shows as active.
+  const headSort = { key: sort.key ?? "", dir: sort.dir };
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
@@ -2202,18 +2292,45 @@ function LocationComparisonTable({
           <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
               <th className="w-6 px-2.5 py-2" />
-              <th className="px-2.5 py-2">Location</th>
-              <th className="px-2.5 py-2 text-right">Analysts</th>
-              <th className="px-2.5 py-2 text-right">Checks</th>
+              <th className="px-2.5 py-2">
+                <SortHead
+                  label="Location"
+                  col="location"
+                  sort={headSort}
+                  onSort={toggleSort}
+                  align="left"
+                />
+              </th>
+              <th className="px-2.5 py-2 text-right">
+                <SortHead
+                  label="Analysts"
+                  col="analysts"
+                  sort={headSort}
+                  onSort={toggleSort}
+                />
+              </th>
+              <th className="px-2.5 py-2 text-right">
+                <SortHead
+                  label="Checks"
+                  col="checks"
+                  sort={headSort}
+                  onSort={toggleSort}
+                />
+              </th>
               {PLAYER_ACCURACY_COLUMNS.map((col) => (
                 <th key={col.key} className="px-2.5 py-2 text-right">
-                  {col.label}
+                  <SortHead
+                    label={col.label}
+                    col={col.key}
+                    sort={headSort}
+                    onSort={toggleSort}
+                  />
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
+            {sortedRows.map((r) => {
               const isOpen = expanded.has(r.location);
               return (
                 <React.Fragment key={r.location}>

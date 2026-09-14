@@ -8,6 +8,32 @@ import { supabase } from "@/lib/supabase";
 export type DisputeSide = "master" | "analyst";
 export type DisputeStatus = "open" | "confirmed" | "denied";
 
+// How the analyst categorises a flag, so disputes can be reviewed by type
+// rather than as one undifferentiated list.
+export type DisputeCategory =
+    | "player_identification"
+    | "stat_difference"
+    | "timing_comparison";
+
+// Display labels for each category, in the order shown in the dropdown / UI.
+export const DISPUTE_CATEGORIES: {
+    value: DisputeCategory;
+    label: string;
+}[] = [
+    { value: "player_identification", label: "Player Identification" },
+    { value: "stat_difference", label: "Stat Difference" },
+    { value: "timing_comparison", label: "Timing/Comparison Error" },
+];
+
+export function disputeCategoryLabel(
+    category: DisputeCategory | null | undefined
+): string {
+    return (
+        DISPUTE_CATEGORIES.find((c) => c.value === category)?.label ??
+        "Uncategorised"
+    );
+}
+
 export interface Dispute {
     id: number;
     created_at: string;
@@ -20,6 +46,8 @@ export interface Dispute {
     code_time: number | null;
     raised_by: string | null;
     reason: string | null;
+    /** Analyst-chosen flag category. Null on legacy disputes. */
+    category: DisputeCategory | null;
     status: DisputeStatus;
     resolved_by: string | null;
     resolved_at: string | null;
@@ -36,6 +64,7 @@ export interface NewDispute {
     codeTime?: number | null;
     raisedBy?: string | null;
     reason?: string | null;
+    category?: DisputeCategory | null;
 }
 
 /** Flag an instance. Upserts so re-flagging the same instance is a no-op. */
@@ -51,10 +80,14 @@ export async function createDispute(input: NewDispute): Promise<Dispute> {
 
     if (existing) {
         // Re-flagging: only update the reason IF a new one was supplied, so an
-        // empty submit never wipes an existing reason. Never reset status.
+        // empty submit never wipes an existing reason. The category is updated
+        // whenever a new one is supplied. Never reset status.
         const patch: Record<string, unknown> = {};
         if (input.reason != null && input.reason.trim() !== "") {
             patch.reason = input.reason.trim();
+        }
+        if (input.category != null) {
+            patch.category = input.category;
         }
         if (Object.keys(patch).length === 0) {
             return existing as Dispute;
@@ -85,6 +118,7 @@ export async function createDispute(input: NewDispute): Promise<Dispute> {
             code_time: input.codeTime ?? null,
             raised_by: input.raisedBy ?? null,
             reason: input.reason?.trim() || null,
+            category: input.category ?? null,
             status: "open",
         })
         .select("*")

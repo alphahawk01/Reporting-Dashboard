@@ -18,7 +18,10 @@ import {
 import {
     getAllDisputes,
     resolveDispute,
+    DISPUTE_CATEGORIES,
+    disputeCategoryLabel,
     type Dispute,
+    type DisputeCategory,
 } from "@/lib/api/disputes";
 import {
     getAccuracyChecksMeta,
@@ -85,6 +88,11 @@ export default function DisputesPage() {
     const [sportFilter, setSportFilter] = useState<SportFilter>("all");
     // Analyst filter for the table ("all" = every analyst).
     const [analystFilter, setAnalystFilter] = useState<string>("all");
+    // Flag-category filter ("all" | one of the DisputeCategory codes |
+    // "uncategorised" for legacy disputes without a category).
+    const [categoryFilter, setCategoryFilter] = useState<
+        "all" | DisputeCategory | "uncategorised"
+    >("all");
     // Sortable columns for the fixture table.
     const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" }>({
         key: "open",
@@ -199,10 +207,17 @@ export default function DisputesPage() {
             return sportByCheck.get(checkId) === sportFilter;
         };
 
+        const matchesCategory = (d: Dispute) => {
+            if (categoryFilter === "all") return true;
+            if (categoryFilter === "uncategorised") return !d.category;
+            return d.category === categoryFilter;
+        };
+
         const byCheck = new Map<number, Dispute[]>();
         for (const d of disputes) {
             if (!matchesFilter(d)) continue;
             if (!matchesSport(d.check_id)) continue;
+            if (!matchesCategory(d)) continue;
             const arr = byCheck.get(d.check_id) ?? [];
             arr.push(d);
             byCheck.set(d.check_id, arr);
@@ -272,6 +287,7 @@ export default function DisputesPage() {
         search,
         sportFilter,
         analystFilter,
+        categoryFilter,
         sort,
     ]);
 
@@ -319,6 +335,68 @@ export default function DisputesPage() {
         const open = disputes.filter((d) => d.status === "open").length;
         return { open, total: disputes.length };
     }, [disputes]);
+
+    // Per-category counts for the breakdown chips. Respects sport / status /
+    // analyst filters (so the breakdown matches the visible table) but NOT the
+    // category filter itself — every category chip stays visible so you can
+    // switch between them. Clicking a chip toggles the category filter.
+    const categoryBreakdown = useMemo(() => {
+        const matchesFilter = (d: Dispute) =>
+            filter === "all"
+                ? true
+                : filter === "open"
+                  ? d.status === "open"
+                  : d.status !== "open";
+        const matchesSport = (checkId: number) =>
+            sportFilter === "all" || sportByCheck.get(checkId) === sportFilter;
+        const matchesAnalyst = (checkId: number) => {
+            if (analystFilter === "all") return true;
+            const a = checkById.get(checkId)?.analyst_name ?? "";
+            return (
+                a.trim().toLowerCase() === analystFilter.trim().toLowerCase()
+            );
+        };
+
+        const counts = new Map<string, number>();
+        let total = 0;
+        for (const d of disputes) {
+            if (!matchesFilter(d)) continue;
+            if (!matchesSport(d.check_id)) continue;
+            if (!matchesAnalyst(d.check_id)) continue;
+            const key = d.category ?? "uncategorised";
+            counts.set(key, (counts.get(key) ?? 0) + 1);
+            total += 1;
+        }
+
+        const rows: {
+            key: "all" | DisputeCategory | "uncategorised";
+            label: string;
+            count: number;
+        }[] = [{ key: "all", label: "All", count: total }];
+        for (const c of DISPUTE_CATEGORIES) {
+            rows.push({
+                key: c.value,
+                label: c.label,
+                count: counts.get(c.value) ?? 0,
+            });
+        }
+        const uncat = counts.get("uncategorised") ?? 0;
+        if (uncat > 0) {
+            rows.push({
+                key: "uncategorised",
+                label: disputeCategoryLabel(null),
+                count: uncat,
+            });
+        }
+        return rows;
+    }, [
+        disputes,
+        filter,
+        sportFilter,
+        analystFilter,
+        sportByCheck,
+        checkById,
+    ]);
 
     function fmtDate(iso: string | null) {
         if (!iso) return "";
@@ -385,12 +463,66 @@ export default function DisputesPage() {
                             </option>
                         ))}
                     </select>
+                    <select
+                        value={categoryFilter}
+                        onChange={(e) =>
+                            setCategoryFilter(
+                                e.target.value as
+                                    | "all"
+                                    | DisputeCategory
+                                    | "uncategorised"
+                            )
+                        }
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 outline-none focus:border-slate-500"
+                        aria-label="Filter by flag category"
+                    >
+                        <option value="all">All categories</option>
+                        {DISPUTE_CATEGORIES.map((c) => (
+                            <option key={c.value} value={c.value}>
+                                {c.label}
+                            </option>
+                        ))}
+                        <option value="uncategorised">Uncategorised</option>
+                    </select>
                     <input
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         placeholder="Search match…"
                         className="ml-auto w-56 rounded-lg border border-slate-300 px-3 py-1.5 text-sm outline-none focus:border-slate-500"
                     />
+                </div>
+
+                {/* By-category breakdown: click a chip to filter the table to
+                    that flag category. */}
+                <div className="mb-4 flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        By category
+                    </span>
+                    {categoryBreakdown.map((c) => {
+                        const active = categoryFilter === c.key;
+                        return (
+                            <button
+                                key={c.key}
+                                onClick={() => setCategoryFilter(c.key)}
+                                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition ${
+                                    active
+                                        ? "bg-indigo-600 text-white"
+                                        : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                                }`}
+                            >
+                                {c.label}
+                                <span
+                                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                                        active
+                                            ? "bg-white/25 text-white"
+                                            : "bg-slate-100 text-slate-500"
+                                    }`}
+                                >
+                                    {c.count}
+                                </span>
+                            </button>
+                        );
+                    })}
                 </div>
 
                 {groups.length === 0 ? (
@@ -1046,10 +1178,23 @@ function DisputeReviewModal({
 
                 {/* Raised reason + resolve */}
                 <div className="border-t border-slate-700 p-4">
-                    <p className="mb-2 text-xs text-slate-400">
-                        {d.raised_by ? `Raised by ${d.raised_by}` : "Raised"}
-                        {d.reason ? ` — “${d.reason}”` : " — no reason given"}
-                    </p>
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <span
+                            className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                d.category
+                                    ? "bg-indigo-500/20 text-indigo-200"
+                                    : "border border-dashed border-slate-600 text-slate-400"
+                            }`}
+                        >
+                            {disputeCategoryLabel(d.category)}
+                        </span>
+                        <p className="text-xs text-slate-400">
+                            {d.raised_by ? `Raised by ${d.raised_by}` : "Raised"}
+                            {d.reason
+                                ? ` — “${d.reason}”`
+                                : " — no reason given"}
+                        </p>
+                    </div>
 
                     {!open && (
                         <p className="text-sm font-semibold text-slate-200">

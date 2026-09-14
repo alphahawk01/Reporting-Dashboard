@@ -2,7 +2,15 @@
 
 import { useState } from "react";
 import { Flag, Check, Clock, Video } from "lucide-react";
-import type { Dispute } from "@/lib/api/disputes";
+import { disputeCategoryLabel, type Dispute } from "@/lib/api/disputes";
+
+// Category badge styling — a soft slate chip so it reads as metadata, not a
+// status. Uncategorised (legacy) disputes get a lighter, dashed look.
+function categoryBadge(category: Dispute["category"]) {
+    return category
+        ? "border border-indigo-200 bg-indigo-50 text-indigo-700"
+        : "border border-dashed border-slate-300 bg-slate-50 text-slate-400";
+}
 
 function statusBadge(status: Dispute["status"]) {
     switch (status) {
@@ -123,6 +131,13 @@ function DisputeRow({
                     </span>
                     <span className="inline-flex items-center gap-1 text-xs text-slate-400">
                         <Clock size={11} /> {fmtTime(d.code_time)}
+                    </span>
+                    <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${categoryBadge(
+                            d.category
+                        )}`}
+                    >
+                        {disputeCategoryLabel(d.category)}
                     </span>
                 </div>
                 <div className="flex items-center gap-2">

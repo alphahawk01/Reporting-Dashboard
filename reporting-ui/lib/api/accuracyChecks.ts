@@ -626,20 +626,28 @@ export interface BackfillProgress {
 }
 
 /**
- * One-time backfill: for every check missing `player_accuracy`, fetch its XML
- * (one row at a time, so it never hits the statement-timeout that batching
- * did), compute the stored Player Accuracy, and write it back. Safe to re-run —
- * it only touches checks where the field is null. Reports progress via the
- * optional callback. Admin-triggered from the Accuracy History page.
+ * Compute + store Player Accuracy for saved checks, one row at a time (so it
+ * never hits the statement-timeout that batching did). Reports progress via
+ * the optional callback. Admin-triggered from the Accuracy History page.
+ *
+ * @param onProgress progress callback (done / total)
+ * @param force when true, RECOMPUTES every check's `player_accuracy` from its
+ *   XML — use this after the grouping logic changes so stored values are
+ *   refreshed. When false (default), only fills checks where the field is null
+ *   (a safe, idempotent one-time backfill).
  */
 export async function backfillPlayerAccuracy(
-    onProgress?: (p: BackfillProgress) => void
+    onProgress?: (p: BackfillProgress) => void,
+    force = false
 ): Promise<{ updated: number; skipped: number }> {
-    // Ids needing backfill (small query — no XML pulled here).
-    const { data, error } = await supabase
+    // Ids to process (small query — no XML pulled here). When forcing, take
+    // every check; otherwise only those missing player_accuracy.
+    const listQuery = supabase
         .from("accuracy_checks")
-        .select("id, tolerance, file_name_master")
-        .is("player_accuracy", null);
+        .select("id, tolerance, file_name_master");
+    const { data, error } = force
+        ? await listQuery
+        : await listQuery.is("player_accuracy", null);
 
     if (error) {
         console.error("Failed listing checks to backfill:", error);
@@ -693,6 +701,18 @@ export async function backfillPlayerAccuracy(
     }
 
     return { updated, skipped };
+}
+
+/**
+ * Recompute + overwrite `player_accuracy` for EVERY saved check from its XML.
+ * Use after the Player Accuracy grouping logic changes (e.g. a stat added to
+ * or removed from a group) so all stored values reflect the new grouping.
+ * Thin wrapper over backfillPlayerAccuracy with force=true.
+ */
+export async function recomputeAllPlayerAccuracy(
+    onProgress?: (p: BackfillProgress) => void
+): Promise<{ updated: number; skipped: number }> {
+    return backfillPlayerAccuracy(onProgress, true);
 }
 
 /**

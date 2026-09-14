@@ -41,8 +41,10 @@ import {
   getDisputesForCheck,
   resolveDispute,
   disputeKey,
+  DISPUTE_CATEGORIES,
   type Dispute,
   type DisputeSide,
+  type DisputeCategory,
 } from "@/lib/api/disputes";
 import {
   parseInstances,
@@ -1160,7 +1162,10 @@ function AccuracyCompareInner() {
     setFlagMenu({ x: e.clientX, y: e.clientY, instance, side });
   };
 
-  const submitFlag = async (reason: string | null) => {
+  const submitFlag = async (
+    reason: string | null,
+    category: DisputeCategory | null
+  ) => {
     if (!flagMenu || loadedCheckId == null) return;
     const { instance, side } = flagMenu;
     setFlagMenu(null);
@@ -1178,6 +1183,7 @@ function AccuracyCompareInner() {
         codeTime: instance.mid,
         raisedBy: user?.username ?? null,
         reason,
+        category,
       });
       await reloadDisputes(loadedCheckId);
     } catch (err) {
@@ -2435,13 +2441,13 @@ function AccuracyCompareInner() {
 
             {/* Player Accuracy — analyst's coded volume vs master, grouped.
                 Passing (passes + crosses), Offensive (shots + goals),
-                Defensive (tackles + intercepts + clearances + ball recoveries).
+                Defensive (tackles + intercepts + clearances + blocks).
                 Each card has an info icon showing the per-stat breakdown and
                 how the absolute-difference % is calculated. */}
             {playerAccuracy && (
               <div className="mt-4">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Player Accuracy <span className="font-normal normal-case text-slate-400">(analyst vs master)</span>
+                  Golden Player Accuracy Checks <span className="font-normal normal-case text-slate-400">(Analyst vs Master)</span>
                 </p>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
                   {(
@@ -3102,6 +3108,11 @@ function AccuracyCompareInner() {
                 <Video size={15} /> Video review
                 <span className="text-xs font-normal text-slate-400">
                   · click any stat to jump to that moment
+                  {canFlag
+                    ? " · right-click an instance to flag it"
+                    : canResolveDispute
+                      ? " · right-click a flagged instance to resolve it"
+                      : ""}
                 </span>
               </span>
               <div className="flex items-center gap-3">
@@ -3432,10 +3443,13 @@ function FlagMenu({
   side: DisputeSide;
   dispute: Dispute | null;
   mode: "flag" | "resolve";
-  onSubmit: (reason: string | null) => void;
+  onSubmit: (reason: string | null, category: DisputeCategory | null) => void;
   onResolve: (status: "confirmed" | "denied", note: string | null) => void;
 }) {
   const [reason, setReason] = useState(dispute?.reason ?? "");
+  const [category, setCategory] = useState<DisputeCategory | "">(
+    dispute?.category ?? ""
+  );
   const [note, setNote] = useState("");
   // Keep the menu on-screen.
   const left = Math.min(x, (typeof window !== "undefined" ? window.innerWidth : 9999) - 300);
@@ -3503,20 +3517,36 @@ function FlagMenu({
       {header}
       {dispute && (
         <p className="mb-2 rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
-          Already flagged — submitting updates the reason.
+          Already flagged — submitting updates the category & reason.
         </p>
       )}
+      <label className="mb-1 block text-[11px] font-medium text-slate-500">
+        Category
+      </label>
+      <select
+        value={category}
+        onChange={(e) => setCategory(e.target.value as DisputeCategory | "")}
+        autoFocus
+        className="mb-2 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-amber-500"
+      >
+        <option value="">Select a category…</option>
+        {DISPUTE_CATEGORIES.map((c) => (
+          <option key={c.value} value={c.value}>
+            {c.label}
+          </option>
+        ))}
+      </select>
       <textarea
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         rows={2}
-        autoFocus
         placeholder="Reason (optional)"
         className="mb-2 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-amber-500"
       />
       <button
-        onClick={() => onSubmit(reason.trim() || null)}
-        className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600"
+        onClick={() => onSubmit(reason.trim() || null, category || null)}
+        disabled={!category}
+        className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <Flag size={13} /> Flag instance
       </button>
