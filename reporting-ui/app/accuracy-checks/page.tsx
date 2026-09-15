@@ -83,47 +83,11 @@ function formatDate(iso: string) {
   });
 }
 
-// Calendar-week key (ISO year-week) for grouping checks by week. Uses the
-// check's created_at date. Returns e.g. "2026-W37". Sortable as a string.
-function isoWeekKey(iso: string): string {
-  const d = new Date(iso);
-  // Shift to Thursday of the current week to get the ISO week number.
-  const date = new Date(
-    Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
-  );
-  const day = date.getUTCDay() || 7; // Mon=1..Sun=7
-  date.setUTCDate(date.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(
-    ((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7
-  );
-  return `${date.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
-}
-
-// Human label for a week key, showing the Monday date of that week.
-function weekLabel(key: string): string {
-  const m = key.match(/^(\d{4})-W(\d{2})$/);
-  if (!m) return key;
-  const year = parseInt(m[1], 10);
-  const week = parseInt(m[2], 10);
-  // Monday of ISO week 1 is the Monday of the week containing Jan 4.
-  const jan4 = new Date(Date.UTC(year, 0, 4));
-  const jan4Day = jan4.getUTCDay() || 7;
-  const week1Mon = new Date(jan4);
-  week1Mon.setUTCDate(jan4.getUTCDate() - (jan4Day - 1));
-  const mon = new Date(week1Mon);
-  mon.setUTCDate(week1Mon.getUTCDate() + (week - 1) * 7);
-  const label = mon.toLocaleDateString("en-AU", {
-    day: "2-digit",
-    month: "short",
-  });
-  return `Week of ${label}`;
-}
-
-// ---- Friday→Thursday weeks (Saved checks table) -------------------
-// The Saved-checks filter groups by a week that STARTS on Friday and ENDS the
-// following Thursday. The key is the ISO date (YYYY-MM-DD, UTC) of that week's
-// Friday, so keys sort chronologically as plain strings.
+// ---- Friday→Thursday weeks ----------------------------------------
+// Every week filter on this page (Saved checks, All analysts, By location)
+// groups by a week that STARTS on Friday and ENDS the following Thursday. The
+// key is the ISO date (YYYY-MM-DD, UTC) of that week's Friday, so keys sort
+// chronologically as plain strings.
 function fridayWeekStart(iso: string): Date {
   const d = new Date(iso);
   const date = new Date(
@@ -544,7 +508,8 @@ export default function AccuracyChecksPage() {
   }>({ key: "date", dir: "desc" });
 
   // Friday→Thursday week filter for the Saved checks table ("all" = every
-  // week). Independent of the comparison-tabs week filter (which is ISO weeks).
+  // week). Separate state from the comparison-tabs week filter, but both now
+  // use the same Friday-start weeks.
   const [savedWeekFilter, setSavedWeekFilter] = useState<string>("all");
 
   // Master-consistency diagnostic modal: which fixture filename to inspect.
@@ -786,11 +751,12 @@ export default function AccuracyChecksPage() {
     return { stats };
   }, [selectedAnalyst, analystChecks]);
 
-  // Distinct calendar weeks present in the (sport-filtered) checks, newest
-  // first, for the comparison-table week selector.
+  // Distinct Friday→Thursday weeks present in the (sport-filtered) checks,
+  // newest first, for the comparison-table week selector. Consistent with the
+  // Saved-checks week filter (Friday start, Thursday end).
   const availableWeeks = useMemo(() => {
     const set = new Set<string>();
-    for (const c of checks) set.add(isoWeekKey(c.created_at));
+    for (const c of checks) set.add(fridayWeekKey(c.created_at));
     return Array.from(set).sort((a, b) => b.localeCompare(a));
   }, [checks]);
 
@@ -801,7 +767,7 @@ export default function AccuracyChecksPage() {
     const scoped =
       weekFilter === "all"
         ? checks
-        : checks.filter((c) => isoWeekKey(c.created_at) === weekFilter);
+        : checks.filter((c) => fridayWeekKey(c.created_at) === weekFilter);
 
     const byAnalyst = new Map<
       string,
@@ -894,7 +860,7 @@ export default function AccuracyChecksPage() {
     const scoped =
       weekFilter === "all"
         ? checks
-        : checks.filter((c) => isoWeekKey(c.created_at) === weekFilter);
+        : checks.filter((c) => fridayWeekKey(c.created_at) === weekFilter);
 
     // Per-analyst accumulator, grouped under each location, so a location row
     // can expand to show every analyst that belongs to it.
@@ -2563,7 +2529,7 @@ function AnalystComparisonTable({
             <option value="all">All weeks</option>
             {weeks.map((w) => (
               <option key={w} value={w}>
-                {weekLabel(w)}
+                {fridayWeekLabel(w)}
               </option>
             ))}
           </select>
@@ -2781,6 +2747,58 @@ function LocationComparisonTable({
   // no header shows as active.
   const headSort = { key: sort.key ?? "", dir: sort.dir };
 
+  // Export the by-location table to CSV: one row per location, then an
+  // indented row per analyst within it. Respects the current sort + week
+  // filter (the rows already reflect them). Percentages are plain numbers.
+  function exportLocations() {
+    const pctNum = (v: number | null) =>
+      v == null ? "" : (v * 100).toFixed(1);
+    const csvCell = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    const groupCols = PLAYER_ACCURACY_COLUMNS;
+
+    const header = [
+      "Location",
+      "Analyst",
+      "Checks",
+      ...groupCols.map((c) => `${c.label} %`),
+    ];
+    const lines: string[] = [];
+    for (const r of sortedRows) {
+      lines.push(
+        [
+          r.location,
+          "", // location-level row: no analyst
+          String(r.checks),
+          ...groupCols.map((col) => pctNum(r.groups[col.key])),
+        ]
+          .map(csvCell)
+          .join(",")
+      );
+      for (const a of r.analystRows) {
+        lines.push(
+          [
+            r.location,
+            a.analyst,
+            String(a.checks),
+            ...groupCols.map((col) => pctNum(a.groups[col.key])),
+          ]
+            .map(csvCell)
+            .join(",")
+        );
+      }
+    }
+
+    const csv = [header.map(csvCell).join(","), ...lines].join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const scope = weekFilter === "all" ? "all-weeks" : `week-${weekFilter}`;
+    a.href = url;
+    a.download = `location-accuracy_${scope}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
@@ -2804,10 +2822,19 @@ function LocationComparisonTable({
             <option value="all">All weeks</option>
             {weeks.map((w) => (
               <option key={w} value={w}>
-                {weekLabel(w)}
+                {fridayWeekLabel(w)}
               </option>
             ))}
           </select>
+          <button
+            onClick={exportLocations}
+            disabled={rows.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+            title="Export the locations currently shown to CSV"
+          >
+            <Download size={13} /> Export
+            {rows.length > 0 ? ` (${rows.length})` : ""}
+          </button>
         </div>
       </div>
 
