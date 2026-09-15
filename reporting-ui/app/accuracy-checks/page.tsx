@@ -33,7 +33,11 @@ import {
   deleteAccuracyCheck,
   backfillPlayerAccuracy,
   recomputeAllPlayerAccuracy,
+  diagnoseMasterConsistency,
+  fixStaleMasterTotals,
   type AccuracyCheckMeta,
+  type MasterConsistencyReport,
+  type MasterSiblingCheck,
 } from "@/lib/api/accuracyChecks";
 import {
   getOpenDisputeCounts,
@@ -543,6 +547,9 @@ export default function AccuracyChecksPage() {
   // week). Independent of the comparison-tabs week filter (which is ISO weeks).
   const [savedWeekFilter, setSavedWeekFilter] = useState<string>("all");
 
+  // Master-consistency diagnostic modal: which fixture filename to inspect.
+  const [masterDiagFile, setMasterDiagFile] = useState<string | null>(null);
+
   function toggleSavedSort(key: string) {
     setSavedSort((cur) =>
       cur.key === key
@@ -606,6 +613,46 @@ export default function AccuracyChecksPage() {
     for (const c of analystChecks) set.add(fridayWeekKey(c.created_at));
     return Array.from(set).sort((a, b) => b.localeCompare(a));
   }, [analystChecks]);
+
+  // Fixtures whose sibling checks (same master file) DON'T all share the same
+  // stored master_total — the tell-tale of an edited/re-coded master. Detected
+  // from data already in memory (no XML fetch): group by file_name_master and
+  // compare the master_total values. Keyed by filename with the min/max spread.
+  const masterTotalMismatches = useMemo(() => {
+    const byFile = new Map<
+      string,
+      { label: string; totals: Set<number>; count: number }
+    >();
+    for (const c of checks) {
+      const file = (c.file_name_master || "").trim();
+      if (!file) continue;
+      const e =
+        byFile.get(file) ??
+        { label: matchTeamsLabel(c), totals: new Set<number>(), count: 0 };
+      e.totals.add(c.master_total);
+      e.count += 1;
+      byFile.set(file, e);
+    }
+    const out: {
+      file: string;
+      label: string;
+      checks: number;
+      min: number;
+      max: number;
+    }[] = [];
+    for (const [file, e] of byFile.entries()) {
+      if (e.totals.size <= 1) continue; // consistent — skip
+      const nums = Array.from(e.totals);
+      out.push({
+        file,
+        label: e.label,
+        checks: e.count,
+        min: Math.min(...nums),
+        max: Math.max(...nums),
+      });
+    }
+    return out.sort((a, b) => b.max - b.min - (a.max - a.min));
+  }, [checks]);
 
   // Export the Saved-checks rows CURRENTLY SHOWING (respecting the week filter,
   // analyst scope and sort) to a CSV download. Percentages are written as plain
@@ -1220,6 +1267,39 @@ export default function AccuracyChecksPage() {
               </div>
             </div>
 
+            {/* Master-consistency warning (admins): fixtures whose sibling
+                checks were graded against different master versions, so their
+                master totals differ. Click a fixture to inspect. */}
+            {canResolve && masterTotalMismatches.length > 0 && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <p className="flex items-center gap-2 text-sm font-semibold text-amber-800">
+                  <Flag size={15} /> Master totals differ for{" "}
+                  {masterTotalMismatches.length} fixture
+                  {masterTotalMismatches.length === 1 ? "" : "s"}
+                </p>
+                <p className="mt-0.5 text-xs text-amber-700">
+                  These fixtures were graded against slightly different master
+                  files, so the master total isn&apos;t identical across
+                  analysts. Click one to inspect each check&apos;s master.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {masterTotalMismatches.map((m) => (
+                    <button
+                      key={m.file}
+                      onClick={() => setMasterDiagFile(m.file)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100"
+                      title={m.file}
+                    >
+                      {m.label}
+                      <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold">
+                        {m.min}–{m.max} · {m.checks} checks
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Recommendations: top problem stats for the analyst — full width */}
             {selectedAnalyst && analystRecommendations && (
               <RecommendationsPanel
@@ -1706,7 +1786,344 @@ export default function AccuracyChecksPage() {
         )}
       </div>
 
+      {masterDiagFile && (
+        <MasterConsistencyModal
+          fileNameMaster={masterDiagFile}
+          onClose={() => setMasterDiagFile(null)}
+          onOpenCheck={(id) => {
+            setMasterDiagFile(null);
+            openCheck(id);
+          }}
+          onFixed={() => load()}
+        />
+      )}
     </div>
+  );
+}
+
+// Modal that inspects every check sharing a master file, showing each one's
+// stored vs parsed master total and whether the raw master files are
+// byte-identical — so an admin can see which check diverged and by how much.
+function MasterConsistencyModal({
+  fileNameMaster,
+  onClose,
+  onOpenCheck,
+  onFixed,
+}: {
+  fileNameMaster: string;
+  onClose: () => void;
+  onOpenCheck: (checkId: number) => void;
+  /** Called after stale stored totals are corrected, so the page can reload. */
+  onFixed: () => void;
+}) {
+  const [report, setReport] = useState<MasterConsistencyReport | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [fixing, setFixing] = useState(false);
+  const [fixMsg, setFixMsg] = useState<string | null>(null);
+
+  async function handleFixStale() {
+    if (!report || report.staleTotalCheckIds.length === 0) return;
+    setFixing(true);
+    setFixMsg(null);
+    try {
+      const res = await fixStaleMasterTotals(report.staleTotalCheckIds);
+      setFixMsg(`Corrected ${res.fixed} stored total(s).`);
+      onFixed();
+      // Re-run the diagnostic so the modal reflects the fix.
+      const fresh = await diagnoseMasterConsistency(fileNameMaster);
+      setReport(fresh);
+    } catch (e) {
+      setFixMsg(e instanceof Error ? e.message : "Fix failed.");
+    } finally {
+      setFixing(false);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    // State is reset via the async callbacks below (not synchronously here) so
+    // the effect only kicks off external work.
+    diagnoseMasterConsistency(fileNameMaster)
+      .then((r) => {
+        if (cancelled) return;
+        setReport(r);
+        setError(null);
+        setLoading(false);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "Failed to load.");
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fileNameMaster]);
+
+  // Assign each distinct xml hash a short letter (A, B, C…) so identical vs
+  // different master files are easy to compare at a glance.
+  const hashLabels = useMemo(() => {
+    const map = new Map<string, string>();
+    let n = 0;
+    for (const c of report?.checks ?? []) {
+      if (c.xmlHash && !map.has(c.xmlHash)) {
+        map.set(c.xmlHash, String.fromCharCode(65 + n));
+        n += 1;
+      }
+    }
+    return map;
+  }, [report]);
+
+  // Letter of the reference (majority) master version.
+  const referenceLetter = useMemo(() => {
+    const ref = report?.checks.find((c) => c.isReference);
+    return ref?.xmlHash ? hashLabels.get(ref.xmlHash) ?? "A" : "A";
+  }, [report, hashLabels]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[85vh] w-full max-w-2xl overflow-auto rounded-2xl bg-white p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-800">
+              <Flag size={16} className="text-amber-600" /> Master consistency
+            </h2>
+            <p className="mt-0.5 break-all text-xs text-slate-400">
+              {fileNameMaster}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {loading ? (
+          <p className="py-8 text-center text-sm text-slate-400">
+            Inspecting each check&apos;s master…
+          </p>
+        ) : error ? (
+          <p className="py-8 text-center text-sm text-red-500">{error}</p>
+        ) : report ? (
+          <>
+            <div
+              className={`mb-3 rounded-lg px-3 py-2 text-xs font-medium ${
+                report.consistent
+                  ? "bg-emerald-50 text-emerald-700"
+                  : "bg-amber-50 text-amber-800"
+              }`}
+            >
+              {report.consistent
+                ? report.staleTotalCheckIds.length > 0
+                  ? "The master files are identical — but some stored totals are out of date. The history difference is stale data, not a real master difference."
+                  : "All checks parse to the same master total."
+                : `Master totals differ: ${report.distinctCounts.join(
+                    ", "
+                  )} across ${report.checks.length} checks. ` +
+                  `${report.distinctHashes} distinct master file version${
+                    report.distinctHashes === 1 ? "" : "s"
+                  } found.`}
+            </div>
+
+            {report.staleTotalCheckIds.length > 0 && (
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                <span className="text-xs text-slate-600">
+                  {report.staleTotalCheckIds.length} check
+                  {report.staleTotalCheckIds.length === 1 ? "" : "s"} have a
+                  stored total that doesn&apos;t match their master file.
+                </span>
+                <button
+                  onClick={handleFixStale}
+                  disabled={fixing}
+                  className="rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-40"
+                >
+                  {fixing ? "Fixing…" : "Fix stored totals"}
+                </button>
+                {fixMsg && (
+                  <span className="text-xs text-slate-500">{fixMsg}</span>
+                )}
+              </div>
+            )}
+
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <th className="py-2 pr-2">Analyst</th>
+                  <th className="py-2 pr-2">Date</th>
+                  <th className="py-2 pr-2 text-right">Master</th>
+                  <th className="py-2 pr-2 text-center">File</th>
+                  <th className="py-2 pr-2 text-right">Diff</th>
+                  <th className="py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {report.checks.map((c) => (
+                  <MasterDiffRow
+                    key={c.checkId}
+                    check={c}
+                    hashLabel={c.xmlHash ? hashLabels.get(c.xmlHash) : "—"}
+                    onOpenCheck={onOpenCheck}
+                  />
+                ))}
+              </tbody>
+            </table>
+
+            <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+              The most common master version is the{" "}
+              <span className="font-semibold text-slate-500">reference</span>{" "}
+              (File {referenceLetter}). Expand a row to see, per stat, how many
+              this master has vs the reference. The{" "}
+              <span className="font-semibold text-slate-500">Diff</span> column
+              sums to the total difference. A re-graded outcome shows as a pair
+              (e.g. −1 &quot;Short Passes Successful&quot;, +1 &quot;… Unsuccessful&quot;)
+              that nets to zero on the total but explains accuracy differences.
+            </p>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+// One row in the master-consistency table. Expands to reveal the exact
+// instances this check's master adds/removes vs the reference version.
+function MasterDiffRow({
+  check: c,
+  hashLabel,
+  onOpenCheck,
+}: {
+  check: MasterSiblingCheck;
+  hashLabel: string | undefined;
+  onOpenCheck: (checkId: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const diffs = c.statDiffs;
+
+  return (
+    <>
+      <tr className="border-b border-slate-100 last:border-0">
+        <td className="py-2 pr-2 font-medium text-slate-700">
+          {c.analystName || "—"}
+          {c.isReference && (
+            <span className="ml-1.5 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-700">
+              REF
+            </span>
+          )}
+        </td>
+        <td className="whitespace-nowrap py-2 pr-2 text-slate-500">
+          {formatDate(c.createdAt)}
+        </td>
+        <td className="py-2 pr-2 text-right tabular-nums text-slate-600">
+          {c.parsedMasterTotal ?? c.storedMasterTotal}
+          {c.parsedMasterTotal != null &&
+            c.parsedMasterTotal !== c.storedMasterTotal && (
+              <span
+                className="ml-1 text-[10px] font-semibold text-amber-600"
+                title={`Stored total is ${c.storedMasterTotal}; the master file actually has ${c.parsedMasterTotal}. Stored value is stale.`}
+              >
+                (stored {c.storedMasterTotal})
+              </span>
+            )}
+        </td>
+        <td className="py-2 pr-2 text-center">
+          <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-bold text-slate-600">
+            {hashLabel ?? "—"}
+          </span>
+        </td>
+        <td className="py-2 pr-2 text-right">
+          {c.isReference ? (
+            <span className="text-xs text-slate-400">reference</span>
+          ) : diffs.length === 0 ? (
+            <span className="text-xs font-medium text-emerald-600">
+              identical
+            </span>
+          ) : (
+            <button
+              onClick={() => setOpen((v) => !v)}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold hover:opacity-80"
+              title="Show which stats differ vs the reference master"
+            >
+              <span
+                className={
+                  c.totalDelta > 0
+                    ? "text-emerald-600"
+                    : c.totalDelta < 0
+                      ? "text-red-600"
+                      : "text-slate-500"
+                }
+              >
+                {c.totalDelta > 0 ? `+${c.totalDelta}` : c.totalDelta} total
+              </span>
+              <span className="text-slate-400">
+                · {diffs.length} stat{diffs.length === 1 ? "" : "s"}
+              </span>
+              {open ? (
+                <ChevronDown size={12} className="text-slate-400" />
+              ) : (
+                <ChevronRight size={12} className="text-slate-400" />
+              )}
+            </button>
+          )}
+        </td>
+        <td className="py-2 text-right">
+          <button
+            onClick={() => onOpenCheck(c.checkId)}
+            className="text-xs font-medium text-sky-600 hover:text-sky-800"
+          >
+            Open
+          </button>
+        </td>
+      </tr>
+      {open && diffs.length > 0 && (
+        <tr className="border-b border-slate-100 bg-slate-50/70">
+          <td colSpan={6} className="px-3 py-3">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Stat counts vs reference — this master&apos;s count, the
+              reference&apos;s, and the difference
+            </p>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-slate-400">
+                  <th className="py-1 pr-2 font-medium">Stat</th>
+                  <th className="py-1 px-2 text-right font-medium">This</th>
+                  <th className="py-1 px-2 text-right font-medium">Ref</th>
+                  <th className="py-1 pl-2 text-right font-medium">Diff</th>
+                </tr>
+              </thead>
+              <tbody>
+                {diffs.map((d) => (
+                  <tr key={d.stat} className="border-t border-slate-100">
+                    <td className="py-1 pr-2 text-slate-700">{d.stat}</td>
+                    <td className="py-1 px-2 text-right tabular-nums text-slate-600">
+                      {d.thisCount}
+                    </td>
+                    <td className="py-1 px-2 text-right tabular-nums text-slate-500">
+                      {d.referenceCount}
+                    </td>
+                    <td
+                      className={`py-1 pl-2 text-right font-semibold tabular-nums ${
+                        d.delta > 0 ? "text-emerald-600" : "text-red-600"
+                      }`}
+                    >
+                      {d.delta > 0 ? `+${d.delta}` : d.delta}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

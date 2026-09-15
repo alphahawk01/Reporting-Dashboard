@@ -381,6 +381,282 @@ export async function getMasterCheckSiblings(
     return { count: data?.length ?? 0, analysts };
 }
 
+// ---- Master consistency diagnostic --------------------------------
+
+// A per-stat count difference of this check's master vs the reference master.
+// We compare COUNTS PER STAT rather than trying to pair individual events,
+// which avoids noise from re-graded players/timing. `delta = thisCount -
+// referenceCount`: positive means this master has more of that stat, negative
+// means fewer. The deltas sum to the master-total difference.
+export interface MasterStatDiff {
+    stat: string;
+    referenceCount: number;
+    thisCount: number;
+    delta: number;
+}
+
+/** One sibling check's master snapshot, for the consistency diagnostic. */
+export interface MasterSiblingCheck {
+    checkId: number;
+    analystName: string;
+    createdAt: string;
+    /** master_total stored on the row (as shown in the Ex/Mas column). */
+    storedMasterTotal: number;
+    /** Live count of parsed instances in this check's xml_master. */
+    parsedMasterTotal: number | null;
+    /** SHA-like short hash of the raw xml_master, to spot identical files. */
+    xmlHash: string | null;
+    /**
+     * Per-stat count differences vs the reference (majority) master. Only
+     * stats whose count differs are included, sorted by largest gap. Empty
+     * when this master matches the reference (or is the reference).
+     */
+    statDiffs: MasterStatDiff[];
+    /** Net master-total difference vs reference (sum of the stat deltas). */
+    totalDelta: number;
+    /** True when this check's master is the chosen reference version. */
+    isReference: boolean;
+}
+
+export interface MasterConsistencyReport {
+    fileNameMaster: string;
+    checks: MasterSiblingCheck[];
+    /** Distinct parsed instance counts seen across siblings. */
+    distinctCounts: number[];
+    /** Distinct xml hashes seen (byte-level file variants). */
+    distinctHashes: number;
+    /** True when every sibling parses to the same master instance count. */
+    consistent: boolean;
+    /**
+     * Check ids whose STORED master_total disagrees with what their own
+     * xml_master actually parses to — i.e. a stale column, not a real master
+     * difference. These are what make the history banner fire while the
+     * parsed masters are actually identical.
+     */
+    staleTotalCheckIds: number[];
+}
+
+// Tiny, fast, non-cryptographic hash (djb2) of a string, hex-encoded. Used
+// only to tell whether two stored master files are byte-identical.
+function cheapHash(s: string): string {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) {
+        h = (h * 33) ^ s.charCodeAt(i);
+    }
+    // >>> 0 keeps it an unsigned 32-bit int.
+    return (h >>> 0).toString(16);
+}
+
+/**
+ * Diagnose why sibling checks of the SAME master file can show different
+ * master totals. Fetches each check's stored xml_master, re-parses it to count
+ * instances, and hashes the raw XML so identical vs edited files are obvious.
+ *
+ * Read-only: touches no data. Runs client-side (parseInstances needs the
+ * browser DOMParser). Fetches XML one row at a time to avoid the statement
+ * timeouts that batching hits on large blobs.
+ */
+export async function diagnoseMasterConsistency(
+    fileNameMaster: string
+): Promise<MasterConsistencyReport> {
+    const { data, error } = await supabase
+        .from("accuracy_checks")
+        .select("id, analyst_name, created_at, master_total")
+        .eq("file_name_master", fileNameMaster)
+        .order("created_at", { ascending: true });
+
+    if (error) {
+        console.error("Failed loading sibling checks:", error);
+        throw new Error(error.message || "Failed loading sibling checks");
+    }
+
+    const rows = (data ?? []) as {
+        id: number;
+        analyst_name: string;
+        created_at: string;
+        master_total: number;
+    }[];
+
+    // First pass: fetch + parse each check's master XML.
+    type Parsed = {
+        row: (typeof rows)[number];
+        instances: ReturnType<typeof parseInstances> | null;
+        xmlHash: string | null;
+    };
+    const parsed: Parsed[] = [];
+    for (const row of rows) {
+        // One row at a time — xml blobs are large.
+        const { data: xmlRow, error: xmlErr } = await supabase
+            .from("accuracy_checks")
+            .select("xml_master")
+            .eq("id", row.id)
+            .single();
+
+        let instances: ReturnType<typeof parseInstances> | null = null;
+        let xmlHash: string | null = null;
+        if (!xmlErr && xmlRow) {
+            const xml = (xmlRow as { xml_master: string | null }).xml_master;
+            if (xml) {
+                try {
+                    instances = parseInstances(xml);
+                } catch {
+                    instances = null;
+                }
+                xmlHash = cheapHash(xml);
+            }
+        }
+        parsed.push({ row, instances, xmlHash });
+    }
+
+    // Choose the REFERENCE version: the xml hash shared by the most checks
+    // (the master everyone else is compared against). Ties break on whichever
+    // appears first.
+    const hashFreq = new Map<string, number>();
+    for (const p of parsed) {
+        if (p.xmlHash) hashFreq.set(p.xmlHash, (hashFreq.get(p.xmlHash) ?? 0) + 1);
+    }
+    let referenceHash: string | null = null;
+    let bestFreq = -1;
+    for (const [h, n] of hashFreq.entries()) {
+        if (n > bestFreq) {
+            bestFreq = n;
+            referenceHash = h;
+        }
+    }
+    const referenceInstances =
+        parsed.find((p) => p.xmlHash === referenceHash)?.instances ?? null;
+
+    type PInst = { stat: string; category: string };
+    const statOf = (i: PInst) => (i.stat || i.category || "—").trim();
+
+    // Count instances per stat for a master. This is the basis of the diff:
+    // comparing per-stat counts (not individual events) cleanly explains a
+    // total difference and is immune to re-graded player/timing noise.
+    const countByStat = (
+        instances: ReturnType<typeof parseInstances> | null
+    ): Map<string, number> => {
+        const m = new Map<string, number>();
+        for (const i of instances ?? []) {
+            const s = statOf(i);
+            m.set(s, (m.get(s) ?? 0) + 1);
+        }
+        return m;
+    };
+
+    const refCounts = countByStat(referenceInstances);
+
+    const checks: MasterSiblingCheck[] = parsed.map((p) => {
+        const isReference = p.xmlHash === referenceHash;
+        const statDiffs: MasterStatDiff[] = [];
+        let totalDelta = 0;
+
+        if (!isReference && p.instances && referenceInstances) {
+            const thisCounts = countByStat(p.instances);
+            // Union of every stat seen in either master.
+            const allStats = new Set<string>([
+                ...refCounts.keys(),
+                ...thisCounts.keys(),
+            ]);
+            for (const stat of allStats) {
+                const referenceCount = refCounts.get(stat) ?? 0;
+                const thisCount = thisCounts.get(stat) ?? 0;
+                const delta = thisCount - referenceCount;
+                if (delta !== 0) {
+                    statDiffs.push({ stat, referenceCount, thisCount, delta });
+                    totalDelta += delta;
+                }
+            }
+            // Biggest absolute gaps first.
+            statDiffs.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+        }
+
+        return {
+            checkId: p.row.id,
+            analystName: p.row.analyst_name,
+            createdAt: p.row.created_at,
+            storedMasterTotal: p.row.master_total,
+            parsedMasterTotal: p.instances ? p.instances.length : null,
+            xmlHash: p.xmlHash,
+            statDiffs,
+            totalDelta,
+            isReference,
+        };
+    });
+
+    const distinctCounts = Array.from(
+        new Set(
+            checks
+                .map((c) => c.parsedMasterTotal)
+                .filter((n): n is number => n != null)
+        )
+    ).sort((a, b) => a - b);
+    const distinctHashes = new Set(
+        checks.map((c) => c.xmlHash).filter(Boolean)
+    ).size;
+
+    const staleTotalCheckIds = checks
+        .filter(
+            (c) =>
+                c.parsedMasterTotal != null &&
+                c.parsedMasterTotal !== c.storedMasterTotal
+        )
+        .map((c) => c.checkId);
+
+    return {
+        fileNameMaster,
+        checks,
+        distinctCounts,
+        distinctHashes,
+        consistent: distinctCounts.length <= 1,
+        staleTotalCheckIds,
+    };
+}
+
+/**
+ * Recompute + persist `master_total` for checks whose stored value has drifted
+ * from what their xml_master actually parses to. Read the master XML, count
+ * instances, and write the corrected count. Returns how many rows were fixed.
+ *
+ * Fixes the case where the history "master totals differ" banner fires purely
+ * because a stored total is stale (the master files are actually identical).
+ * Runs client-side (parseInstances). Pass the check ids from a
+ * MasterConsistencyReport's `staleTotalCheckIds`.
+ */
+export async function fixStaleMasterTotals(
+    checkIds: number[]
+): Promise<{ fixed: number }> {
+    let fixed = 0;
+    for (const id of checkIds) {
+        const { data, error } = await supabase
+            .from("accuracy_checks")
+            .select("xml_master")
+            .eq("id", id)
+            .single();
+        if (error || !data) {
+            console.error(`Failed loading XML for check ${id}:`, error);
+            continue;
+        }
+        const xml = (data as { xml_master: string | null }).xml_master;
+        if (!xml) continue;
+        let count: number;
+        try {
+            count = parseInstances(xml).length;
+        } catch {
+            continue;
+        }
+        const { error: upErr } = await supabase
+            .from("accuracy_checks")
+            .update({ master_total: count })
+            .eq("id", id);
+        if (upErr) {
+            console.error(`Failed fixing master_total for ${id}:`, upErr);
+            continue;
+        }
+        fixed += 1;
+    }
+    return { fixed };
+}
+
 /**
  * Subscribe to UPDATEs of a single accuracy check row (via Supabase Realtime).
  * Fires `onUpdate` whenever the row changes (e.g. a corrected master saved
