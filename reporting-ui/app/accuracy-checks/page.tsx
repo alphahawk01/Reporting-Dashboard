@@ -2072,6 +2072,44 @@ function AnalystComparisonTable({
           selectedAnalyst.trim().toLowerCase()
       )
     : rows;
+
+  // Export the rows CURRENTLY SHOWING (respecting the analyst + week filters
+  // and the active sort) to a CSV download. Percentages are plain numbers
+  // (e.g. 92.3) so they open cleanly in Excel/Sheets.
+  function exportComparison() {
+    const pctNum = (v: number | null) =>
+      v == null ? "" : (v * 100).toFixed(1);
+    const csvCell = (s: string) => `"${s.replace(/"/g, '""')}"`;
+
+    const header = [
+      "Analyst",
+      "Checks",
+      ...PLAYER_ACCURACY_COLUMNS.map((c) => `${c.label} %`),
+    ];
+    const lines = visibleRows.map((r) =>
+      [
+        r.analyst,
+        String(r.checks),
+        ...PLAYER_ACCURACY_COLUMNS.map((col) => pctNum(r.groups[col.key])),
+      ]
+        .map(csvCell)
+        .join(",")
+    );
+
+    const csv = [header.map(csvCell).join(","), ...lines].join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const scope = weekFilter === "all" ? "all-weeks" : `week-${weekFilter}`;
+    const who = selectedAnalyst
+      ? selectedAnalyst.replace(/\s+/g, "-").toLowerCase()
+      : "all-analysts";
+    a.href = url;
+    a.download = `analyst-accuracy_${who}_${scope}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="space-y-6">
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -2112,6 +2150,15 @@ function AnalystComparisonTable({
               </option>
             ))}
           </select>
+          <button
+            onClick={exportComparison}
+            disabled={visibleRows.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+            title="Export the analysts currently shown to CSV"
+          >
+            <Download size={13} /> Export
+            {visibleRows.length > 0 ? ` (${visibleRows.length})` : ""}
+          </button>
         </div>
       </div>
 
