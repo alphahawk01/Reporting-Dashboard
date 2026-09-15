@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import {
-  Trophy,
   History,
   Trash2,
   X,
@@ -25,10 +24,10 @@ const AccuracyTrendChart = dynamic(() => import("./AccuracyTrendChart"), {
     </div>
   ),
 });
+import type { TrendPoint } from "./AccuracyTrendChart";
 import {
   getAccuracyChecksMeta,
   getAccuracyChecksXml,
-  countMasterChecks,
   summariseByAnalyst,
   deleteAccuracyCheck,
   backfillPlayerAccuracy,
@@ -454,8 +453,6 @@ export default function AccuracyChecksPage() {
     [checks]
   );
 
-  const masterCounts = useMemo(() => countMasterChecks(checks), [checks]);
-
   // Empty selectedAnalyst = "All analysts" (the default view). Checks are
   // shown oldest-first per analyst, or all checks newest-first for "All".
   const analystChecks = useMemo(() => {
@@ -559,41 +556,6 @@ export default function AccuracyChecksPage() {
   // Average Player Accuracy per group (Overall/Passing/Offensive/Defensive/
   // Goalkeeper) across the selected analyst's checks, from the stored
   // player_accuracy (both-teams scope). Only checks that HAVE a value for a
-  // group count toward that group's average, so missing/non-football checks
-  // don't drag it down. null when the analyst has no computed groups yet.
-  const analystGroupAverages = useMemo(() => {
-    if (!selectedAnalyst) return null;
-    const sums = new Map<PlayerAccuracyGroupKey, { total: number; n: number }>();
-    for (const col of PLAYER_ACCURACY_COLUMNS) {
-      sums.set(col.key, { total: 0, n: 0 });
-    }
-    for (const c of analystChecks) {
-      for (const col of PLAYER_ACCURACY_COLUMNS) {
-        const v = storedGroupPct(c, col.key);
-        if (v == null) continue;
-        const e = sums.get(col.key)!;
-        e.total += v;
-        e.n += 1;
-      }
-    }
-    const out: Record<PlayerAccuracyGroupKey, number | null> = {
-      overall: null,
-      passing: null,
-      offensive: null,
-      defensive: null,
-      goalkeeper: null,
-    };
-    let any = false;
-    for (const col of PLAYER_ACCURACY_COLUMNS) {
-      const e = sums.get(col.key)!;
-      if (e.n > 0) {
-        out[col.key] = e.total / e.n;
-        any = true;
-      }
-    }
-    return any ? out : null;
-  }, [selectedAnalyst, analystChecks]);
-
   // Problem-area analysis for the selected analyst: the 3–5 stats most in need
   // of improvement, each with the specific check they struggled with most.
   // Rule-based (no LLM), from the stored player_accuracy (both scope) — instant.
@@ -1108,6 +1070,16 @@ export default function AccuracyChecksPage() {
             weeks={availableWeeks}
             weekFilter={weekFilter}
             onWeekChange={setWeekFilter}
+            analystOptions={analystSummaries.map((s) => ({
+              name: s.analystName,
+              checks: s.checks,
+            }))}
+            totalChecks={checks.length}
+            selectedAnalyst={selectedAnalyst}
+            onAnalystChange={setSelectedAnalyst}
+            trendData={trendData}
+            trendGroup={trendGroup}
+            onTrendGroupChange={setTrendGroup}
           />
         ) : view === "locations" ? (
           <LocationComparisonTable
@@ -1140,136 +1112,6 @@ export default function AccuracyChecksPage() {
                   );
                 })}
               </div>
-            </div>
-
-            {/* Top: analyst picker (left) and leaderboard (right) */}
-            <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,1fr)]">
-            {/* LEFT: analyst picker */}
-            <div className="space-y-6">
-              {/* Analyst picker */}
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <label className="mb-1 block text-xs font-medium text-slate-500">
-                  Analyst
-                </label>
-                <select
-                  value={selectedAnalyst}
-                  onChange={(e) => setSelectedAnalyst(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none"
-                >
-                  <option value="">
-                    All analysts ({checks.length} check
-                    {checks.length === 1 ? "" : "s"})
-                  </option>
-                  {analystSummaries.map((s) => (
-                    <option key={s.analystName} value={s.analystName}>
-                      {s.analystName} ({s.checks} check{s.checks === 1 ? "" : "s"})
-                    </option>
-                  ))}
-                </select>
-
-                {/* Average Player Accuracy per group across this analyst's
-                    checks — same headers as the tables below. */}
-                {analystGroupAverages && (
-                  <div className="mt-4">
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                      Avg player accuracy
-                    </p>
-                    <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
-                      {PLAYER_ACCURACY_COLUMNS.map((col) => {
-                        const v = analystGroupAverages[col.key];
-                        return (
-                          <Stat
-                            key={col.key}
-                            label={col.label}
-                            value={v != null ? pct(v) : "—"}
-                            color={v != null ? accColor(v) : undefined}
-                          />
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* RIGHT: master-checks leaderboard */}
-            <div className="space-y-6">
-              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-700">
-                  <Trophy size={16} className="text-amber-500" /> Master checks completed
-                </h2>
-                <p className="mb-4 text-xs text-slate-400">
-                  How many accuracy checks each person has completed as the
-                  master coder.
-                </p>
-
-                {masterCounts.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-slate-400">
-                    No master checks recorded yet.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {masterCounts.map((m, i) => (
-                      <div
-                        key={m.masterAnalystName}
-                        className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="w-5 shrink-0 text-center text-xs font-bold text-slate-400">
-                            {i + 1}
-                          </span>
-                          <span className="truncate text-sm font-medium text-slate-700">
-                            {m.masterAnalystName}
-                          </span>
-                        </div>
-                        <span className="shrink-0 rounded-full bg-slate-900 px-2.5 py-0.5 text-xs font-bold text-white">
-                          {m.count}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-            </div>
-
-            {/* Trend chart — full width */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold text-slate-700">
-                  Accuracy trend
-                </h2>
-                {selectedAnalyst && (
-                  <div className="flex flex-wrap items-center gap-1">
-                    {PLAYER_ACCURACY_COLUMNS.map((col) => (
-                      <button
-                        key={col.key}
-                        onClick={() => setTrendGroup(col.key)}
-                        className={`rounded-md px-2 py-1 text-[11px] font-semibold transition ${
-                          trendGroup === col.key
-                            ? "bg-slate-900 text-white"
-                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                        }`}
-                      >
-                        {col.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {!selectedAnalyst ? (
-                <p className="text-sm text-slate-400">
-                  Select an analyst to see their accuracy trend.
-                </p>
-              ) : trendData.length < 2 ? (
-                <p className="text-sm text-slate-400">
-                  Need at least 2 saved checks to show a trend.
-                </p>
-              ) : (
-                <div className="h-64">
-                  <AccuracyTrendChart data={trendData} />
-                </div>
-              )}
             </div>
 
             {/* Recommendations: top problem stats for the analyst — full width */}
@@ -2058,6 +1900,13 @@ function AnalystComparisonTable({
   weeks,
   weekFilter,
   onWeekChange,
+  analystOptions,
+  totalChecks,
+  selectedAnalyst,
+  onAnalystChange,
+  trendData,
+  trendGroup,
+  onTrendGroupChange,
 }: {
   rows: ComparisonRowData[];
   sort: { key: string; dir: "asc" | "desc" };
@@ -2065,8 +1914,29 @@ function AnalystComparisonTable({
   weeks: string[];
   weekFilter: string;
   onWeekChange: (w: string) => void;
+  /** Analyst names + check counts for the picker. */
+  analystOptions: { name: string; checks: number }[];
+  /** Total checks across all analysts (for the "All analysts" option). */
+  totalChecks: number;
+  /** Currently selected analyst ("" = all). */
+  selectedAnalyst: string;
+  onAnalystChange: (name: string) => void;
+  /** Accuracy-trend points for the selected analyst + group. */
+  trendData: TrendPoint[];
+  /** Which Player Accuracy group the trend plots. */
+  trendGroup: PlayerAccuracyGroupKey;
+  onTrendGroupChange: (key: PlayerAccuracyGroupKey) => void;
 }) {
+  // When an analyst is picked, narrow the table to just their row.
+  const visibleRows = selectedAnalyst
+    ? rows.filter(
+        (r) =>
+          r.analyst.trim().toLowerCase() ===
+          selectedAnalyst.trim().toLowerCase()
+      )
+    : rows;
   return (
+    <div className="space-y-6">
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
         <div>
@@ -2078,7 +1948,20 @@ function AnalystComparisonTable({
             {weekFilter === "all" ? " (whole season)" : ""}.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="text-xs font-medium text-slate-500">Analyst</label>
+          <select
+            value={selectedAnalyst}
+            onChange={(e) => onAnalystChange(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 focus:border-slate-500 focus:outline-none"
+          >
+            <option value="">All analysts ({totalChecks} check{totalChecks === 1 ? "" : "s"})</option>
+            {analystOptions.map((o) => (
+              <option key={o.name} value={o.name}>
+                {o.name} ({o.checks} check{o.checks === 1 ? "" : "s"})
+              </option>
+            ))}
+          </select>
           <label className="text-xs font-medium text-slate-500">Week</label>
           <select
             value={weekFilter}
@@ -2129,7 +2012,7 @@ function AnalystComparisonTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {visibleRows.map((r) => (
               <tr
                 key={r.analyst}
                 className="border-t border-slate-100 hover:bg-slate-50"
@@ -2155,19 +2038,59 @@ function AnalystComparisonTable({
                 })}
               </tr>
             ))}
-            {rows.length === 0 && (
+            {visibleRows.length === 0 && (
               <tr>
                 <td
                   colSpan={2 + PLAYER_ACCURACY_COLUMNS.length}
                   className="p-6 text-center text-sm text-slate-400"
                 >
-                  No checks for this week.
+                  {selectedAnalyst
+                    ? "No checks for this analyst in the selected week."
+                    : "No checks for this week."}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+    </div>
+
+    {/* Accuracy trend — for the selected analyst. */}
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-slate-700">Accuracy trend</h2>
+        {selectedAnalyst && (
+          <div className="flex flex-wrap items-center gap-1">
+            {PLAYER_ACCURACY_COLUMNS.map((col) => (
+              <button
+                key={col.key}
+                onClick={() => onTrendGroupChange(col.key)}
+                className={`rounded-md px-2 py-1 text-[11px] font-semibold transition ${
+                  trendGroup === col.key
+                    ? "bg-slate-900 text-white"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                {col.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {!selectedAnalyst ? (
+        <p className="text-sm text-slate-400">
+          Select an analyst above to see their accuracy trend.
+        </p>
+      ) : trendData.length < 2 ? (
+        <p className="text-sm text-slate-400">
+          Need at least 2 saved checks to show a trend.
+        </p>
+      ) : (
+        <div className="h-64">
+          <AccuracyTrendChart data={trendData} />
+        </div>
+      )}
+    </div>
     </div>
   );
 }
