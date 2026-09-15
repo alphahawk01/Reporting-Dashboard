@@ -12,6 +12,7 @@ import {
   Sparkles,
   ChevronDown,
   ChevronRight,
+  Download,
 } from "lucide-react";
 
 // Accuracy trend chart pulls in recharts — load lazily so recharts stays out
@@ -113,6 +114,41 @@ function weekLabel(key: string): string {
     month: "short",
   });
   return `Week of ${label}`;
+}
+
+// ---- Friday→Thursday weeks (Saved checks table) -------------------
+// The Saved-checks filter groups by a week that STARTS on Friday and ENDS the
+// following Thursday. The key is the ISO date (YYYY-MM-DD, UTC) of that week's
+// Friday, so keys sort chronologically as plain strings.
+function fridayWeekStart(iso: string): Date {
+  const d = new Date(iso);
+  const date = new Date(
+    Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
+  );
+  // Days since the most recent Friday. getUTCDay: Sun=0..Sat=6, Fri=5.
+  const back = (date.getUTCDay() - 5 + 7) % 7;
+  date.setUTCDate(date.getUTCDate() - back);
+  return date;
+}
+
+function fridayWeekKey(iso: string): string {
+  return fridayWeekStart(iso).toISOString().slice(0, 10);
+}
+
+// Label a Friday-week key as its "Fri dd Mon – Thu dd Mon" range.
+function fridayWeekLabel(key: string): string {
+  const m = key.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return key;
+  const fri = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  const thu = new Date(fri);
+  thu.setUTCDate(fri.getUTCDate() + 6);
+  const fmt = (dt: Date) =>
+    dt.toLocaleDateString("en-AU", {
+      day: "2-digit",
+      month: "short",
+      timeZone: "UTC",
+    });
+  return `${fmt(fri)} – ${fmt(thu)}`;
 }
 
 type TeamScope = "both" | "home" | "away";
@@ -503,6 +539,10 @@ export default function AccuracyChecksPage() {
     dir: "asc" | "desc";
   }>({ key: "date", dir: "desc" });
 
+  // Friday→Thursday week filter for the Saved checks table ("all" = every
+  // week). Independent of the comparison-tabs week filter (which is ISO weeks).
+  const [savedWeekFilter, setSavedWeekFilter] = useState<string>("all");
+
   function toggleSavedSort(key: string) {
     setSavedSort((cur) =>
       cur.key === key
@@ -540,7 +580,13 @@ export default function AccuracyChecksPage() {
           return null;
       }
     };
-    return [...analystChecks].sort((a, b) => {
+    const scoped =
+      savedWeekFilter === "all"
+        ? analystChecks
+        : analystChecks.filter(
+            (c) => fridayWeekKey(c.created_at) === savedWeekFilter
+          );
+    return [...scoped].sort((a, b) => {
       const av = val(a);
       const bv = val(b);
       if (av == null && bv == null) return 0;
@@ -551,7 +597,67 @@ export default function AccuracyChecksPage() {
       }
       return ((av as number) - (bv as number)) * mult;
     });
-  }, [analystChecks, savedSort, openCounts]);
+  }, [analystChecks, savedSort, openCounts, savedWeekFilter]);
+
+  // Distinct Friday→Thursday weeks present in the current (analyst/sport
+  // scoped) checks, newest first, for the Saved-checks week selector.
+  const savedWeeks = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of analystChecks) set.add(fridayWeekKey(c.created_at));
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [analystChecks]);
+
+  // Export the Saved-checks rows CURRENTLY SHOWING (respecting the week filter,
+  // analyst scope and sort) to a CSV download. Percentages are written as plain
+  // numbers (e.g. 92.3) so they open cleanly in Excel/Sheets.
+  function exportSavedChecks() {
+    const pctNum = (v: number | null) =>
+      v == null ? "" : (v * 100).toFixed(1);
+    const csvCell = (s: string) => `"${s.replace(/"/g, '""')}"`;
+
+    const header = [
+      "Date",
+      "Match",
+      "Analyst",
+      "Master by",
+      ...PLAYER_ACCURACY_COLUMNS.map((c) => `${c.label} %`),
+      "Exact",
+      "Master total",
+      "Open disputes",
+    ];
+
+    const lines = sortedSavedChecks.map((c) => {
+      const cells = [
+        formatDate(c.created_at),
+        matchTeamsLabel(c),
+        c.analyst_name || "",
+        c.master_analyst_name || "",
+        ...PLAYER_ACCURACY_COLUMNS.map((col) =>
+          pctNum(storedGroupPct(c, col.key))
+        ),
+        String(c.exact),
+        String(c.master_total),
+        String(openCounts[c.id] ?? 0),
+      ];
+      return cells.map(csvCell).join(",");
+    });
+
+    const csv = [header.map(csvCell).join(","), ...lines].join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const scope =
+      savedWeekFilter === "all"
+        ? "all-weeks"
+        : `week-${savedWeekFilter}`;
+    const who = selectedAnalyst
+      ? selectedAnalyst.replace(/\s+/g, "-").toLowerCase()
+      : "all-analysts";
+    a.href = url;
+    a.download = `saved-checks_${who}_${scope}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   // Average Player Accuracy per group (Overall/Passing/Offensive/Defensive/
   // Goalkeeper) across the selected analyst's checks, from the stored
@@ -1127,9 +1233,40 @@ export default function AccuracyChecksPage() {
             {/* Saved checks — full width */}
             <div>
               <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <h2 className="border-b border-slate-100 p-5 text-sm font-semibold text-slate-700">
-                  Saved checks
-                </h2>
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
+                  <h2 className="text-sm font-semibold text-slate-700">
+                    Saved checks
+                  </h2>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-medium text-slate-500">
+                      Week
+                    </label>
+                    <select
+                      value={savedWeekFilter}
+                      onChange={(e) => setSavedWeekFilter(e.target.value)}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 focus:border-slate-500 focus:outline-none"
+                      aria-label="Filter saved checks by week (Friday to Thursday)"
+                    >
+                      <option value="all">All weeks</option>
+                      {savedWeeks.map((w) => (
+                        <option key={w} value={w}>
+                          {fridayWeekLabel(w)}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={exportSavedChecks}
+                      disabled={sortedSavedChecks.length === 0}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      title="Export the checks currently shown to CSV"
+                    >
+                      <Download size={13} /> Export
+                      {sortedSavedChecks.length > 0
+                        ? ` (${sortedSavedChecks.length})`
+                        : ""}
+                    </button>
+                  </div>
+                </div>
                 {/* Scroll region sized to ~10 rows; header stays pinned.
                     Vertical-only scroll — columns are sized to fit width. */}
                 <div className="max-h-[460px] overflow-y-auto">
