@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
     Flag,
     ChevronDown,
@@ -14,6 +15,7 @@ import {
     Pencil,
     Plus,
     Save,
+    MessageSquare,
 } from "lucide-react";
 import {
     getAllDisputes,
@@ -44,6 +46,10 @@ import MasterEditModal from "@/components/MasterEditModal";
 import { useAuth } from "@/components/auth/AuthContext";
 import DisputesPanel from "@/components/DisputesPanel";
 import SportToggle, { type SportFilter } from "@/components/SportToggle";
+import {
+    findUserByAnalystName,
+    getOrCreateDirectConversation,
+} from "@/lib/api/messages";
 
 type Filter = "open" | "resolved" | "all";
 
@@ -77,7 +83,46 @@ function titleCaseTeam(name: string): string {
 
 export default function DisputesPage() {
     const { user, ready } = useAuth();
+    const router = useRouter();
     const canResolve = user?.role === "admin" || user?.role === "super_admin";
+    // Which fixture group is currently starting a message (checkId), for a
+    // per-button loading state.
+    const [messaging, setMessaging] = useState<number | null>(null);
+
+    // Start (or open) a direct conversation with the analyst whose fixture
+    // this is, linked to the check, then jump to the Messages page. Admins use
+    // this to give an analyst feedback about their flagged instances.
+    async function messageAnalyst(analystName: string, checkId: number) {
+        if (!user) return;
+        if (!analystName.trim()) {
+            alert("This fixture has no analyst name to message.");
+            return;
+        }
+        setMessaging(checkId);
+        try {
+            const target = await findUserByAnalystName(analystName);
+            if (!target) {
+                alert(
+                    `No user account found for "${analystName}". They need a login account to receive messages.`
+                );
+                return;
+            }
+            if (target.id === user.id) {
+                alert("That's you — pick a different person to message.");
+                return;
+            }
+            const convId = await getOrCreateDirectConversation(
+                user.id,
+                target.id,
+                { checkId }
+            );
+            router.push(`/messages?c=${convId}`);
+        } catch (err) {
+            alert(err instanceof Error ? err.message : "Failed to open messages.");
+        } finally {
+            setMessaging(null);
+        }
+    }
 
     const [disputes, setDisputes] = useState<Dispute[]>([]);
     const [checks, setChecks] = useState<AccuracyCheckMeta[]>([]);
@@ -637,6 +682,32 @@ export default function DisputesPage() {
                                                         colSpan={7}
                                                         className="bg-slate-50/60 p-3"
                                                     >
+                                                        {canResolve && g.analyst && (
+                                                            <div className="mb-3 flex items-center justify-end">
+                                                                <button
+                                                                    onClick={() =>
+                                                                        messageAnalyst(
+                                                                            g.analyst,
+                                                                            g.checkId
+                                                                        )
+                                                                    }
+                                                                    disabled={
+                                                                        messaging ===
+                                                                        g.checkId
+                                                                    }
+                                                                    className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+                                                                    title={`Message ${g.analyst} about this fixture's flags`}
+                                                                >
+                                                                    <MessageSquare
+                                                                        size={13}
+                                                                    />
+                                                                    {messaging ===
+                                                                    g.checkId
+                                                                        ? "Opening…"
+                                                                        : `Message ${g.analyst}`}
+                                                                </button>
+                                                            </div>
+                                                        )}
                                                         <DisputesPanel
                                                             disputes={g.disputes}
                                                             canResolve={canResolve}

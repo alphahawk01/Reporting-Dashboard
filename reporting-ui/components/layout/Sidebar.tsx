@@ -24,10 +24,13 @@ import {
   UserCog,
   LogOut,
   Flag,
+  MessageSquare,
 } from "lucide-react";
 
+import { useEffect, useState } from "react";
 import { useAuth } from "@/components/auth/AuthContext";
 import { pageKeyForPath, ROLE_LABELS } from "@/lib/api/auth";
+import { getUnreadCount, subscribeToAllMessages } from "@/lib/api/messages";
 
 const sections = [
   {
@@ -146,6 +149,17 @@ const sections = [
   },
 
   {
+    heading: "COMMUNICATION",
+    items: [
+      {
+        title: "Messages",
+        href: "/messages",
+        icon: MessageSquare,
+      },
+    ],
+  },
+
+  {
     heading: "ADMIN",
     items: [
       {
@@ -176,6 +190,28 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, hasAccess, logout } = useAuth();
+
+  // Unread message count for the Messages nav badge. Refreshed on mount, when
+  // the route changes (so opening/reading a thread updates it), and live via
+  // Realtime on any new message.
+  const [unread, setUnread] = useState(0);
+  useEffect(() => {
+    if (!user) return;
+    const uid = user.id;
+    let cancelled = false;
+    const refresh = () =>
+      getUnreadCount(uid)
+        .then((n) => {
+          if (!cancelled) setUnread(n);
+        })
+        .catch(() => {});
+    refresh();
+    const unsub = subscribeToAllMessages(refresh);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [user, pathname]);
 
   function handleLogout() {
     logout();
@@ -252,9 +288,15 @@ export default function Sidebar() {
 
                     <Icon size={18} />
 
-                    <span className="text-sm font-medium">
+                    <span className="flex-1 text-sm font-medium">
                       {item.title}
                     </span>
+
+                    {item.href === "/messages" && unread > 0 && (
+                      <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-bold text-white">
+                        {unread > 99 ? "99+" : unread}
+                      </span>
+                    )}
 
                   </Link>
 
