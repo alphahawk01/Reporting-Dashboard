@@ -21,6 +21,7 @@ export interface UserAccount {
     created_at: string;
     username: string;
     analyst_name: string | null;
+    email: string | null;
     role: Role;
 }
 
@@ -263,6 +264,7 @@ export async function login(
         created_at: row.created_at,
         username: row.username,
         analyst_name: row.analyst_name,
+        email: row.email ?? null,
         role: row.role,
     };
 }
@@ -274,7 +276,7 @@ export async function login(
 export async function listUsers(): Promise<UserAccount[]> {
     const { data, error } = await supabase
         .from("user_accounts")
-        .select("id, created_at, username, analyst_name, role")
+        .select("id, created_at, username, analyst_name, email, role")
         .order("username", { ascending: true });
 
     if (error) {
@@ -288,6 +290,7 @@ export async function createUser(input: {
     username: string;
     password: string;
     analystName?: string | null;
+    email?: string | null;
     role: Role;
 }): Promise<UserAccount> {
     const username = input.username.trim();
@@ -304,9 +307,10 @@ export async function createUser(input: {
             password_hash,
             salt,
             analyst_name: input.analystName?.trim() || null,
+            email: input.email?.trim() || null,
             role: input.role,
         })
-        .select("id, created_at, username, analyst_name, role")
+        .select("id, created_at, username, analyst_name, email, role")
         .single();
 
     if (error) {

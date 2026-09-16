@@ -8,6 +8,7 @@ import {
     getPlatformAnalysts,
     createAnalyst,
     updateAnalystLocation,
+    updateAnalystEmail,
     updatePlatformAnalystName,
     mergeAnalysts,
     type AnalystLocation,
@@ -24,6 +25,7 @@ import {
 } from "@/lib/api/computers";
 
 import { supabase } from "@/lib/supabase";
+import { provisionLmsUser } from "@/lib/api/lmsProvision";
 
 import AnalystTable from "./AnalystTable";
 import SearchBar from "./SearchBar";
@@ -725,6 +727,64 @@ export default function AnalystsPage() {
     // RENAME ANALYST
     // ==================================================
 
+    // Set/change an analyst's email (prompt-based). Saves to the shared
+    // analysts table (by name), then reloads so the table + invite button
+    // reflect the new email.
+    async function handleEditEmail(analyst: {
+        name: string;
+        email?: string | null;
+    }) {
+        const next = window.prompt(
+            `Email for ${analyst.name}:`,
+            analyst.email ?? ""
+        );
+        if (next === null) return; // cancelled
+        const trimmed = next.trim();
+        // Light validation: allow empty (clears it) or a basic email shape.
+        if (trimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+            alert("That doesn't look like a valid email address.");
+            return;
+        }
+        try {
+            await updateAnalystEmail(analyst.name, trimmed || null);
+            await load();
+        } catch (err) {
+            alert(
+                err instanceof Error
+                    ? err.message
+                    : "Failed to update email."
+            );
+        }
+    }
+
+    // Send an LMS invite to an analyst (provision/invite them into the
+    // training LMS). Requires an email; analysts map to the LMS learner role.
+    async function handleInvite(analyst: {
+        id: number;
+        name: string;
+        email?: string | null;
+    }) {
+        const email = analyst.email?.trim();
+        if (!email) {
+            alert("This analyst has no email — add one before inviting.");
+            return;
+        }
+        const res = await provisionLmsUser({
+            email,
+            fullName: analyst.name,
+            role: "analyst",
+        });
+        if (res.ok) {
+            alert(
+                res.status === "exists"
+                    ? `${analyst.name} already has an LMS account (role synced).`
+                    : `LMS invite sent to ${email}.`
+            );
+        } else {
+            alert(`Could not send LMS invite: ${res.error}`);
+        }
+    }
+
     function openRenameModal(
         analystId: number,
         currentName: string
@@ -984,6 +1044,8 @@ export default function AnalystsPage() {
                     }
                 }
                 onRename={openRenameModal}
+                onInvite={handleInvite}
+                onEditEmail={handleEditEmail}
             />
 
 

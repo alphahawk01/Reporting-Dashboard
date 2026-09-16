@@ -14,6 +14,7 @@ import {
     ROLE_LABELS,
 } from "@/lib/api/auth";
 import { getPlatformAnalystNames } from "@/lib/api/analysts";
+import { provisionLmsUser } from "@/lib/api/lmsProvision";
 
 export default function UsersPage() {
     const [users, setUsers] = useState<UserAccount[]>([]);
@@ -25,6 +26,7 @@ export default function UsersPage() {
     const [newUsername, setNewUsername] = useState("");
     const [newPassword, setNewPassword] = useState("");
     const [newAnalyst, setNewAnalyst] = useState("");
+    const [newEmail, setNewEmail] = useState("");
     const [newRole, setNewRole] = useState<Role>("analyst");
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -66,16 +68,39 @@ export default function UsersPage() {
         }
         try {
             setSaving(true);
+            const email = newEmail.trim();
             await createUser({
                 username: newUsername.trim(),
                 password: newPassword,
                 analystName: newAnalyst || null,
+                email: email || null,
                 role: newRole,
             });
-            setMessage(`Created user "${newUsername.trim()}".`);
+
+            // Best-effort: if an email was given, provision (invite) the same
+            // person into the LMS. Never block dashboard creation on this.
+            let lmsNote = "";
+            if (email) {
+                const res = await provisionLmsUser({
+                    email,
+                    fullName: newAnalyst || newUsername.trim(),
+                    role: newRole,
+                });
+                if (res.ok) {
+                    lmsNote =
+                        res.status === "exists"
+                            ? " LMS account already existed (role synced)."
+                            : " Invited to the LMS.";
+                } else {
+                    lmsNote = ` LMS provisioning failed: ${res.error}`;
+                }
+            }
+
+            setMessage(`Created user "${newUsername.trim()}".${lmsNote}`);
             setNewUsername("");
             setNewPassword("");
             setNewAnalyst("");
+            setNewEmail("");
             setNewRole("analyst");
             await load();
         } catch (err) {
@@ -188,6 +213,21 @@ export default function UsersPage() {
                                         <option key={n} value={n}>{n}</option>
                                     ))}
                                 </select>
+                            </div>
+                            <div>
+                                <label className="mb-1 block text-xs font-medium text-slate-500">
+                                    Email{" "}
+                                    <span className="font-normal text-slate-400">
+                                        (invites them to the LMS)
+                                    </span>
+                                </label>
+                                <input
+                                    type="email"
+                                    value={newEmail}
+                                    onChange={(e) => setNewEmail(e.target.value)}
+                                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                                    placeholder="name@premierdata.com.au"
+                                />
                             </div>
                             <div>
                                 <label className="mb-1 block text-xs font-medium text-slate-500">

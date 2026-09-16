@@ -9,6 +9,7 @@ import {
     type AnalystLocation,
     type NewAnalystEntry,
 } from "@/lib/api/analysts";
+import { provisionLmsUser } from "@/lib/api/lmsProvision";
 
 type Mode = "single" | "bulk";
 
@@ -85,7 +86,27 @@ export default function AddAnalystModal({
                     return;
                 }
                 await createAnalyst(clean, email, location || null);
-                setMessage(`Added "${clean}".`);
+
+                // Best-effort: if an email was given, invite them to the LMS.
+                let lmsNote = "";
+                const cleanEmail = email.trim();
+                if (cleanEmail) {
+                    const res = await provisionLmsUser({
+                        email: cleanEmail,
+                        fullName: clean,
+                        role: "analyst",
+                    });
+                    if (res.ok) {
+                        lmsNote =
+                            res.status === "exists"
+                                ? " LMS account already existed."
+                                : " LMS invite sent.";
+                    } else {
+                        lmsNote = ` LMS invite failed: ${res.error}`;
+                    }
+                }
+
+                setMessage(`Added "${clean}".${lmsNote}`);
                 setName("");
                 setEmail("");
                 setLocation("");

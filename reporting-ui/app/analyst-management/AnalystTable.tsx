@@ -1,6 +1,9 @@
 "use client";
+"use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import { Mail, Loader2, AtSign } from "lucide-react";
 import type { Computer } from "@/lib/api/computers";
 import {
     ANALYST_LOCATIONS,
@@ -59,6 +62,12 @@ type Props = {
         analystId: number,
         currentName: string
     ) => void;
+
+    /** Send an LMS invite to this analyst (requires an email). */
+    onInvite: (analyst: Analyst) => void | Promise<void>;
+
+    /** Set/change this analyst's email. */
+    onEditEmail: (analyst: Analyst) => void | Promise<void>;
 };
 
 export default function AnalystTable({
@@ -71,7 +80,21 @@ export default function AnalystTable({
     onOfficeComputerChange,
     onDelete,
     onRename,
+    onInvite,
+    onEditEmail,
 }: Props) {
+
+    // Per-row "sending invite" state, keyed by analyst id.
+    const [invitingId, setInvitingId] = useState<number | null>(null);
+
+    async function handleInvite(analyst: Analyst) {
+        setInvitingId(analyst.id);
+        try {
+            await onInvite(analyst);
+        } finally {
+            setInvitingId(null);
+        }
+    }
 
     const assignedHomeComputerIds =
         new Set(
@@ -515,6 +538,58 @@ export default function AnalystTable({
                                             title="Rename Analyst"
                                         >
                                             ✏️
+                                        </button>
+
+                                        <button
+                                            onClick={() =>
+                                                onEditEmail(analyst)
+                                            }
+                                            className="
+                                                rounded-lg
+                                                p-2
+                                                text-slate-600
+                                                hover:bg-slate-100
+                                            "
+                                            title={
+                                                analyst.email
+                                                    ? `Edit email (${analyst.email})`
+                                                    : "Set email"
+                                            }
+                                        >
+                                            <AtSign size={16} />
+                                        </button>
+
+                                        <button
+                                            onClick={() =>
+                                                handleInvite(analyst)
+                                            }
+                                            disabled={
+                                                !analyst.email ||
+                                                invitingId === analyst.id
+                                            }
+                                            className="
+                                                rounded-lg
+                                                p-2
+                                                text-emerald-600
+                                                hover:bg-emerald-50
+                                                disabled:cursor-not-allowed
+                                                disabled:text-slate-300
+                                                disabled:hover:bg-transparent
+                                            "
+                                            title={
+                                                analyst.email
+                                                    ? `Send LMS invite to ${analyst.email}`
+                                                    : "Add an email to send an LMS invite"
+                                            }
+                                        >
+                                            {invitingId === analyst.id ? (
+                                                <Loader2
+                                                    size={16}
+                                                    className="animate-spin"
+                                                />
+                                            ) : (
+                                                <Mail size={16} />
+                                            )}
                                         </button>
 
                                         <button

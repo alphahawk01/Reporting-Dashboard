@@ -519,6 +519,48 @@ export async function updateAnalystLocation(
 }
 
 /**
+ * Set/clear an analyst's email in the shared `analysts` table, keyed BY NAME
+ * (case-insensitive). Creates the row if the analyst isn't in the table yet
+ * (e.g. .NET-only analysts). Returns the resolved/updated platform analyst.
+ */
+export async function updateAnalystEmail(
+    name: string,
+    email: string | null
+): Promise<PlatformAnalyst> {
+    const clean = name.trim();
+    if (!clean) throw new Error("Analyst name is required.");
+    const cleanEmail = email?.trim() || null;
+
+    const { data: existing, error: findErr } = await supabase
+        .from("analysts")
+        .select("id, name, email, location, created_at")
+        .ilike("name", clean)
+        .limit(1)
+        .maybeSingle();
+    if (findErr) {
+        console.error("Failed looking up analyst:", findErr);
+        throw new Error(findErr.message || "Failed updating email");
+    }
+
+    if (existing) {
+        const { data, error } = await supabase
+            .from("analysts")
+            .update({ email: cleanEmail })
+            .eq("id", (existing as PlatformAnalyst).id)
+            .select("id, name, email, location, created_at")
+            .single();
+        if (error) {
+            console.error("Failed updating analyst email:", error);
+            throw new Error(error.message || "Failed updating email");
+        }
+        return data as PlatformAnalyst;
+    }
+
+    // No row yet — create one with the email.
+    return createAnalyst(clean, cleanEmail, null);
+}
+
+/**
  * Map of analyst name (lowercased) -> location, from the shared `analysts`
  * table. Used to attribute name-only accuracy checks to a country.
  */
