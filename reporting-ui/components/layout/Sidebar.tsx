@@ -25,6 +25,8 @@ import {
   LogOut,
   Flag,
   MessageSquare,
+  GraduationCap,
+  ExternalLink,
 } from "lucide-react";
 
 import { useEffect, useState } from "react";
@@ -40,6 +42,24 @@ const sections = [
         title: "Dashboard",
         href: "/dashboard",
         icon: LayoutDashboard,
+      },
+    ],
+  },
+
+  {
+    heading: "COMMUNICATION",
+    items: [
+      {
+        title: "Messages",
+        href: "/messages",
+        icon: MessageSquare,
+      },
+      {
+        title: "Learning",
+        href: "https://training.premierdata-technology.com",
+        icon: GraduationCap,
+        // Opens the LMS in a new tab (external — not an internal route).
+        external: true,
       },
     ],
   },
@@ -149,17 +169,6 @@ const sections = [
   },
 
   {
-    heading: "COMMUNICATION",
-    items: [
-      {
-        title: "Messages",
-        href: "/messages",
-        icon: MessageSquare,
-      },
-    ],
-  },
-
-  {
     heading: "ADMIN",
     items: [
       {
@@ -219,11 +228,15 @@ export default function Sidebar() {
   }
 
   // Only show items the current role can access; drop empty sections.
+  // External links (e.g. the LMS) aren't page-gated — show them to any logged
+  // in user.
   const visibleSections = sections
     .map((section) => ({
       ...section,
       items: section.items.filter((item) =>
-        hasAccess(pageKeyForPath(item.href))
+        "external" in item && item.external
+          ? !!user
+          : hasAccess(pageKeyForPath(item.href))
       ),
     }))
     .filter((section) => section.items.length > 0);
@@ -268,22 +281,42 @@ export default function Sidebar() {
               {section.items.map((item) => {
 
                 const Icon = item.icon;
+                const isExternal = "external" in item && item.external;
+                const active = !isExternal && pathname.startsWith(item.href);
 
-                const active =
-                  pathname.startsWith(item.href);
+                const baseClass = `
+                  flex items-center gap-3 rounded-lg px-3 py-3 transition
+                  ${active
+                    ? "bg-sky-600 text-white"
+                    : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                  }
+                `;
+
+                // External links (e.g. the LMS) open in a new tab.
+                if (isExternal) {
+                  return (
+                    <a
+                      key={item.href}
+                      href={item.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={baseClass}
+                    >
+                      <Icon size={18} />
+                      <span className="flex-1 text-sm font-medium">
+                        {item.title}
+                      </span>
+                      <ExternalLink size={14} className="text-slate-500" />
+                    </a>
+                  );
+                }
 
                 return (
 
                   <Link
                     key={item.href}
                     href={item.href}
-                    className={`
-                      flex items-center gap-3 rounded-lg px-3 py-3 transition
-                      ${active
-                        ? "bg-sky-600 text-white"
-                        : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                      }
-                    `}
+                    className={baseClass}
                   >
 
                     <Icon size={18} />
