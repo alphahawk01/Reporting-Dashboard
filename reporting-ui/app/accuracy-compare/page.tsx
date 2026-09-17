@@ -629,14 +629,15 @@ function PlayerAccuracyCard({
   highlight?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  // A group with no master events has pct === null — show "—", not a %/colour.
-  const hasData = group.pct != null;
+  // A group with no master events has no data — show "—", not a %/colour.
+  // Guard on master (not just pct) so a 0/0 group is never treated as 100%.
+  const hasData = group.master > 0 && group.pct != null;
   const accent =
-    group.pct == null
+    !hasData
       ? "text-slate-400"
-      : group.pct >= 0.9
+      : group.pct! >= 0.9
         ? "text-emerald-600"
-        : group.pct >= 0.7
+        : group.pct! >= 0.7
           ? "text-amber-600"
           : "text-red-600";
 

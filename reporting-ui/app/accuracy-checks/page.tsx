@@ -55,6 +55,7 @@ import {
 import {
   computePlayerAccuracy,
   type PlayerAccuracy,
+  type AccuracyGroup,
 } from "@/lib/comparison/player-accuracy";
 import {
   getAnalystLocationMap,
@@ -197,6 +198,16 @@ function matchTeamsLabel(check: AccuracyCheckMeta): string {
   return check.match_label || "—";
 }
 
+// A group's % for display/averaging, or null when it has no data to compare.
+// Guards on `master` (not just `pct`) so stale stored snapshots — written
+// before the 0/0 fix, with pct=1 for empty sections — are treated as no-data
+// instead of a bogus 100%. This is the single place that decision is made, so
+// live data is correct even before an admin runs "Recompute all".
+function groupPct(group: AccuracyGroup | null | undefined): number | null {
+  if (!group || group.master === 0) return null;
+  return group.pct;
+}
+
 // Read one Player Accuracy group's % from a check's STORED player_accuracy
 // (both-teams scope). Returns null when not computed yet or non-football.
 function storedGroupPct(
@@ -205,8 +216,7 @@ function storedGroupPct(
 ): number | null {
   const pa = check.player_accuracy;
   if (!pa || !pa.football) return null;
-  const g = pa.both?.[key];
-  return g ? g.pct : null;
+  return groupPct(pa.both?.[key]);
 }
 
 // Average each Player Accuracy group across a set of checks (both-teams scope).
@@ -1065,7 +1075,7 @@ export default function AccuracyChecksPage() {
       if (key === "date") return new Date(r.date).getTime();
       // Otherwise it's one of the Player Accuracy group keys.
       const g = r.groups?.[key as keyof PlayerAccuracy];
-      return g ? g.pct : null;
+      return groupPct(g);
     };
     return [...rows].sort((a, b) => {
       const av = val(a);
@@ -1672,7 +1682,7 @@ export default function AccuracyChecksPage() {
                                 {PLAYER_ACCURACY_COLUMNS.map((col, idx) => {
                                   const grp =
                                     r.groups?.[col.key as keyof PlayerAccuracy];
-                                  const v = grp ? grp.pct : null;
+                                  const v = groupPct(grp);
                                   return (
                                     <td
                                       key={col.key}
@@ -1712,9 +1722,10 @@ export default function AccuracyChecksPage() {
                                 for (const r of g.rows) {
                                   const grp =
                                     r.groups?.[col.key as keyof PlayerAccuracy];
-                                  // Exclude 0/0 groups (pct null) from the avg.
-                                  if (grp && grp.pct != null) {
-                                    total += grp.pct;
+                                  // Exclude 0/0 groups (no data) from the avg.
+                                  const v = groupPct(grp);
+                                  if (v != null) {
+                                    total += v;
                                     n += 1;
                                   }
                                 }
