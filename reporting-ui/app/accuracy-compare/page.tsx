@@ -629,12 +629,16 @@ function PlayerAccuracyCard({
   highlight?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  // A group with no master events has pct === null — show "—", not a %/colour.
+  const hasData = group.pct != null;
   const accent =
-    group.pct >= 0.9
-      ? "text-emerald-600"
-      : group.pct >= 0.7
-        ? "text-amber-600"
-        : "text-red-600";
+    group.pct == null
+      ? "text-slate-400"
+      : group.pct >= 0.9
+        ? "text-emerald-600"
+        : group.pct >= 0.7
+          ? "text-amber-600"
+          : "text-red-600";
 
   return (
     <div
@@ -659,10 +663,12 @@ function PlayerAccuracyCard({
         </button>
       </div>
       <p className={`mt-1 text-2xl font-bold ${accent}`}>
-        {(group.pct * 100).toFixed(1)}%
+        {hasData ? `${(group.pct! * 100).toFixed(1)}%` : "—"}
       </p>
       <p className="text-xs text-slate-500">
-        {group.exact}/{group.master} exact
+        {hasData
+          ? `${group.exact}/${group.master} exact`
+          : "No data to compare"}
       </p>
 
       {open && (
@@ -710,7 +716,7 @@ function PlayerAccuracyCard({
                 <td className="pt-1 text-right tabular-nums">{group.exact}</td>
                 <td className="pt-1 text-right tabular-nums">{group.master}</td>
                 <td className="pt-1 text-right tabular-nums">
-                  {(group.pct * 100).toFixed(0)}%
+                  {hasData ? `${(group.pct! * 100).toFixed(0)}%` : "—"}
                 </td>
               </tr>
             </tbody>
@@ -724,7 +730,7 @@ function PlayerAccuracyCard({
             <p className="mt-1">
               = {group.exact} / {group.master} ={" "}
               <span className="font-semibold text-slate-700">
-                {(group.pct * 100).toFixed(1)}%
+                {hasData ? `${(group.pct! * 100).toFixed(1)}%` : "—"}
               </span>
             </p>
           </div>

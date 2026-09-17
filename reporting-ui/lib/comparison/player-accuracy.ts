@@ -222,8 +222,12 @@ export type AccuracyPart = {
 export type AccuracyGroup = {
   master: number;
   exact: number;
-  /** exact / master, or 1 when master is 0. */
-  pct: number;
+  /**
+   * exact / master, or NULL when master is 0 (no events to compare). A 0/0
+   * group is NOT 100% — it has no data, so it must be excluded from display
+   * and from any averages rather than counted as perfect.
+   */
+  pct: number | null;
   parts: AccuracyPart[];
 };
 
@@ -331,7 +335,8 @@ function buildGroup(
 
   const master = parts.reduce((s, p) => s + p.master, 0);
   const exact = parts.reduce((s, p) => s + p.exact, 0);
-  const pct = master === 0 ? 1 : exact / master;
+  // No master events → no data to compare, so pct is null (excluded), NOT 100%.
+  const pct = master === 0 ? null : exact / master;
   return {
     master,
     exact,

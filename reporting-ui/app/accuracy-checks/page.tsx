@@ -1266,8 +1266,16 @@ export default function AccuracyChecksPage() {
               </div>
             )}
 
-            {/* Recommendations: top problem stats for the analyst — full width */}
-            {selectedAnalyst && analystRecommendations && (
+          </div>
+        )}
+
+        {/* Selected-analyst detail (recommendations + their saved checks).
+            Rendered outside the view switch so it appears in whichever tab is
+            active when an analyst is picked — the picker lives in the "All
+            analysts" tab, so this shows there. */}
+        {selectedAnalyst && (
+          <div className="mt-6 space-y-6">
+            {analystRecommendations && (
               <RecommendationsPanel
                 data={analystRecommendations}
                 threshold={PROBLEM_THRESHOLD}
@@ -1704,7 +1712,8 @@ export default function AccuracyChecksPage() {
                                 for (const r of g.rows) {
                                   const grp =
                                     r.groups?.[col.key as keyof PlayerAccuracy];
-                                  if (grp) {
+                                  // Exclude 0/0 groups (pct null) from the avg.
+                                  if (grp && grp.pct != null) {
                                     total += grp.pct;
                                     n += 1;
                                   }
