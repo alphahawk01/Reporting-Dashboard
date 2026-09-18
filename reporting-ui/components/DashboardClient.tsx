@@ -29,6 +29,10 @@ const TTGames = dynamic(() => import("./TTGames"), {
   ssr: false,
   loading: chartLoading,
 });
+const AwsCosts = dynamic(() => import("./AwsCosts"), {
+  ssr: false,
+  loading: chartLoading,
+});
 const AveHoursPerGame = dynamic(() => import("./AveHoursPerGame"), {
   ssr: false,
   loading: chartLoading,
@@ -257,6 +261,7 @@ export default function DashboardClient({
         <Tabs defaultValue="overview">
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="aws">AWS</TabsTrigger>
             <TabsTrigger value="tt">TT Games</TabsTrigger>
             <TabsTrigger value="performance">Performance</TabsTrigger>
             <TabsTrigger value="bonus">Bonus</TabsTrigger>
@@ -294,6 +299,13 @@ export default function DashboardClient({
             {/* WEEKLY COST TABLE */}
             <div style={{ marginTop: 20 }}>
               <CostByAreaByWeek data={filtered} />
+            </div>
+          </TabsContent>
+
+          {/* AWS COSTS */}
+          <TabsContent value="aws">
+            <div style={{ marginTop: 20 }}>
+              <AwsCosts />
             </div>
           </TabsContent>
 
