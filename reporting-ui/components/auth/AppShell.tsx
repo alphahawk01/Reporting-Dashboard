@@ -6,6 +6,7 @@ import { useAuth } from "@/components/auth/AuthContext";
 import { pageKeyForPath } from "@/lib/api/auth";
 import Sidebar from "@/components/layout/Sidebar";
 import TopBar from "@/components/layout/Topbar";
+import ChatWidget from "@/components/chat/ChatWidget";
 
 // Pages that render without the app chrome / auth guard.
 const PUBLIC_PATHS = ["/login"];
@@ -87,6 +88,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 <TopBar />
                 <main className="flex-1 overflow-auto">{children}</main>
             </div>
+            {/* App-wide floating chat (shows on every authenticated page,
+                including the accuracy pages). */}
+            <ChatWidget />
         </div>
     );
 }

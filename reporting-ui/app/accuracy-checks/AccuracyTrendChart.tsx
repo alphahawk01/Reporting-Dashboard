@@ -19,10 +19,12 @@ export type TrendPoint = {
 };
 
 // Bar fill by the same % bands used across the tables:
-//   >= 90% green, >= 70% amber, else red. (accuracy is 0–100 here.)
+//   >= 90% green, 80–89.99% yellow, 70–79.99% orange, else red.
+//   (accuracy is 0–100 here.)
 function bandColor(accuracy: number): string {
   if (accuracy >= 90) return "#059669"; // emerald-600
-  if (accuracy >= 70) return "#d97706"; // amber-600
+  if (accuracy >= 80) return "#eab308"; // yellow-500
+  if (accuracy >= 70) return "#f97316"; // orange-500
   return "#dc2626"; // red-600
 }
 

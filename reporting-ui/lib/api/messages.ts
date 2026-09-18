@@ -548,8 +548,14 @@ export function subscribeToConversation(
     conversationId: number,
     onInsert: (message: MessageRow) => void
 ): () => void {
+    // Unique channel name per call — same reason as subscribeToAllMessages:
+    // the /messages page and the floating chat widget could both open the same
+    // conversation, and a shared name would throw on the second subscriber.
+    const channelName = `messages_${conversationId}_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
     const channel = supabase
-        .channel(`messages_${conversationId}`)
+        .channel(channelName)
         .on(
             "postgres_changes",
             {
@@ -569,10 +575,19 @@ export function subscribeToConversation(
 /**
  * Subscribe to ALL new messages (any conversation) so the inbox / unread badge
  * can refresh live. Coarse but simple; the callback should re-fetch counts.
+ *
+ * Each call gets a UNIQUE channel name. Supabase permits only one channel per
+ * name per client and rejects adding `.on()` handlers to a name that's already
+ * been `.subscribe()`d — so a shared "messages_all" name would throw the moment
+ * a second consumer mounts (e.g. the sidebar badge AND the floating chat
+ * widget). The unique suffix lets any number of consumers subscribe safely.
  */
 export function subscribeToAllMessages(onInsert: () => void): () => void {
+    const channelName = `messages_all_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
     const channel = supabase
-        .channel("messages_all")
+        .channel(channelName)
         .on(
             "postgres_changes",
             { event: "INSERT", schema: "public", table: "messages" },

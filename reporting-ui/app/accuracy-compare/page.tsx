@@ -637,9 +637,11 @@ function PlayerAccuracyCard({
       ? "text-slate-400"
       : group.pct! >= 0.9
         ? "text-emerald-600"
-        : group.pct! >= 0.7
-          ? "text-amber-600"
-          : "text-red-600";
+        : group.pct! >= 0.8
+          ? "text-yellow-500"
+          : group.pct! >= 0.7
+            ? "text-orange-500"
+            : "text-red-600";
 
   return (
     <div
@@ -702,9 +704,11 @@ function PlayerAccuracyCard({
                           ? "text-slate-400"
                           : acc >= 0.9
                             ? "text-emerald-600"
-                            : acc >= 0.7
-                              ? "text-amber-600"
-                              : "text-red-600"
+                            : acc >= 0.8
+                              ? "text-yellow-500"
+                              : acc >= 0.7
+                                ? "text-orange-500"
+                                : "text-red-600"
                       }`}
                     >
                       {p.master === 0 ? "—" : `${(acc * 100).toFixed(0)}%`}
@@ -2535,9 +2539,11 @@ function AccuracyCompareInner() {
                             className={`h-full rounded-full ${
                               c.accuracy >= 0.9
                                 ? "bg-emerald-500"
-                                : c.accuracy >= 0.7
-                                  ? "bg-amber-500"
-                                  : "bg-red-500"
+                                : c.accuracy >= 0.8
+                                  ? "bg-yellow-500"
+                                  : c.accuracy >= 0.7
+                                    ? "bg-orange-500"
+                                    : "bg-red-500"
                             }`}
                             style={{ width: `${c.accuracy * 100}%` }}
                           />
@@ -2614,9 +2620,11 @@ function AccuracyCompareInner() {
                             className={`px-4 py-2 text-right tabular-nums font-semibold ${
                               s.accuracy >= 0.9
                                 ? "text-emerald-600"
-                                : s.accuracy >= 0.7
-                                  ? "text-amber-600"
-                                  : "text-red-600"
+                                : s.accuracy >= 0.8
+                                  ? "text-yellow-500"
+                                  : s.accuracy >= 0.7
+                                    ? "text-orange-500"
+                                    : "text-red-600"
                             }`}
                           >
                             {(s.accuracy * 100).toFixed(0)}%

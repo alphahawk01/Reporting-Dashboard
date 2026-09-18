@@ -16,6 +16,7 @@ import {
   Check,
 } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthContext";
+import { linkify } from "@/components/chat/linkify";
 import {
   getConversationsForUser,
   getMessages,
@@ -519,8 +520,8 @@ function MessagesInner() {
                             </div>
                           )}
                           {m.content && (
-                            <p className="whitespace-pre-wrap text-sm">
-                              {m.content}
+                            <p className="whitespace-pre-wrap break-words text-sm">
+                              {linkify(m.content)}
                             </p>
                           )}
                           <p

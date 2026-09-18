@@ -70,9 +70,12 @@ function pct(v: number) {
   return `${(v * 100).toFixed(1)}%`;
 }
 
+// Accuracy color bands: 90%+ green, 80–89.99% yellow, 70–79.99% orange,
+// below 70% red.
 function accColor(a: number) {
   if (a >= 0.9) return "text-emerald-600";
-  if (a >= 0.7) return "text-amber-600";
+  if (a >= 0.8) return "text-yellow-500";
+  if (a >= 0.7) return "text-orange-500";
   return "text-red-600";
 }
 
@@ -1100,6 +1103,237 @@ export default function AccuracyChecksPage() {
     );
   }, [masterFixtureGroups, fixtureSearch]);
 
+  // The "Saved checks" card — the full list of every saved check, sorted +
+  // week-filterable, in a ~10-row scroll region. Rendered in the History tab
+  // (all checks) AND, when an analyst is selected, in their detail section.
+  // The table columns adapt: the Analyst column is shown only when no single
+  // analyst is selected.
+  const savedChecksCard = (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
+        <h2 className="text-sm font-semibold text-slate-700">Saved checks</h2>
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-medium text-slate-500">Week</label>
+          <select
+            value={savedWeekFilter}
+            onChange={(e) => setSavedWeekFilter(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 focus:border-slate-500 focus:outline-none"
+            aria-label="Filter saved checks by week (Friday to Thursday)"
+          >
+            <option value="all">All weeks</option>
+            {savedWeeks.map((w) => (
+              <option key={w} value={w}>
+                {fridayWeekLabel(w)}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={exportSavedChecks}
+            disabled={sortedSavedChecks.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+            title="Export the checks currently shown to CSV"
+          >
+            <Download size={13} /> Export
+            {sortedSavedChecks.length > 0
+              ? ` (${sortedSavedChecks.length})`
+              : ""}
+          </button>
+        </div>
+      </div>
+      {/* Scroll region sized to ~10 rows; header stays pinned.
+          Vertical-only scroll — columns are sized to fit width. */}
+      <div className="max-h-[460px] overflow-y-auto">
+        <table className="w-full table-fixed text-xs">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="w-24 px-2.5 py-2">
+                <SortHead
+                  label="Date"
+                  col="date"
+                  sort={savedSort}
+                  onSort={toggleSavedSort}
+                  align="left"
+                />
+              </th>
+              <th className="w-40 px-2.5 py-2">
+                <SortHead
+                  label="Match"
+                  col="match"
+                  sort={savedSort}
+                  onSort={toggleSavedSort}
+                  align="left"
+                />
+              </th>
+              {!selectedAnalyst && (
+                <th className="w-28 px-2.5 py-2">
+                  <SortHead
+                    label="Analyst"
+                    col="analyst"
+                    sort={savedSort}
+                    onSort={toggleSavedSort}
+                    align="left"
+                  />
+                </th>
+              )}
+              <th className="w-28 px-2.5 py-2">
+                <SortHead
+                  label="Master by"
+                  col="masterBy"
+                  sort={savedSort}
+                  onSort={toggleSavedSort}
+                  align="left"
+                />
+              </th>
+              {PLAYER_ACCURACY_COLUMNS.map((col) => (
+                <th
+                  key={col.key}
+                  title={col.label}
+                  className="w-14 px-2 py-2 text-right"
+                >
+                  <SortHead
+                    label={col.short}
+                    col={col.key}
+                    sort={savedSort}
+                    onSort={toggleSavedSort}
+                  />
+                </th>
+              ))}
+              <th className="w-20 px-2 py-2 text-right">
+                <SortHead
+                  label="Ex/Mas"
+                  col="exactMaster"
+                  sort={savedSort}
+                  onSort={toggleSavedSort}
+                />
+              </th>
+              <th className="w-16 px-2 py-2 text-center">
+                <SortHead
+                  label="Disp"
+                  col="disputes"
+                  sort={savedSort}
+                  onSort={toggleSavedSort}
+                  align="center"
+                />
+              </th>
+              <th className="w-8 px-1 py-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedSavedChecks.map((c) => {
+              return (
+                <React.Fragment key={c.id}>
+                  <tr
+                    onClick={() => openCheck(c.id)}
+                    className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
+                    title="Open full accuracy check in Accuracy Comparison"
+                  >
+                    <td className="whitespace-nowrap px-2.5 py-2 text-slate-600">
+                      {formatDate(c.created_at)}
+                    </td>
+                    <td className="px-2.5 py-2 text-slate-700">
+                      <span
+                        className="block truncate"
+                        title={matchTeamsLabel(c)}
+                      >
+                        {matchTeamsLabel(c)}
+                      </span>
+                    </td>
+                    {!selectedAnalyst && (
+                      <td className="truncate px-2.5 py-2 font-medium text-slate-700">
+                        {c.analyst_name || "—"}
+                      </td>
+                    )}
+                    <td className="truncate px-2.5 py-2 text-slate-600">
+                      {c.master_analyst_name || "—"}
+                    </td>
+                    {PLAYER_ACCURACY_COLUMNS.map((col) => {
+                      const v = storedGroupPct(c, col.key);
+                      return (
+                        <td
+                          key={col.key}
+                          className={`px-2 py-2 text-right font-medium tabular-nums ${
+                            v != null ? accColor(v) : "text-slate-300"
+                          }`}
+                        >
+                          {v != null ? pct(v) : "—"}
+                        </td>
+                      );
+                    })}
+                    <td className="whitespace-nowrap px-2 py-2 text-right text-slate-600">
+                      {c.exact}/{c.master_total}
+                    </td>
+                    <td className="px-2 py-2 text-center">
+                      {(openCounts[c.id] ?? 0) > 0 ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleDisputes(c.id);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 hover:bg-amber-200"
+                          title="Review disputes"
+                        >
+                          <Flag size={11} /> {openCounts[c.id]}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleDisputes(c.id);
+                          }}
+                          className="text-xs text-slate-400 hover:text-slate-600"
+                          title="View disputes"
+                        >
+                          —
+                        </button>
+                      )}
+                    </td>
+                    <td className="px-1 py-2 text-center">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(c.id);
+                        }}
+                        className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                        title="Delete check"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                  {expandedCheck === c.id && (
+                    <tr className="border-t border-slate-100 bg-slate-50/60">
+                      <td
+                        colSpan={selectedAnalyst ? 11 : 12}
+                        className="px-4 py-3"
+                      >
+                        <DisputesPanel
+                          disputes={panelDisputes}
+                          canResolve={canResolve}
+                          onResolve={handleResolve}
+                          onOpen={(d) => {
+                            const params = new URLSearchParams({
+                              check: String(d.check_id),
+                            });
+                            if (d.code_time != null)
+                              params.set("seek", String(d.code_time));
+                            if (d.stat) params.set("stat", d.stat);
+                            router.push(
+                              `/accuracy-compare?${params.toString()}`
+                            );
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
   async function handleDelete(id: number) {
     if (!confirm("Delete this saved accuracy check?")) return;
     try {
@@ -1276,6 +1510,11 @@ export default function AccuracyChecksPage() {
               </div>
             )}
 
+            {/* Full list of every saved check. Shown here in the History tab
+                whenever no single analyst is selected; when one IS selected the
+                selected-analyst detail below renders it instead (so it's not
+                duplicated). */}
+            {!selectedAnalyst && savedChecksCard}
           </div>
         )}
 
@@ -1295,234 +1534,7 @@ export default function AccuracyChecksPage() {
             )}
 
             {/* Saved checks — full width */}
-            <div>
-              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-5">
-                  <h2 className="text-sm font-semibold text-slate-700">
-                    Saved checks
-                  </h2>
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs font-medium text-slate-500">
-                      Week
-                    </label>
-                    <select
-                      value={savedWeekFilter}
-                      onChange={(e) => setSavedWeekFilter(e.target.value)}
-                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 focus:border-slate-500 focus:outline-none"
-                      aria-label="Filter saved checks by week (Friday to Thursday)"
-                    >
-                      <option value="all">All weeks</option>
-                      {savedWeeks.map((w) => (
-                        <option key={w} value={w}>
-                          {fridayWeekLabel(w)}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={exportSavedChecks}
-                      disabled={sortedSavedChecks.length === 0}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-                      title="Export the checks currently shown to CSV"
-                    >
-                      <Download size={13} /> Export
-                      {sortedSavedChecks.length > 0
-                        ? ` (${sortedSavedChecks.length})`
-                        : ""}
-                    </button>
-                  </div>
-                </div>
-                {/* Scroll region sized to ~10 rows; header stays pinned.
-                    Vertical-only scroll — columns are sized to fit width. */}
-                <div className="max-h-[460px] overflow-y-auto">
-                  <table className="w-full table-fixed text-xs">
-                    <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                      <tr>
-                        <th className="w-24 px-2.5 py-2">
-                          <SortHead
-                            label="Date"
-                            col="date"
-                            sort={savedSort}
-                            onSort={toggleSavedSort}
-                            align="left"
-                          />
-                        </th>
-                        <th className="w-40 px-2.5 py-2">
-                          <SortHead
-                            label="Match"
-                            col="match"
-                            sort={savedSort}
-                            onSort={toggleSavedSort}
-                            align="left"
-                          />
-                        </th>
-                        {!selectedAnalyst && (
-                          <th className="w-28 px-2.5 py-2">
-                            <SortHead
-                              label="Analyst"
-                              col="analyst"
-                              sort={savedSort}
-                              onSort={toggleSavedSort}
-                              align="left"
-                            />
-                          </th>
-                        )}
-                        <th className="w-28 px-2.5 py-2">
-                          <SortHead
-                            label="Master by"
-                            col="masterBy"
-                            sort={savedSort}
-                            onSort={toggleSavedSort}
-                            align="left"
-                          />
-                        </th>
-                        {PLAYER_ACCURACY_COLUMNS.map((col) => (
-                          <th
-                            key={col.key}
-                            title={col.label}
-                            className="w-14 px-2 py-2 text-right"
-                          >
-                            <SortHead
-                              label={col.short}
-                              col={col.key}
-                              sort={savedSort}
-                              onSort={toggleSavedSort}
-                            />
-                          </th>
-                        ))}
-                        <th className="w-20 px-2 py-2 text-right">
-                          <SortHead
-                            label="Ex/Mas"
-                            col="exactMaster"
-                            sort={savedSort}
-                            onSort={toggleSavedSort}
-                          />
-                        </th>
-                        <th className="w-16 px-2 py-2 text-center">
-                          <SortHead
-                            label="Disp"
-                            col="disputes"
-                            sort={savedSort}
-                            onSort={toggleSavedSort}
-                            align="center"
-                          />
-                        </th>
-                        <th className="w-8 px-1 py-2"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedSavedChecks.map((c) => {
-                          return (
-                          <React.Fragment key={c.id}>
-                          <tr
-                            onClick={() => openCheck(c.id)}
-                            className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
-                            title="Open full accuracy check in Accuracy Comparison"
-                          >
-                            <td className="whitespace-nowrap px-2.5 py-2 text-slate-600">
-                              {formatDate(c.created_at)}
-                            </td>
-                            <td className="px-2.5 py-2 text-slate-700">
-                              <span
-                                className="block truncate"
-                                title={matchTeamsLabel(c)}
-                              >
-                                {matchTeamsLabel(c)}
-                              </span>
-                            </td>
-                            {!selectedAnalyst && (
-                              <td className="truncate px-2.5 py-2 font-medium text-slate-700">
-                                {c.analyst_name || "—"}
-                              </td>
-                            )}
-                            <td className="truncate px-2.5 py-2 text-slate-600">
-                              {c.master_analyst_name || "—"}
-                            </td>
-                            {PLAYER_ACCURACY_COLUMNS.map((col) => {
-                              const v = storedGroupPct(c, col.key);
-                              return (
-                                <td
-                                  key={col.key}
-                                  className={`px-2 py-2 text-right font-medium tabular-nums ${
-                                    v != null
-                                      ? accColor(v)
-                                      : "text-slate-300"
-                                  }`}
-                                >
-                                  {v != null ? pct(v) : "—"}
-                                </td>
-                              );
-                            })}
-                            <td className="whitespace-nowrap px-2 py-2 text-right text-slate-600">
-                              {c.exact}/{c.master_total}
-                            </td>
-                            <td className="px-2 py-2 text-center">
-                              {(openCounts[c.id] ?? 0) > 0 ? (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleDisputes(c.id);
-                                  }}
-                                  className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700 hover:bg-amber-200"
-                                  title="Review disputes"
-                                >
-                                  <Flag size={11} /> {openCounts[c.id]}
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleDisputes(c.id);
-                                  }}
-                                  className="text-xs text-slate-400 hover:text-slate-600"
-                                  title="View disputes"
-                                >
-                                  —
-                                </button>
-                              )}
-                            </td>
-                            <td className="px-1 py-2 text-center">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDelete(c.id);
-                                }}
-                                className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                                title="Delete check"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </td>
-                          </tr>
-                          {expandedCheck === c.id && (
-                            <tr className="border-t border-slate-100 bg-slate-50/60">
-                              <td colSpan={selectedAnalyst ? 11 : 12} className="px-4 py-3">
-                                <DisputesPanel
-                                  disputes={panelDisputes}
-                                  canResolve={canResolve}
-                                  onResolve={handleResolve}
-                                  onOpen={(d) => {
-                                    const params = new URLSearchParams({
-                                      check: String(d.check_id),
-                                    });
-                                    if (d.code_time != null)
-                                      params.set("seek", String(d.code_time));
-                                    if (d.stat) params.set("stat", d.stat);
-                                    router.push(
-                                      `/accuracy-compare?${params.toString()}`
-                                    );
-                                  }}
-                                />
-                              </td>
-                            </tr>
-                          )}
-                          </React.Fragment>
-                          );
-                        })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
+            <div>{savedChecksCard}</div>
           </div>
         )}
 
@@ -2136,7 +2148,13 @@ function CheckDetailModal({
   ];
 
   const barColor = (a: number) =>
-    a >= 0.9 ? "bg-emerald-500" : a >= 0.7 ? "bg-amber-500" : "bg-red-500";
+    a >= 0.9
+      ? "bg-emerald-500"
+      : a >= 0.8
+        ? "bg-yellow-500"
+        : a >= 0.7
+          ? "bg-orange-500"
+          : "bg-red-500";
 
   return (
     <div
@@ -2605,7 +2623,14 @@ function AnalystComparisonTable({
                 className="border-t border-slate-100 hover:bg-slate-50"
               >
                 <td className="whitespace-nowrap px-2.5 py-2 font-medium text-slate-800">
-                  {r.analyst}
+                  <button
+                    type="button"
+                    onClick={() => onAnalystChange(r.analyst)}
+                    className="text-left font-medium text-sky-700 hover:text-sky-900 hover:underline"
+                    title={`View all of ${r.analyst}'s checks`}
+                  >
+                    {r.analyst}
+                  </button>
                 </td>
                 <td className="px-2.5 py-2 text-right tabular-nums text-slate-600">
                   {r.checks}
