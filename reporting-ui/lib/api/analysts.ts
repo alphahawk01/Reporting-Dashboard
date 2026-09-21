@@ -247,11 +247,16 @@ export async function updateOfficeComputer(
 // ======================================================================
 
 // Where an analyst is based. Used for cross-country accuracy comparison.
-export type AnalystLocation = "Australia" | "Philippines" | "Vietnam";
+export type AnalystLocation =
+    | "Australia"
+    | "Philippines"
+    | "Vietnam"
+    | "Vietnam - Training";
 export const ANALYST_LOCATIONS: AnalystLocation[] = [
     "Australia",
     "Philippines",
     "Vietnam",
+    "Vietnam - Training",
 ];
 
 export interface PlatformAnalyst {

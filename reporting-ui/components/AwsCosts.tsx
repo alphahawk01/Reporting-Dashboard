@@ -12,7 +12,8 @@ import {
   Legend,
 } from "recharts";
 import {
-  parseAwsCosts,
+  parseAwsCostRows,
+  buildAwsCostData,
   bucketize,
   bucketizeByCategory,
   formatMoney,
@@ -20,6 +21,7 @@ import {
   USD_TO_AUD,
   type AwsCostData,
   type Granularity,
+  type RawDailyRow,
 } from "@/lib/aws/costs";
 import { getAwsCostCategories } from "@/lib/api/awsCostCategories";
 
@@ -49,6 +51,46 @@ const MAX_USAGE_SERIES = 8;
 
 type Grouping = "category" | "usageType";
 
+// A fuller bucket label for the table (e.g. "Wednesday, 1 October 2025" for a
+// month, "1 Oct 2025" for a day, "Fri 3 Oct – Thu 9 Oct" style for a week).
+// `key` is the bucket key: ISO date (daily), Friday ISO (weekly), or "YYYY-MM"
+// (monthly). `fallback` is the short label already computed by the aggregator.
+function fullBucketLabel(
+  key: string,
+  granularity: Granularity,
+  fallback: string
+): string {
+  if (granularity === "monthly") {
+    const m = key.match(/^(\d{4})-(\d{2})$/);
+    if (m) {
+      const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, 1));
+      return d.toLocaleDateString("en-AU", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+        timeZone: "UTC",
+      });
+    }
+  }
+  if (granularity === "daily" && /^\d{4}-\d{2}-\d{2}$/.test(key)) {
+    const d = new Date(key + "T00:00:00Z");
+    return d.toLocaleDateString("en-AU", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+  }
+  // Weekly: keep the range fallback (already "Fri – Thu").
+  return fallback;
+}
+
+// Internal chart-row field names (prefixed to avoid clashing with series keys).
+const TOTAL_FIELD = "__total__";
+const FULL_LABEL_FIELD = "__fullLabel__";
+
 function Card({ title, value, sub }: { title: string; value: string; sub?: string }) {
   return (
     <div className="rounded-2xl border border-zinc-100 bg-white p-5 shadow-sm">
@@ -62,57 +104,85 @@ function Card({ title, value, sub }: { title: string; value: string; sub?: strin
 }
 
 export default function AwsCosts() {
-  const [csvText, setCsvText] = useState<string | null>(null);
-  // Usage-type → category mapping from Supabase (empty until loaded; the parser
-  // falls back to its built-in map per header when a key is missing).
+  // The dashboard reads daily cost data from the CSV in /public/data. We keep
+  // the RAW rows (+ category map from Supabase / the CSV Category row) in state
+  // and derive the filtered/aggregated `data` via useMemo, so the Year filter
+  // can re-derive everything.
+  const [rawRows, setRawRows] = useState<RawDailyRow[] | null>(null);
+  const [csvCategoryByKey, setCsvCategoryByKey] = useState<Record<string, string>>({});
   const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [granularity, setGranularity] = useState<Granularity>("monthly");
   const [grouping, setGrouping] = useState<Grouping>("category");
+  const [view, setView] = useState<"chart" | "table">("chart");
+  // Year filter: "all" or a 4-digit year present in the data.
+  const [yearFilter, setYearFilter] = useState<string>("all");
 
   useEffect(() => {
-    // `loading` already starts true; the effect only flips it false when both
-    // the CSV fetch and the category lookup settle, so there's no synchronous
-    // setState in the effect body.
+    // `loading` is set inside the async callback (not synchronously in the
+    // effect body) and only flipped false once loading settles.
     let cancelled = false;
-    const csvPromise = fetch(CSV_URL)
-      .then((res) => {
+
+    (async () => {
+      setLoading(true);
+      // Categories: usage-type → category mapping from Supabase (best-effort;
+      // falls back to the CSV Category row / built-in map per header).
+      const cats = await getAwsCostCategories().catch(
+        () => ({}) as Record<string, string>
+      );
+
+      try {
+        const res = await fetch(CSV_URL);
         if (!res.ok) throw new Error(`Could not load cost data (${res.status}).`);
-        return res.text();
-      })
-      .then((text) => {
-        // A stray HTML response (e.g. 404 page) isn't a CSV — guard against it.
+        const text = await res.text();
         if (/^\s*</.test(text)) throw new Error("Cost data file not found.");
-        return text;
-      });
-
-    // Categories are best-effort: on failure we fall back to the built-in map.
-    const catPromise = getAwsCostCategories().catch(() => ({}) as Record<string, string>);
-
-    Promise.all([csvPromise, catPromise])
-      .then(([text, cats]) => {
         if (cancelled) return;
-        setCsvText(text);
+        const parsed = parseAwsCostRows(text);
+        setRawRows(parsed.rows);
+        setCsvCategoryByKey(parsed.csvCategoryByKey);
         setCategoryMap(cats);
         setError(null);
-      })
-      .catch((err: unknown) => {
+      } catch (err: unknown) {
         if (!cancelled)
           setError(err instanceof Error ? err.message : "Failed to load cost data.");
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    })();
+
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const data: AwsCostData | null = useMemo(
-    () => (csvText ? parseAwsCosts(csvText, categoryMap) : null),
-    [csvText, categoryMap]
-  );
+  // Distinct calendar years present in the loaded data, newest first.
+  const availableYears = useMemo(() => {
+    if (!rawRows) return [];
+    const set = new Set<string>();
+    for (const r of rawRows) set.add(r.day.slice(0, 4));
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [rawRows]);
+
+  // The effective year: fall back to "all" if the selected year isn't present
+  // (e.g. after an import changed the data). Clamped here rather than via an
+  // effect so there's no cascading setState.
+  const effectiveYear =
+    yearFilter !== "all" && !availableYears.includes(yearFilter)
+      ? "all"
+      : yearFilter;
+
+  // Derive the filtered, aggregated dashboard data. The Year filter scopes the
+  // raw rows before aggregation, so KPIs, chart, tables and category rollups
+  // all reflect the selected year.
+  const data: AwsCostData | null = useMemo(() => {
+    if (!rawRows) return null;
+    const scoped =
+      effectiveYear === "all"
+        ? rawRows
+        : rawRows.filter((r) => r.day.startsWith(effectiveYear));
+    return buildAwsCostData(scoped, categoryMap, csvCategoryByKey);
+  }, [rawRows, effectiveYear, categoryMap, csvCategoryByKey]);
 
   // Build the stacked chart data + series for the active grouping.
   const { chartData, series } = useMemo(() => {
@@ -130,9 +200,17 @@ export default function AwsCosts() {
         color: SERIES_COLORS[i % SERIES_COLORS.length],
       }));
       const chartData = buckets.map((b) => {
-        const row: Record<string, number | string> = { label: b.label };
-        for (const c of data.categories)
-          row[c.category] = Number((b.byCategory[c.category] ?? 0).toFixed(2));
+        const row: Record<string, number | string> = {
+          label: b.label,
+          [FULL_LABEL_FIELD]: fullBucketLabel(b.key, granularity, b.label),
+        };
+        let total = 0;
+        for (const c of data.categories) {
+          const amt = b.byCategory[c.category] ?? 0;
+          row[c.category] = Number(amt.toFixed(2));
+          total += amt;
+        }
+        row[TOTAL_FIELD] = Number(total.toFixed(2));
         return row;
       });
       return { chartData, series };
@@ -152,13 +230,19 @@ export default function AwsCosts() {
     if (hasOther) series.push({ key: "__other__", label: "Other", color: OTHER_COLOR });
 
     const chartData = buckets.map((b) => {
-      const row: Record<string, number | string> = { label: b.label };
+      const row: Record<string, number | string> = {
+        label: b.label,
+        [FULL_LABEL_FIELD]: fullBucketLabel(b.key, granularity, b.label),
+      };
       let other = 0;
+      let total = 0;
       for (const [k, amt] of Object.entries(b.byUsageType)) {
+        total += amt;
         if (topSet.has(k)) row[k] = Number(amt.toFixed(2));
         else other += amt;
       }
       if (hasOther) row["__other__"] = Number(other.toFixed(2));
+      row[TOTAL_FIELD] = Number(total.toFixed(2));
       return row;
     });
     return { chartData, series };
@@ -236,6 +320,30 @@ export default function AwsCosts() {
 
   return (
     <div className="space-y-5">
+      {/* SOURCE + YEAR FILTER */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-zinc-500">
+          Figures in AUD (USD × {USD_TO_AUD})
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* YEAR FILTER */}
+          <label className="text-xs font-medium text-zinc-500">Year</label>
+          <select
+            value={effectiveYear}
+            onChange={(e) => setYearFilter(e.target.value)}
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-700 outline-none transition hover:border-zinc-300 focus:border-indigo-500"
+            aria-label="Filter by calendar year"
+          >
+            <option value="all">All years</option>
+            {availableYears.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
       {/* KPI CARDS */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Card
@@ -300,9 +408,92 @@ export default function AwsCosts() {
                 </button>
               ))}
             </div>
+            {/* CHART / TABLE TOGGLE */}
+            <div className="inline-flex rounded-lg bg-zinc-100 p-1">
+              {(["chart", "table"] as const).map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setView(v)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                    view === v
+                      ? "bg-white text-zinc-900 shadow-sm"
+                      : "text-zinc-600 hover:text-zinc-900"
+                  }`}
+                >
+                  {v === "chart" ? "Chart" : "Table"}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
+        {view === "table" ? (
+          <div className="max-h-[520px] overflow-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 z-10 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
+                <tr>
+                  <th className="px-3 py-2 text-left">
+                    {granularity === "monthly"
+                      ? "Month"
+                      : granularity === "weekly"
+                        ? "Week"
+                        : "Day"}
+                  </th>
+                  <th className="px-3 py-2 text-right font-semibold text-zinc-700">
+                    Total costs
+                  </th>
+                  {series.map((s) => (
+                    <th key={s.key} className="px-3 py-2 text-right" title={s.label}>
+                      {s.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {chartData.map((row, idx) => (
+                  <tr
+                    key={String(row.label) + idx}
+                    className="border-t border-zinc-100 hover:bg-zinc-50"
+                  >
+                    <td className="whitespace-nowrap px-3 py-2 text-left font-medium text-zinc-800">
+                      {String(row[FULL_LABEL_FIELD] ?? row.label)}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums text-zinc-800">
+                      {formatMoney(Number(row[TOTAL_FIELD]) || 0)}
+                    </td>
+                    {series.map((s) => (
+                      <td
+                        key={s.key}
+                        className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-zinc-600"
+                      >
+                        {formatMoney(Number(row[s.key]) || 0)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+                {/* Totals row */}
+                <tr className="border-t-2 border-zinc-300 bg-zinc-50 font-semibold text-zinc-800">
+                  <td className="px-3 py-2 text-left">Total</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                    {formatMoney(
+                      chartData.reduce((a, r) => a + (Number(r[TOTAL_FIELD]) || 0), 0)
+                    )}
+                  </td>
+                  {series.map((s) => (
+                    <td
+                      key={s.key}
+                      className="whitespace-nowrap px-3 py-2 text-right tabular-nums"
+                    >
+                      {formatMoney(
+                        chartData.reduce((a, r) => a + (Number(r[s.key]) || 0), 0)
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        ) : (
         <div style={{ width: "100%", height: 380, minWidth: 0, overflow: "hidden" }}>
           <ResponsiveContainer width="99%" height="100%">
             <BarChart data={chartData} barCategoryGap="20%">
@@ -356,6 +547,7 @@ export default function AwsCosts() {
             </BarChart>
           </ResponsiveContainer>
         </div>
+        )}
       </div>
 
       {/* COST BY CATEGORY */}

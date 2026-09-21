@@ -7,7 +7,13 @@ Layout:
 - Row `Usage type total`: the whole-period total per usage type (ignored by the dashboard — it recomputes from the daily rows).
 - Remaining rows: one per calendar day (`YYYY-MM-DD`), each cell = that usage type's cost that day.
 
-To refresh: re-export from AWS Cost Explorer (Group by = Usage Type, daily granularity) and replace `aws-costs.csv`. The AWS dashboard tab parses it at runtime and:
+## Updating the data
+
+The AWS dashboard reads this `aws-costs.csv` directly at runtime. To update:
+re-export from AWS Cost Explorer (Group by = Usage Type, daily granularity),
+rename to `aws-costs.csv`, and replace this file. Then commit / redeploy.
+
+The tab parses it at runtime and:
 - converts every amount from **USD → AUD** (rate `USD_TO_AUD` in `lib/aws/costs.ts`, currently 1.4),
 - drops any usage type whose **average cost per day < A$0.50** across the period,
 - aggregates into daily / weekly (Fri–Thu) / monthly views,

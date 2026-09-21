@@ -1608,7 +1608,8 @@ export default function AccuracyChecksPage() {
               )}
             </div>
 
-            <div className="divide-y divide-slate-100">
+            {/* Scrollable list — ~5 fixture rows visible, the rest scroll. */}
+            <div className="max-h-[340px] divide-y divide-slate-100 overflow-y-auto">
               {filteredFixtureGroups.map((g) => {
                 const isOpen = expandedFixture === g.key;
                 return (

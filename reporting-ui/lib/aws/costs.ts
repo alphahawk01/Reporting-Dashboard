@@ -171,13 +171,42 @@ function cleanLabel(header: string): string {
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DMY_DATE_RE = /^(\d{2})\/(\d{2})\/(\d{4})$/;
 
-// Return the ISO date (YYYY-MM-DD) for a row label if it's a recognised date,
-// else null. Handles ISO and DD/MM/YYYY.
+// Sanity window for AWS cost data — reject anything outside so a mis-parsed or
+// wrong-format date can't silently enter the data set.
+const MIN_YEAR = 2020;
+const MAX_YEAR = 2035;
+
+// Validate a YYYY-MM-DD string is a real calendar date within the sane window.
+function isValidIsoDate(iso: string): boolean {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return false;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (y < MIN_YEAR || y > MAX_YEAR) return false;
+  if (mo < 1 || mo > 12) return false;
+  if (d < 1 || d > 31) return false;
+  // Reject impossible days (e.g. 31 Feb) by round-tripping through Date.
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return (
+    dt.getUTCFullYear() === y &&
+    dt.getUTCMonth() === mo - 1 &&
+    dt.getUTCDate() === d
+  );
+}
+
+// Return the ISO date (YYYY-MM-DD) for a row label if it's a recognised, VALID
+// date in the sane window, else null. Handles ISO and DD/MM/YYYY. Anything
+// ambiguous or out of range is rejected (returns null) rather than guessed.
 function normaliseDate(label: string): string | null {
-  if (ISO_DATE_RE.test(label)) return label;
-  const m = label.match(DMY_DATE_RE);
-  if (m) return `${m[3]}-${m[2]}-${m[1]}`; // dd/mm/yyyy -> yyyy-mm-dd
-  return null;
+  let iso: string | null = null;
+  if (ISO_DATE_RE.test(label)) {
+    iso = label;
+  } else {
+    const m = label.match(DMY_DATE_RE);
+    if (m) iso = `${m[3]}-${m[2]}-${m[1]}`; // dd/mm/yyyy -> yyyy-mm-dd
+  }
+  return iso && isValidIsoDate(iso) ? iso : null;
 }
 
 // Label of the optional leading "Category" row (aligned to the usage-type
@@ -186,37 +215,37 @@ const CATEGORY_ROW_LABEL = "category";
 // Header label used by the usage-type header row (case-insensitive match).
 const USAGE_TYPE_LABEL_LOWER = "usage type";
 
+// One (day, usage type, amount) fact in USD — the normalised unit shared by the
+// CSV parser and the Supabase-backed store. `day` is ISO (YYYY-MM-DD).
+export type RawDailyRow = {
+  day: string;
+  usageType: string;
+  amountUsd: number;
+};
+
+// The result of reading a raw AWS export: the daily facts (USD) plus any
+// per-usage-type categories found in the CSV's optional "Category" row.
+export type ParsedAwsCsv = {
+  rows: RawDailyRow[];
+  csvCategoryByKey: Record<string, string>;
+};
+
 /**
- * Parse the AWS cost CSV text into a filtered, aggregation-ready structure.
- * Only usage types whose average cost per day >= MIN_AVG_COST_PER_DAY are kept.
- *
- * @param categoryMap optional usage-type → category overrides (e.g. from
- *   Supabase). Falls back to the built-in USAGE_TYPE_CATEGORY per header.
+ * Extract raw (day, usage type, USD amount) rows from an AWS cost CSV, plus any
+ * categories declared in the CSV's optional leading "Category" row. Does NO
+ * filtering or currency conversion — used both for aggregation (via
+ * buildAwsCostData) and for importing into Supabase.
  */
-export function parseAwsCosts(
-  csvText: string,
-  categoryMap?: Record<string, string>
-): AwsCostData {
+export function parseAwsCostRows(csvText: string): ParsedAwsCsv {
   const lines = csvText
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
 
-  if (lines.length === 0) {
-    return {
-      days: [],
-      usageTypes: [],
-      categories: [],
-      daily: {},
-      grandTotal: 0,
-      categorisedTotal: 0,
-      droppedCount: 0,
-    };
-  }
+  if (lines.length === 0) return { rows: [], csvCategoryByKey: {} };
 
-  // The export may start with an optional "Category" row (row 0) aligned to the
-  // usage-type columns, followed by the "Usage type" header row. Find the
-  // header row, and capture the category row if it precedes it.
+  // The export may start with an optional "Category" row (aligned to the
+  // usage-type columns), followed by the "Usage type" header row.
   let headerIdx = 0;
   let csvCategoryRow: string[] | null = null;
   for (let i = 0; i < Math.min(lines.length, 5); i++) {
@@ -231,7 +260,6 @@ export function parseAwsCosts(
   }
 
   const header = parseCsvLine(lines[headerIdx]);
-  // Column indexes for real usage types (skip the label col + the Total col).
   const usageCols: { index: number; key: string }[] = [];
   for (let i = 0; i < header.length; i++) {
     const h = header[i].trim();
@@ -240,8 +268,6 @@ export function parseAwsCosts(
     usageCols.push({ index: i, key: h });
   }
 
-  // Category taken from the CSV's Category row, per usage-type column. Blank
-  // cells mean uncategorised. Used as a fallback under the Supabase override.
   const csvCategoryByKey: Record<string, string> = {};
   if (csvCategoryRow) {
     for (const c of usageCols) {
@@ -250,56 +276,79 @@ export function parseAwsCosts(
     }
   }
 
-  // Running totals per usage type + per-day breakdown.
-  const totals = new Map<string, number>();
-  for (const c of usageCols) totals.set(c.key, 0);
-
-  const days: string[] = [];
-  const dailyAll: Record<string, Record<string, number>> = {};
-
+  const rows: RawDailyRow[] = [];
   for (let r = headerIdx + 1; r < lines.length; r++) {
     const cells = parseCsvLine(lines[r]);
     const rowLabel = (cells[0] ?? "").trim();
-    // Skip the whole-period total row and anything that isn't a date row.
     if (rowLabel.toLowerCase() === TOTAL_ROW_LABEL) continue;
     const day = normaliseDate(rowLabel);
     if (!day) continue;
-
-    days.push(day);
-    const perType: Record<string, number> = {};
     for (const c of usageCols) {
       const raw = cells[c.index];
       const v = raw == null || raw === "" ? 0 : Number(raw);
-      // Convert USD → AUD once, here, so everything downstream is in AUD.
-      const amount = Number.isFinite(v) ? v * USD_TO_AUD : 0;
-      perType[c.key] = amount;
-      totals.set(c.key, (totals.get(c.key) ?? 0) + amount);
+      const amountUsd = Number.isFinite(v) ? v : 0;
+      // Skip zero cells to keep the row set small (missing == 0 downstream).
+      if (amountUsd !== 0) rows.push({ day, usageType: c.key, amountUsd });
     }
-    dailyAll[day] = perType;
   }
 
-  days.sort();
+  return { rows, csvCategoryByKey };
+}
+
+/**
+ * Build the filtered, aggregation-ready dashboard data from raw daily USD rows.
+ * Converts USD → AUD, drops usage types averaging < MIN_AVG_COST_PER_DAY, and
+ * rolls up categories. Category precedence: `categoryMap` (Supabase) →
+ * `csvCategoryByKey` (CSV Category row) → built-in USAGE_TYPE_CATEGORY.
+ */
+export function buildAwsCostData(
+  rawRows: RawDailyRow[],
+  categoryMap?: Record<string, string>,
+  csvCategoryByKey?: Record<string, string>
+): AwsCostData {
+  // Distinct usage types + per-day-per-type AUD amounts + per-type totals.
+  const totals = new Map<string, number>();
+  const daySet = new Set<string>();
+  const dailyAll: Record<string, Record<string, number>> = {};
+
+  for (const row of rawRows) {
+    const day = row.day;
+    daySet.add(day);
+    const amount = (Number.isFinite(row.amountUsd) ? row.amountUsd : 0) * USD_TO_AUD;
+    (dailyAll[day] ??= {})[row.usageType] =
+      (dailyAll[day]?.[row.usageType] ?? 0) + amount;
+    totals.set(row.usageType, (totals.get(row.usageType) ?? 0) + amount);
+  }
+
+  const days = Array.from(daySet).sort();
+  if (days.length === 0) {
+    return {
+      days: [],
+      usageTypes: [],
+      categories: [],
+      daily: {},
+      grandTotal: 0,
+      categorisedTotal: 0,
+      droppedCount: 0,
+    };
+  }
   const dayCount = days.length || 1;
 
-  // Effective category source, in precedence order:
-  //   1. Supabase override (categoryMap), 2. the CSV's Category row,
-  //   3. the built-in USAGE_TYPE_CATEGORY (applied inside categoryFor).
   const effectiveCategoryMap: Record<string, string> = {
-    ...csvCategoryByKey,
+    ...(csvCategoryByKey ?? {}),
     ...(categoryMap ?? {}),
   };
 
   // Keep only usage types averaging >= threshold per day; sort biggest first.
   const kept: UsageTypeSummary[] = [];
   let droppedCount = 0;
-  for (const c of usageCols) {
-    const total = totals.get(c.key) ?? 0;
+  for (const [key, total] of totals) {
     const avgPerDay = total / dayCount;
     if (avgPerDay >= MIN_AVG_COST_PER_DAY) {
       kept.push({
-        key: c.key,
-        label: cleanLabel(c.key),
-        category: categoryFor(c.key, effectiveCategoryMap),
+        key,
+        label: cleanLabel(key),
+        category: categoryFor(key, effectiveCategoryMap),
         total,
         avgPerDay,
       });
@@ -351,6 +400,21 @@ export function parseAwsCosts(
     categorisedTotal,
     droppedCount,
   };
+}
+
+/**
+ * Parse an AWS cost CSV directly into dashboard data (fallback path when the
+ * Supabase store is empty/unavailable). Thin wrapper over parseAwsCostRows +
+ * buildAwsCostData.
+ *
+ * @param categoryMap optional usage-type → category overrides (e.g. Supabase).
+ */
+export function parseAwsCosts(
+  csvText: string,
+  categoryMap?: Record<string, string>
+): AwsCostData {
+  const { rows, csvCategoryByKey } = parseAwsCostRows(csvText);
+  return buildAwsCostData(rows, categoryMap, csvCategoryByKey);
 }
 
 // ---- Bucketing helpers -------------------------------------------------
