@@ -30,6 +30,7 @@ import {
   updateAccuracyCheck,
   getAccuracyCheckById,
   getSavedMasters,
+  getSavedMasterXml,
   propagateMasterCorrection,
   getMasterCheckSiblings,
   type SavedMaster,
@@ -1236,8 +1237,11 @@ function AccuracyCompareInner() {
     };
   }, [flagMenu]);
 
-  // Previously-saved master XMLs, for the "reuse master" dropdown.
+  // Previously-saved masters, for the "reuse master" dropdown. Only the
+  // file names are loaded up front; the chosen master's XML is fetched on
+  // demand (see getSavedMasterXml) to keep this list fast.
   const [savedMasters, setSavedMasters] = useState<SavedMaster[]>([]);
+  const [loadingSavedMaster, setLoadingSavedMaster] = useState(false);
 
   // Analyst allocation + save
   const [analystNames, setAnalystNames] = useState<string[]>([]);
@@ -2131,25 +2135,37 @@ function AccuracyCompareInner() {
             {savedMasters.length > 0 && (
               <div className="mt-2">
                 <label className="mb-1 block text-xs font-medium text-slate-500">
-                  ...or reuse a saved master
+                  {loadingSavedMaster
+                    ? "Loading master…"
+                    : "...or reuse a saved master"}
                 </label>
                 <select
                   value=""
-                  onChange={(e) => {
+                  disabled={loadingSavedMaster}
+                  onChange={async (e) => {
                     const sm = savedMasters.find(
                       (m) => m.fileName === e.target.value
                     );
                     if (!sm) return;
-                    setMaster({
-                      name: sm.fileName,
-                      instances: parseInstances(sm.xml),
-                      raw: sm.xml,
-                    });
-                    // If this master had a video and none is set yet,
-                    // prefill it too.
-                    if (sm.videoUrl && !videoUrl) setVideoUrl(sm.videoUrl);
+                    // The XML isn't loaded with the dropdown list (it's
+                    // large); fetch just the picked master's XML now.
+                    setLoadingSavedMaster(true);
+                    try {
+                      const xml = await getSavedMasterXml(sm.checkId);
+                      if (!xml) return;
+                      setMaster({
+                        name: sm.fileName,
+                        instances: parseInstances(xml),
+                        raw: xml,
+                      });
+                      // If this master had a video and none is set yet,
+                      // prefill it too.
+                      if (sm.videoUrl && !videoUrl) setVideoUrl(sm.videoUrl);
+                    } finally {
+                      setLoadingSavedMaster(false);
+                    }
                   }}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-500 focus:outline-none disabled:cursor-wait disabled:opacity-60"
                 >
                   <option value="">Select a saved master...</option>
                   {savedMasters.map((m) => (

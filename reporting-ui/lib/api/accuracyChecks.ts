@@ -691,20 +691,28 @@ export function subscribeToAccuracyCheck(
 }
 
 export interface SavedMaster {
+    /** The check row that holds this master's most-recent XML. */
+    checkId: number;
     fileName: string;
-    xml: string;
     videoUrl: string | null;
 }
 
 /**
- * Distinct master XMLs already stored across saved checks, so a master
- * can be re-selected from a dropdown instead of re-uploaded each time.
+ * Distinct saved masters, for the "reuse master" dropdown.
+ *
+ * Only lightweight columns are fetched here (NOT the large `xml_master`
+ * blob): a single dropdown needs just the file names. The full XML for
+ * whichever master the user actually picks is loaded on demand via
+ * `getSavedMasterXml(checkId)`. Fetching every stored master XML up front
+ * pulls megabytes of XML across every check and hammers the database —
+ * which made this dropdown hang.
+ *
  * De-duplicated by master file name (most recent wins).
  */
 export async function getSavedMasters(): Promise<SavedMaster[]> {
     const { data, error } = await supabase
         .from("accuracy_checks")
-        .select("file_name_master, xml_master, video_url, created_at")
+        .select("id, file_name_master, video_url, created_at")
         .not("xml_master", "is", null)
         .order("created_at", { ascending: false });
 
@@ -717,18 +725,38 @@ export async function getSavedMasters(): Promise<SavedMaster[]> {
     const masters: SavedMaster[] = [];
     for (const row of data ?? []) {
         const fileName = (row as any).file_name_master as string | null;
-        const xml = (row as any).xml_master as string | null;
-        if (!fileName || !xml) continue;
+        const id = (row as any).id as number | null;
+        if (!fileName || id == null) continue;
         const key = fileName.trim().toLowerCase();
         if (seen.has(key)) continue;
         seen.add(key);
         masters.push({
+            checkId: id,
             fileName,
-            xml,
             videoUrl: (row as any).video_url ?? null,
         });
     }
     return masters;
+}
+
+/**
+ * Load one saved master's raw XML on demand (when the user picks it from
+ * the "reuse master" dropdown), by the check id that holds it.
+ */
+export async function getSavedMasterXml(
+    checkId: number
+): Promise<string | null> {
+    const { data, error } = await supabase
+        .from("accuracy_checks")
+        .select("xml_master")
+        .eq("id", checkId)
+        .single();
+
+    if (error) {
+        console.error("Failed loading saved master XML:", error);
+        return null;
+    }
+    return ((data as any)?.xml_master as string | null) ?? null;
 }
 
 /**
