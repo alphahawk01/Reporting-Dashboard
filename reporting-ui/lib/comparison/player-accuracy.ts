@@ -387,22 +387,29 @@ export function computePlayerAccuracy(
   const goalkeeper = buildGroup(FOOTBALL_GROUPS.goalkeeper, rows);
   const other = buildGroup(FOOTBALL_GROUPS.other, rows);
 
-  // Overall spans the four CORE groups only. The "other" group (touches,
-  // carries, dribbles, throw-ins, cards, fouls, offside) is a STANDALONE % and
-  // is deliberately excluded from Overall so it doesn't move the headline
-  // accuracy figure.
-  const overall = buildGroup(
-    {
-      label: "Overall",
-      parts: [
-        ...FOOTBALL_GROUPS.passing.parts,
-        ...FOOTBALL_GROUPS.offensive.parts,
-        ...FOOTBALL_GROUPS.defensive.parts,
-        ...FOOTBALL_GROUPS.goalkeeper.parts,
-      ],
-    },
-    rows
-  );
+  // Overall normally spans the four CORE groups only — the "other" group
+  // (touches, carries, dribbles, throw-ins, cards, fouls, offside) is a
+  // STANDALONE % and doesn't move the headline figure when a check has real
+  // full-game stats.
+  //
+  // EXCEPTION: when a check has NO core-group events at all (its only coded
+  // stats are Other-type — e.g. a touches/general-play-only check), fall back
+  // to including Other in Overall so the check still gets a headline % instead
+  // of showing blank.
+  const coreParts = [
+    ...FOOTBALL_GROUPS.passing.parts,
+    ...FOOTBALL_GROUPS.offensive.parts,
+    ...FOOTBALL_GROUPS.defensive.parts,
+    ...FOOTBALL_GROUPS.goalkeeper.parts,
+  ];
+  const coreOverall = buildGroup({ label: "Overall", parts: coreParts }, rows);
+  const overall =
+    coreOverall.master > 0
+      ? coreOverall
+      : buildGroup(
+          { label: "Overall", parts: [...coreParts, ...FOOTBALL_GROUPS.other.parts] },
+          rows
+        );
 
   return { overall, passing, offensive, defensive, goalkeeper, other };
 }
