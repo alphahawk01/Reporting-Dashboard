@@ -160,49 +160,79 @@ export async function getDisputesForCheck(
     return (data ?? []) as Dispute[];
 }
 
-/** Every dispute across all checks (for the global Disputes page). */
+/** Every dispute across all checks (for the global Disputes page).
+ *
+ * Pages through ALL rows (PostgREST caps a single response at ~1000; there are
+ * more open disputes than that, so an unpaged select dropped the tail).
+ * Excludes soft-deleted disputes and disputes on soft-deleted checks. */
 export async function getAllDisputes(): Promise<Dispute[]> {
-    // Exclude disputes that are themselves soft-deleted, AND disputes belonging
-    // to a soft-deleted check. The embedded `accuracy_checks!inner(...)` with a
-    // deleted_at filter makes it an inner join that drops disputes whose parent
-    // check is deleted.
-    const { data, error } = await supabase
-        .from("accuracy_disputes")
-        .select("*, accuracy_checks!inner(deleted_at)")
-        .is("deleted_at", null)
-        .is("accuracy_checks.deleted_at", null)
-        .order("created_at", { ascending: false });
+    const out: Dispute[] = [];
+    const pageSize = 1000;
+    let from = 0;
 
-    if (error) {
-        console.error("Failed loading disputes:", error);
-        throw new Error(error.message || "Failed loading disputes");
+    while (true) {
+        // Exclude disputes that are themselves soft-deleted, AND disputes on a
+        // soft-deleted check. The embedded `accuracy_checks!inner(...)` with a
+        // deleted_at filter makes it an inner join that drops disputes whose
+        // parent check is deleted.
+        const { data, error } = await supabase
+            .from("accuracy_disputes")
+            .select("*, accuracy_checks!inner(deleted_at)")
+            .is("deleted_at", null)
+            .is("accuracy_checks.deleted_at", null)
+            .order("created_at", { ascending: false })
+            .range(from, from + pageSize - 1);
+
+        if (error) {
+            console.error("Failed loading disputes:", error);
+            throw new Error(error.message || "Failed loading disputes");
+        }
+        if (!data || data.length === 0) break;
+        // Strip the embedded join object so callers see a plain Dispute.
+        for (const d of data) {
+            const { accuracy_checks: _omit, ...rest } = d as Dispute & {
+                accuracy_checks?: unknown;
+            };
+            out.push(rest as Dispute);
+        }
+        if (data.length < pageSize) break;
+        from += pageSize;
     }
-    // Strip the embedded join object so callers see a plain Dispute.
-    return (data ?? []).map((d) => {
-        const { accuracy_checks: _omit, ...rest } = d as Dispute & {
-            accuracy_checks?: unknown;
-        };
-        return rest as Dispute;
-    });
+    return out;
 }
 
-/** Count of open disputes per check_id (for history badges). */
+/** Count of open disputes per check_id (for history badges).
+ *
+ * Pages through ALL matching rows. PostgREST caps a single response at ~1000
+ * rows, and there are well over that many open disputes — a single unpaged
+ * select silently dropped the tail, so some checks showed no badge. We fetch
+ * in pages of 1000 and tally client-side. Excludes soft-deleted disputes and
+ * disputes belonging to soft-deleted checks. */
 export async function getOpenDisputeCounts(): Promise<Record<number, number>> {
-    const { data, error } = await supabase
-        .from("accuracy_disputes")
-        .select("check_id, accuracy_checks!inner(deleted_at)")
-        .eq("status", "open")
-        .is("deleted_at", null)
-        .is("accuracy_checks.deleted_at", null);
-
-    if (error) {
-        console.error("Failed loading dispute counts:", error);
-        return {};
-    }
     const counts: Record<number, number> = {};
-    for (const r of data ?? []) {
-        const id = (r as { check_id: number }).check_id;
-        counts[id] = (counts[id] ?? 0) + 1;
+    const pageSize = 1000;
+    let from = 0;
+
+    while (true) {
+        const { data, error } = await supabase
+            .from("accuracy_disputes")
+            .select("check_id, accuracy_checks!inner(deleted_at)")
+            .eq("status", "open")
+            .is("deleted_at", null)
+            .is("accuracy_checks.deleted_at", null)
+            .range(from, from + pageSize - 1);
+
+        if (error) {
+            console.error("Failed loading dispute counts:", error);
+            return {};
+        }
+        if (!data || data.length === 0) break;
+        for (const r of data) {
+            const id = (r as { check_id: number }).check_id;
+            counts[id] = (counts[id] ?? 0) + 1;
+        }
+        if (data.length < pageSize) break;
+        from += pageSize;
     }
     return counts;
 }
