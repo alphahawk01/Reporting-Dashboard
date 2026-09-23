@@ -58,6 +58,12 @@ export interface AccuracyCheck {
     // re-parsing the raw XML. Recomputed on save/update/propagate. Null on
     // older checks until backfilled.
     player_accuracy: StoredPlayerAccuracy | null;
+
+    // Soft delete: when set, the check is treated as deleted (hidden from all
+    // active views) but kept for review/restore. `deleted_by` is the username
+    // that removed it. Null on active checks.
+    deleted_at: string | null;
+    deleted_by: string | null;
 }
 
 export interface SaveAccuracyCheckInput {
@@ -285,7 +291,8 @@ export async function propagateMasterCorrection(
     const { data, error } = await supabase
         .from("accuracy_checks")
         .select("id, analyst_name, tolerance, xml_analyst, file_name_master")
-        .eq("file_name_master", fileNameMaster);
+        .eq("file_name_master", fileNameMaster)
+        .is("deleted_at", null);
 
     if (error) {
         console.error("Failed loading checks for master:", error);
@@ -366,7 +373,8 @@ export async function getMasterCheckSiblings(
     const { data, error } = await supabase
         .from("accuracy_checks")
         .select("analyst_name")
-        .eq("file_name_master", fileNameMaster);
+        .eq("file_name_master", fileNameMaster)
+        .is("deleted_at", null);
     if (error) {
         console.error("Failed counting master siblings:", error);
         return { count: 0, analysts: [] };
@@ -463,6 +471,7 @@ export async function diagnoseMasterConsistency(
         .from("accuracy_checks")
         .select("id, analyst_name, created_at, master_total")
         .eq("file_name_master", fileNameMaster)
+        .is("deleted_at", null)
         .order("created_at", { ascending: true });
 
     if (error) {
@@ -714,6 +723,7 @@ export async function getSavedMasters(): Promise<SavedMaster[]> {
         .from("accuracy_checks")
         .select("id, file_name_master, video_url, created_at")
         .not("xml_master", "is", null)
+        .is("deleted_at", null)
         .order("created_at", { ascending: false });
 
     if (error) {
@@ -790,6 +800,7 @@ export async function getAccuracyChecksForAnalyst(
     const { data, error } = await supabase
         .from("accuracy_checks")
         .select("*")
+        .is("deleted_at", null)
         .ilike("analyst_name", analystName.trim())
         .order("created_at", { ascending: true });
 
@@ -813,6 +824,7 @@ export async function getAllAccuracyChecks(): Promise<AccuracyCheck[]> {
         const { data, error } = await supabase
             .from("accuracy_checks")
             .select("*")
+            .is("deleted_at", null)
             .order("created_at", { ascending: false })
             .range(from, from + pageSize - 1);
 
@@ -844,7 +856,7 @@ const ACCURACY_CHECK_META_COLUMNS =
     "file_name_master, file_name_analyst, tolerance, accuracy, master_total, " +
     "analyst_total, exact, wrong_stat, wrong_player, wrong_team, missed, extra, " +
     "avg_time_drift, category_breakdown, team_breakdown, video_url, sport, " +
-    "player_accuracy";
+    "player_accuracy, deleted_at, deleted_by";
 
 /**
  * Like getAllAccuracyChecks but WITHOUT the xml_master/xml_analyst blobs.
@@ -860,6 +872,7 @@ export async function getAccuracyChecksMeta(): Promise<AccuracyCheckMeta[]> {
         const { data, error } = await supabase
             .from("accuracy_checks")
             .select(ACCURACY_CHECK_META_COLUMNS)
+            .is("deleted_at", null)
             .order("created_at", { ascending: false })
             .range(from, from + pageSize - 1);
 
@@ -948,7 +961,8 @@ export async function backfillPlayerAccuracy(
     // every check; otherwise only those missing player_accuracy.
     const listQuery = supabase
         .from("accuracy_checks")
-        .select("id, tolerance, file_name_master");
+        .select("id, tolerance, file_name_master")
+        .is("deleted_at", null);
     const { data, error } = force
         ? await listQuery
         : await listQuery.is("player_accuracy", null);
@@ -1022,16 +1036,77 @@ export async function recomputeAllPlayerAccuracy(
 /**
  * Delete a saved accuracy check (e.g. a mistaken save).
  */
-export async function deleteAccuracyCheck(id: number): Promise<void> {
+export async function deleteAccuracyCheck(
+    id: number,
+    deletedBy?: string | null
+): Promise<void> {
+    // Soft delete: mark the row instead of removing it, so a mistakenly-deleted
+    // check (and its disputes) can be reviewed and restored. Active views filter
+    // out rows where deleted_at is set.
     const { error } = await supabase
         .from("accuracy_checks")
-        .delete()
+        .update({
+            deleted_at: new Date().toISOString(),
+            deleted_by: deletedBy ?? null,
+        })
         .eq("id", id);
 
     if (error) {
         console.error("Failed deleting accuracy check:", error);
         throw new Error(error.message || "Failed deleting accuracy check");
     }
+}
+
+/**
+ * Restore a soft-deleted check (clears deleted_at/deleted_by). Its disputes are
+ * untouched by soft delete, so restoring the check makes them active again too.
+ */
+export async function restoreAccuracyCheck(id: number): Promise<void> {
+    const { error } = await supabase
+        .from("accuracy_checks")
+        .update({ deleted_at: null, deleted_by: null })
+        .eq("id", id);
+
+    if (error) {
+        console.error("Failed restoring accuracy check:", error);
+        throw new Error(error.message || "Failed restoring accuracy check");
+    }
+}
+
+/**
+ * Permanently remove a check (and, via ON DELETE CASCADE, its disputes). Use
+ * only from the "Deleted checks" review view to purge a check for good.
+ */
+export async function purgeAccuracyCheck(id: number): Promise<void> {
+    const { error } = await supabase
+        .from("accuracy_checks")
+        .delete()
+        .eq("id", id);
+
+    if (error) {
+        console.error("Failed purging accuracy check:", error);
+        throw new Error(error.message || "Failed purging accuracy check");
+    }
+}
+
+/**
+ * All soft-deleted checks (metadata only, newest-deleted first) for the
+ * "Deleted checks" review view.
+ */
+export async function getDeletedAccuracyChecksMeta(): Promise<
+    AccuracyCheckMeta[]
+> {
+    const { data, error } = await supabase
+        .from("accuracy_checks")
+        .select(ACCURACY_CHECK_META_COLUMNS)
+        .not("deleted_at", "is", null)
+        .order("deleted_at", { ascending: false });
+
+    if (error) {
+        console.error("Failed loading deleted checks:", error);
+        throw new Error(error.message || "Failed loading deleted checks");
+    }
+    return (data ?? []) as unknown as AccuracyCheckMeta[];
 }
 
 // ---- Aggregations -------------------------------------------------

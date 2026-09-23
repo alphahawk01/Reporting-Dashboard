@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
+  RotateCcw,
 } from "lucide-react";
 
 // Accuracy trend chart pulls in recharts — load lazily so recharts stays out
@@ -31,6 +32,8 @@ import {
   getAccuracyChecksXml,
   summariseByAnalyst,
   deleteAccuracyCheck,
+  restoreAccuracyCheck,
+  getDeletedAccuracyChecksMeta,
   backfillPlayerAccuracy,
   recomputeAllPlayerAccuracy,
   diagnoseMasterConsistency,
@@ -527,6 +530,9 @@ export default function AccuracyChecksPage() {
 
   // Master-consistency diagnostic modal: which fixture filename to inspect.
   const [masterDiagFile, setMasterDiagFile] = useState<string | null>(null);
+
+  // Deleted-checks review modal (admin only).
+  const [showDeleted, setShowDeleted] = useState(false);
 
   function toggleSavedSort(key: string) {
     setSavedSort((cur) =>
@@ -1335,9 +1341,14 @@ export default function AccuracyChecksPage() {
   );
 
   async function handleDelete(id: number) {
-    if (!confirm("Delete this saved accuracy check?")) return;
+    if (
+      !confirm(
+        "Delete this saved accuracy check?\n\nIt will be moved to Deleted checks, where an admin can review or restore it."
+      )
+    )
+      return;
     try {
-      await deleteAccuracyCheck(id);
+      await deleteAccuracyCheck(id, user?.username ?? null);
       await load();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to delete.");
@@ -1400,6 +1411,15 @@ export default function AccuracyChecksPage() {
               </button>
             </div>
             <SportToggle value={sportFilter} onChange={setSportFilter} />
+            {canResolve && (
+              <button
+                onClick={() => setShowDeleted(true)}
+                title="Review and restore deleted checks"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50"
+              >
+                <Trash2 size={14} /> Deleted checks
+              </button>
+            )}
             <Link
               href="/accuracy-compare"
               className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50"
@@ -1796,6 +1816,235 @@ export default function AccuracyChecksPage() {
           onFixed={() => load()}
         />
       )}
+
+      {showDeleted && (
+        <DeletedChecksModal
+          onClose={() => setShowDeleted(false)}
+          onOpenCheck={(id) => {
+            setShowDeleted(false);
+            openCheck(id);
+          }}
+          onRestored={() => load()}
+        />
+      )}
+    </div>
+  );
+}
+
+// Modal listing soft-deleted checks (admin only) so they can be reviewed,
+// re-opened, or restored. Each row can expand to show the check's disputes.
+function DeletedChecksModal({
+  onClose,
+  onOpenCheck,
+  onRestored,
+}: {
+  onClose: () => void;
+  onOpenCheck: (checkId: number) => void;
+  /** Called after a check is restored, so the main page reloads. */
+  onRestored: () => void;
+}) {
+  const [rows, setRows] = useState<AccuracyCheckMeta[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [disputesByCheck, setDisputesByCheck] = useState<
+    Record<number, Dispute[]>
+  >({});
+
+  async function reload() {
+    try {
+      setRows(await getDeletedAccuracyChecksMeta());
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load.");
+      setRows([]);
+    }
+  }
+
+  useEffect(() => {
+    reload();
+  }, []);
+
+  async function toggleExpand(id: number) {
+    if (expanded === id) {
+      setExpanded(null);
+      return;
+    }
+    setExpanded(id);
+    if (!disputesByCheck[id]) {
+      try {
+        const d = await getDisputesForCheck(id);
+        setDisputesByCheck((cur) => ({ ...cur, [id]: d }));
+      } catch {
+        setDisputesByCheck((cur) => ({ ...cur, [id]: [] }));
+      }
+    }
+  }
+
+  async function handleRestore(id: number) {
+    setBusyId(id);
+    try {
+      await restoreAccuracyCheck(id);
+      await reload();
+      onRestored();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to restore.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
+      <div className="max-h-[85vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-800">
+            <Trash2 size={18} /> Deleted checks
+          </h2>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
+        {rows == null ? (
+          <p className="py-8 text-center text-sm text-slate-400">Loading…</p>
+        ) : rows.length === 0 ? (
+          <p className="py-8 text-center text-sm text-slate-400">
+            No deleted checks. Anything deleted from the history will appear
+            here for review or restore.
+          </p>
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">Match</th>
+                  <th className="px-3 py-2">Analyst</th>
+                  <th className="px-3 py-2">Deleted</th>
+                  <th className="px-3 py-2">By</th>
+                  <th className="px-3 py-2 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((c) => {
+                  const disputes = disputesByCheck[c.id];
+                  const isOpen = expanded === c.id;
+                  return (
+                    <React.Fragment key={c.id}>
+                      <tr className="border-t border-slate-100">
+                        <td className="px-3 py-2 font-medium text-slate-700">
+                          {matchTeamsLabel(c)}
+                        </td>
+                        <td className="px-3 py-2 text-slate-600">
+                          {c.analyst_name || "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-slate-500">
+                          {c.deleted_at ? formatDate(c.deleted_at) : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-slate-500">
+                          {c.deleted_by || "—"}
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => toggleExpand(c.id)}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-800"
+                            >
+                              {isOpen ? (
+                                <ChevronDown size={13} />
+                              ) : (
+                                <ChevronRight size={13} />
+                              )}
+                              Disputes
+                            </button>
+                            <button
+                              onClick={() => onOpenCheck(c.id)}
+                              className="text-xs font-medium text-sky-600 hover:text-sky-800"
+                            >
+                              Open
+                            </button>
+                            <button
+                              onClick={() => handleRestore(c.id)}
+                              disabled={busyId === c.id}
+                              className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
+                            >
+                              <RotateCcw size={12} />
+                              {busyId === c.id ? "Restoring…" : "Restore"}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <tr className="bg-slate-50/60">
+                          <td colSpan={5} className="px-4 py-3">
+                            {disputes == null ? (
+                              <p className="text-xs text-slate-400">
+                                Loading disputes…
+                              </p>
+                            ) : disputes.length === 0 ? (
+                              <p className="text-xs text-slate-400">
+                                No disputes were raised on this check.
+                              </p>
+                            ) : (
+                              <ul className="space-y-1">
+                                {disputes.map((d) => (
+                                  <li
+                                    key={d.id}
+                                    className="flex flex-wrap items-center gap-2 text-xs text-slate-600"
+                                  >
+                                    <span
+                                      className={`rounded px-1.5 py-0.5 font-semibold ${
+                                        d.status === "open"
+                                          ? "bg-amber-100 text-amber-700"
+                                          : d.status === "confirmed"
+                                            ? "bg-emerald-100 text-emerald-700"
+                                            : "bg-slate-200 text-slate-600"
+                                      }`}
+                                    >
+                                      {d.status}
+                                    </span>
+                                    <span className="font-medium text-slate-700">
+                                      {d.stat || "—"}
+                                    </span>
+                                    <span className="text-slate-500">
+                                      {d.side} · {d.player || "—"}
+                                      {d.team ? ` · ${d.team}` : ""}
+                                    </span>
+                                    {d.reason && (
+                                      <span className="italic text-slate-400">
+                                        “{d.reason}”
+                                      </span>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <p className="mt-4 text-[11px] leading-relaxed text-slate-400">
+          Deleted checks are hidden from all history, leaderboards and dispute
+          views but kept here so they can be restored. Restoring brings the
+          check (and its disputes) back into the active data.
+        </p>
+      </div>
     </div>
   );
 }

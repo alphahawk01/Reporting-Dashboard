@@ -52,6 +52,9 @@ export interface Dispute {
     resolved_by: string | null;
     resolved_at: string | null;
     resolution_note: string | null;
+    /** Soft delete: set when the dispute was removed (kept for review). */
+    deleted_at: string | null;
+    deleted_by: string | null;
 }
 
 export interface NewDispute {
@@ -82,7 +85,15 @@ export async function createDispute(input: NewDispute): Promise<Dispute> {
         // Re-flagging: only update the reason IF a new one was supplied, so an
         // empty submit never wipes an existing reason. The category is updated
         // whenever a new one is supplied. Never reset status.
+        const existingDispute = existing as Dispute;
         const patch: Record<string, unknown> = {};
+        // If the previous dispute for this instance/side was soft-deleted,
+        // re-flagging restores it (the unique index on check/instance/side
+        // means we can't insert a fresh row alongside the deleted one).
+        if (existingDispute.deleted_at != null) {
+            patch.deleted_at = null;
+            patch.deleted_by = null;
+        }
         if (input.reason != null && input.reason.trim() !== "") {
             patch.reason = input.reason.trim();
         }
@@ -90,7 +101,7 @@ export async function createDispute(input: NewDispute): Promise<Dispute> {
             patch.category = input.category;
         }
         if (Object.keys(patch).length === 0) {
-            return existing as Dispute;
+            return existingDispute;
         }
         const { data, error } = await supabase
             .from("accuracy_disputes")
@@ -139,6 +150,7 @@ export async function getDisputesForCheck(
         .from("accuracy_disputes")
         .select("*")
         .eq("check_id", checkId)
+        .is("deleted_at", null)
         .order("created_at", { ascending: true });
 
     if (error) {
@@ -150,24 +162,38 @@ export async function getDisputesForCheck(
 
 /** Every dispute across all checks (for the global Disputes page). */
 export async function getAllDisputes(): Promise<Dispute[]> {
+    // Exclude disputes that are themselves soft-deleted, AND disputes belonging
+    // to a soft-deleted check. The embedded `accuracy_checks!inner(...)` with a
+    // deleted_at filter makes it an inner join that drops disputes whose parent
+    // check is deleted.
     const { data, error } = await supabase
         .from("accuracy_disputes")
-        .select("*")
+        .select("*, accuracy_checks!inner(deleted_at)")
+        .is("deleted_at", null)
+        .is("accuracy_checks.deleted_at", null)
         .order("created_at", { ascending: false });
 
     if (error) {
         console.error("Failed loading disputes:", error);
         throw new Error(error.message || "Failed loading disputes");
     }
-    return (data ?? []) as Dispute[];
+    // Strip the embedded join object so callers see a plain Dispute.
+    return (data ?? []).map((d) => {
+        const { accuracy_checks: _omit, ...rest } = d as Dispute & {
+            accuracy_checks?: unknown;
+        };
+        return rest as Dispute;
+    });
 }
 
 /** Count of open disputes per check_id (for history badges). */
 export async function getOpenDisputeCounts(): Promise<Record<number, number>> {
     const { data, error } = await supabase
         .from("accuracy_disputes")
-        .select("check_id")
-        .eq("status", "open");
+        .select("check_id, accuracy_checks!inner(deleted_at)")
+        .eq("status", "open")
+        .is("deleted_at", null)
+        .is("accuracy_checks.deleted_at", null);
 
     if (error) {
         console.error("Failed loading dispute counts:", error);
@@ -204,16 +230,36 @@ export async function resolveDispute(
     }
 }
 
-/** Remove a dispute (e.g. flagged by mistake). */
-export async function deleteDispute(id: number): Promise<void> {
+/** Remove a dispute (e.g. flagged by mistake). Soft delete: marks the row so
+ * it's hidden from active views but kept for review/restore. */
+export async function deleteDispute(
+    id: number,
+    deletedBy?: string | null
+): Promise<void> {
     const { error } = await supabase
         .from("accuracy_disputes")
-        .delete()
+        .update({
+            deleted_at: new Date().toISOString(),
+            deleted_by: deletedBy ?? null,
+        })
         .eq("id", id);
 
     if (error) {
         console.error("Failed deleting dispute:", error);
         throw new Error(error.message || "Failed deleting dispute");
+    }
+}
+
+/** Restore a soft-deleted dispute (clears deleted_at/deleted_by). */
+export async function restoreDispute(id: number): Promise<void> {
+    const { error } = await supabase
+        .from("accuracy_disputes")
+        .update({ deleted_at: null, deleted_by: null })
+        .eq("id", id);
+
+    if (error) {
+        console.error("Failed restoring dispute:", error);
+        throw new Error(error.message || "Failed restoring dispute");
     }
 }
 
