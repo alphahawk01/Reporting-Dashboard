@@ -2476,7 +2476,7 @@ function AccuracyCompareInner() {
                 <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
                   Golden Player Accuracy Checks <span className="font-normal normal-case text-slate-400">(Analyst vs Master)</span>
                 </p>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
                   {(
                     [
                       { label: "Overall %", g: playerAccuracy.overall, highlight: true },
@@ -2484,6 +2484,7 @@ function AccuracyCompareInner() {
                       { label: "Offensive %", g: playerAccuracy.offensive, highlight: false },
                       { label: "Defensive %", g: playerAccuracy.defensive, highlight: false },
                       { label: "Goalkeeper %", g: playerAccuracy.goalkeeper, highlight: false },
+                      { label: "Other %", g: playerAccuracy.other, highlight: false },
                     ] as const
                   ).map(({ label, g, highlight }) => (
                     <PlayerAccuracyCard

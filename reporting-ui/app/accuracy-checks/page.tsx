@@ -173,6 +173,7 @@ const PLAYER_ACCURACY_COLUMNS = [
   { key: "offensive", label: "Offensive", short: "OFF" },
   { key: "defensive", label: "Defensive", short: "DEF" },
   { key: "goalkeeper", label: "Goalkeeper", short: "GK" },
+  { key: "other", label: "Other", short: "OTH" },
 ] as const;
 
 type PlayerAccuracyGroupKey = (typeof PLAYER_ACCURACY_COLUMNS)[number]["key"];
@@ -250,6 +251,7 @@ function averageGroups(
     offensive: null,
     defensive: null,
     goalkeeper: null,
+    other: null,
   };
   for (const col of PLAYER_ACCURACY_COLUMNS) {
     const s = sums.get(col.key)!;
@@ -562,6 +564,7 @@ export default function AccuracyChecksPage() {
         case "offensive":
         case "defensive":
         case "goalkeeper":
+        case "other":
           return storedGroupPct(c, key as PlayerAccuracyGroupKey);
         case "exactMaster":
           return c.master_total > 0 ? c.exact / c.master_total : 0;
@@ -828,6 +831,7 @@ export default function AccuracyChecksPage() {
           offensive: null,
           defensive: null,
           goalkeeper: null,
+          other: null,
         };
         for (const col of PLAYER_ACCURACY_COLUMNS) {
           const s = e.sums.get(col.key)!;
@@ -899,6 +903,7 @@ export default function AccuracyChecksPage() {
         offensive: null,
         defensive: null,
         goalkeeper: null,
+        other: null,
       };
       for (const col of PLAYER_ACCURACY_COLUMNS) {
         const s = sums.get(col.key)!;
@@ -1482,7 +1487,7 @@ export default function AccuracyChecksPage() {
                   {checks.length === 1 ? "" : "s"})
                 </span>
               </p>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                 {PLAYER_ACCURACY_COLUMNS.map((col) => {
                   const v = overallAverages[col.key];
                   return (

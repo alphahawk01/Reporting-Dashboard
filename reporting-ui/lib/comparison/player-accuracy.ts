@@ -52,6 +52,10 @@ export function initFootballCounts(): FootballCounts {
     headers: 0,
     fouls: 0,
     foulsDrawn: 0,
+    // Other / discipline / set-piece
+    throwIns: 0,
+    cards: 0,
+    offsides: 0,
     // Goalkeeper
     gkSaves: 0,
     gkBlocks: 0,
@@ -128,6 +132,11 @@ export function bumpFootball(c: FootballCounts, s: string): void {
   else if (s.includes("header")) c.headers += 1;
   else if (s.includes("fouls drawn")) c.foulsDrawn += 1;
   else if (s.includes("foul")) c.fouls += 1;
+  // Other / set-piece / discipline. Throw-ins here are OUTFIELD throw-ins;
+  // keeper throws were already matched above (they require "keeper"/"goalkeeper").
+  else if (s.includes("throw")) c.throwIns += 1;
+  else if (s.includes("card")) c.cards += 1; // Yellow Card / Red Card / Card
+  else if (s.includes("offside")) c.offsides += 1;
 }
 
 // Add derived aggregate keys (totalPasses, crosses, tackles) used by groups.
@@ -205,6 +214,20 @@ export const FOOTBALL_GROUPS = {
       { key: "gkThrows", label: "Keeper throws" },
     ],
   },
+  // On-ball actions, set pieces and discipline that don't belong to the four
+  // core groups above. Exact-match based like the others.
+  other: {
+    label: "Other",
+    parts: [
+      { key: "touches", label: "Touches" },
+      { key: "carries", label: "Carries" },
+      { key: "dribbles", label: "Dribbles" },
+      { key: "throwIns", label: "Throw ins" },
+      { key: "cards", label: "Cards" },
+      { key: "fouls", label: "Fouls" },
+      { key: "offsides", label: "Offside" },
+    ],
+  },
 } as const;
 
 // One component stat within a group. Player accuracy is EXACT-match based:
@@ -237,6 +260,7 @@ export type PlayerAccuracy = {
   offensive: AccuracyGroup;
   defensive: AccuracyGroup;
   goalkeeper: AccuracyGroup;
+  other: AccuracyGroup;
 };
 
 // Is this stat one of the "pass" types (short/long/through, either outcome)?
@@ -361,8 +385,12 @@ export function computePlayerAccuracy(
   const offensive = buildGroup(FOOTBALL_GROUPS.offensive, rows);
   const defensive = buildGroup(FOOTBALL_GROUPS.defensive, rows);
   const goalkeeper = buildGroup(FOOTBALL_GROUPS.goalkeeper, rows);
+  const other = buildGroup(FOOTBALL_GROUPS.other, rows);
 
-  // Overall spans every part from every group.
+  // Overall spans the four CORE groups only. The "other" group (touches,
+  // carries, dribbles, throw-ins, cards, fouls, offside) is a STANDALONE % and
+  // is deliberately excluded from Overall so it doesn't move the headline
+  // accuracy figure.
   const overall = buildGroup(
     {
       label: "Overall",
@@ -376,7 +404,7 @@ export function computePlayerAccuracy(
     rows
   );
 
-  return { overall, passing, offensive, defensive, goalkeeper };
+  return { overall, passing, offensive, defensive, goalkeeper, other };
 }
 
 // The three team scopes shown in the fixture table.
