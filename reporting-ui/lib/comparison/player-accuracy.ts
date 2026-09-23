@@ -455,7 +455,12 @@ export function computePlayerAccuracyByScope(
 
   const both = forScope("both");
   return {
-    football: both.overall.master > 0,
+    // A check is "football" (has player-accuracy data) if it has ANY graded
+    // events across the core groups OR the standalone Other group. Overall
+    // excludes Other, so a check whose only stats are Other-type (touches,
+    // carries, throw-ins, etc.) would wrongly read as non-football if we keyed
+    // this off overall.master alone.
+    football: both.overall.master > 0 || both.other.master > 0,
     both,
     home: forScope("home"),
     away: forScope("away"),

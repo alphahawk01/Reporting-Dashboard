@@ -1380,7 +1380,12 @@ function AccuracyCompareInner() {
         const masterInstances = parseInstances(check.xml_master);
         const cmp = compareInstances(masterInstances, [], check.tolerance ?? 3);
         const fb = computePlayerAccuracy(cmp.rows);
-        setSport(fb.overall.master > 0 ? "football" : "afl");
+        // Overall excludes the standalone Other group, so also count Other
+        // when deciding football vs afl — otherwise a check whose only stats
+        // are Other-type (touches, carries, throw-ins, …) is misread as AFL.
+        setSport(
+          fb.overall.master > 0 || fb.other.master > 0 ? "football" : "afl"
+        );
       }
 
       // Enable disputes for this saved check.
