@@ -144,6 +144,11 @@ const STAT_START_OFFSETS: {
   offset: number;
   exact?: boolean;
 }[] = [
+  // Corners (football) are marked at the start of the build-up; the actual
+  // delivery is ~5s later, so code time = start + 5s. "corner" is a substring
+  // match so it covers "Corner", "Corners", "Corner Won", etc.
+  { keyword: "corner", offset: 5 },
+
   { keyword: "uncontested mark", offset: 5 },
 
   // Around-the-ground bounce (sometimes coded as "Ball Up") — 9s.
@@ -750,6 +755,31 @@ export function canonicaliseTeams(
   /** Real club names for each canonical side, taken from the master's XML. */
   displayNames: CanonTeamNames;
 } {
+  // Idempotency guard: if the instances are ALREADY canonicalised (their only
+  // teams are "Home"/"Away"), do NOT re-map them. This happens when a caller
+  // canonicalises once, filters the result, then passes the subset back into
+  // compareInstances (which canonicalises again). On that second pass the real
+  // club names are gone, so the file-name similarity match scores 0 and the
+  // frequency fallback can FLIP Home/Away on the subset — silently swapping the
+  // teams shown on the timeline. Passing through keeps the first (correct)
+  // assignment intact.
+  const isCanon = (arr: Instance[]) =>
+    arr.length > 0 &&
+    arr.every((i) => {
+      const t = normTeam(i.team);
+      return t === "home" || t === "away" || t === "";
+    });
+  if (isCanon(master) && isCanon(analyst)) {
+    return {
+      master,
+      analyst,
+      mapped: true,
+      // Already canonical; real club names aren't recoverable here, so leave
+      // display names null (callers that need them use the FIRST canonicalise).
+      displayNames: { home: null, away: null },
+    };
+  }
+
   const mTeams = topTwoTeams(master);
   const aTeams = topTwoTeams(analyst);
 
