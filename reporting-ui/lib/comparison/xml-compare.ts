@@ -705,10 +705,27 @@ export function parseHomeAwayFromFileName(
 ): [string, string] | null {
   if (!fileName) return null;
   // Strip extension and any trailing " (1)", ". 1", ".." noise.
-  let base = fileName.replace(/\.xml$/i, "");
-  const marker = base.toLowerCase().lastIndexOf("_full_");
+  const base = fileName.replace(/\.xml$/i, "");
+  // The home/away teams follow a round/period marker: full game ("_full_"),
+  // a quarter ("_Q1_".."_Q4_"), a half ("_H1_"/"_H2_"), or a finals stage
+  // ("_GF_"/"_SF_"/"_QF_"). Match the LAST such marker (some names combine
+  // them, e.g. "..._GF_full_<Home>_<Away>", where "_full_" is last and the
+  // teams follow it). Previously only "_full_" was recognised, so quarter
+  // files (e.g. "..._Q1_PD General AFC_PD General SC") fell back to the
+  // most-coded-team heuristic and could put the away team as Home.
+  // Markers can appear alone ("_Q1_") or combined ("_GF_full_"). Consume any
+  // run of consecutive markers so the tail starts at the actual teams (e.g.
+  // "_GF_full_" -> teams follow "_full_", not "_GF_"). \1-style back-to-back
+  // markers share an underscore, so match a whole run in one go.
+  const markerRunRe = /_(?:full|q[1-4]|h[12]|gf|sf|qf)(?:_(?:full|q[1-4]|h[12]|gf|sf|qf))*_/gi;
+  let marker = -1;
+  let markerLen = 0;
+  for (const m of base.matchAll(markerRunRe)) {
+    marker = m.index ?? -1;
+    markerLen = m[0].length;
+  }
   if (marker === -1) return null;
-  const tail = base.slice(marker + "_full_".length);
+  const tail = base.slice(marker + markerLen);
   const parts = tail.split("_");
   if (parts.length < 2) return null;
   // Home = first segment, Away = the rest joined (in case an away name itself
