@@ -16,6 +16,12 @@ export const USD_TO_AUD = 1.4;
 // CONVERTED (AUD) figures, i.e. AUD $0.50/day.
 export const MIN_AVG_COST_PER_DAY = 0.5;
 
+// Catch-all category for kept usage types that have no mapped category (e.g.
+// Tax, Support, and anything else uncategorised). Rolling these into "Other"
+// means every kept cost shows up in the category breakdown/chart instead of
+// being dropped from it.
+export const OTHER_CATEGORY = "Other";
+
 // Column headers that are not real usage types (the row label + the row total).
 const TOTAL_COLUMN = "Total costs($)";
 // The label of the whole-period total row (skipped during daily parsing).
@@ -169,7 +175,9 @@ function cleanLabel(header: string): string {
 // Accepted date-row formats: ISO (2026-09-16) and AWS/Excel DD/MM/YYYY
 // (16/09/2026). Both are normalised to ISO so days sort and bucket correctly.
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const DMY_DATE_RE = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+// Day and month may be 1 OR 2 digits — AWS/Excel exports drop the leading zero
+// (e.g. "1/10/2025" for the 1st). Zero-padded when normalised to ISO.
+const DMY_DATE_RE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
 
 // Sanity window for AWS cost data — reject anything outside so a mis-parsed or
 // wrong-format date can't silently enter the data set.
@@ -204,7 +212,13 @@ function normaliseDate(label: string): string | null {
     iso = label;
   } else {
     const m = label.match(DMY_DATE_RE);
-    if (m) iso = `${m[3]}-${m[2]}-${m[1]}`; // dd/mm/yyyy -> yyyy-mm-dd
+    // d/m/yyyy -> yyyy-mm-dd, zero-padding single-digit day/month (e.g. the
+    // 1st of a month exports as "1/10/2025") so it passes ISO validation.
+    if (m) {
+      const dd = m[1].padStart(2, "0");
+      const mm = m[2].padStart(2, "0");
+      iso = `${m[3]}-${mm}-${dd}`;
+    }
   }
   return iso && isValidIsoDate(iso) ? iso : null;
 }
@@ -359,23 +373,31 @@ export function buildAwsCostData(
   kept.sort((a, b) => b.total - a.total);
   const keptKeys = kept.map((k) => k.key);
 
-  // Roll up kept usage types into categories (skip uncategorised).
+  // Roll up kept usage types into categories. Uncategorised usage types (Tax,
+  // Support, anything without a mapped category) roll into the "Other"
+  // category so every kept cost is represented in the category breakdown.
   const catMap = new Map<string, CategorySummary>();
   let categorisedTotal = 0;
   for (const u of kept) {
-    if (!u.category) continue;
+    const category = u.category ?? OTHER_CATEGORY;
     categorisedTotal += u.total;
-    let cat = catMap.get(u.category);
+    let cat = catMap.get(category);
     if (!cat) {
-      cat = { category: u.category, total: 0, avgPerDay: 0, usageTypeKeys: [] };
-      catMap.set(u.category, cat);
+      cat = { category, total: 0, avgPerDay: 0, usageTypeKeys: [] };
+      catMap.set(category, cat);
     }
     cat.total += u.total;
     cat.usageTypeKeys.push(u.key);
   }
+  // Sort by total desc, but always keep "Other" last so the catch-all sits at
+  // the bottom of the category list/legend regardless of its size.
   const categories = Array.from(catMap.values())
     .map((c) => ({ ...c, avgPerDay: c.total / dayCount }))
-    .sort((a, b) => b.total - a.total);
+    .sort((a, b) => {
+      if (a.category === OTHER_CATEGORY) return 1;
+      if (b.category === OTHER_CATEGORY) return -1;
+      return b.total - a.total;
+    });
 
   // Rebuild the daily breakdown limited to kept usage types.
   const daily: Record<string, Record<string, number>> = {};
@@ -512,10 +534,11 @@ export function bucketizeByCategory(
   granularity: Granularity
 ): CategoryBucket[] {
   const cats = data.categories.map((c) => c.category);
-  // usage-type key -> category (kept + categorised only).
+  // usage-type key -> category. Uncategorised kept usage types roll into the
+  // "Other" category so they're stacked in the chart, not dropped.
   const keyToCat = new Map<string, string>();
   for (const u of data.usageTypes) {
-    if (u.category) keyToCat.set(u.key, u.category);
+    keyToCat.set(u.key, u.category ?? OTHER_CATEGORY);
   }
 
   const map = new Map<string, CategoryBucket>();
@@ -540,8 +563,8 @@ export function bucketizeByCategory(
     const row = data.daily[day] ?? {};
     for (const [uKey, amt] of Object.entries(row)) {
       const cat = keyToCat.get(uKey);
-      if (!cat) continue; // uncategorised → excluded
-      bucket.byCategory[cat] += amt;
+      if (!cat) continue; // usage type not kept
+      bucket.byCategory[cat] = (bucket.byCategory[cat] ?? 0) + amt;
       bucket.total += amt;
     }
   }

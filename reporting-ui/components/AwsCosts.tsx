@@ -91,6 +91,99 @@ function fullBucketLabel(
 const TOTAL_FIELD = "__total__";
 const FULL_LABEL_FIELD = "__fullLabel__";
 
+// Custom tooltip: shows the bucket's full label, a bolded TOTAL for the
+// column, then each stacked series. Rendered as our own element (not the
+// default) so we can add the total line and control styling.
+function CostTooltip({
+  active,
+  payload,
+  label,
+  series,
+}: {
+  active?: boolean;
+  payload?: { name?: string | number; value?: number | string }[];
+  label?: string | number;
+  series: { key: string; label: string; color: string }[];
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+  const seriesLabel = (name: string) =>
+    series.find((x) => x.key === name)?.label ?? name;
+  const seriesColor = (name: string) =>
+    series.find((x) => x.key === name)?.color ?? "#94a3b8";
+  // The stacked total for this column = sum of every series value.
+  const total = payload.reduce((a, p) => a + (Number(p.value) || 0), 0);
+  // Show non-zero series, largest first.
+  const rows = payload
+    .map((p) => ({
+      name: String(p.name),
+      value: Number(p.value) || 0,
+    }))
+    .filter((r) => r.value > 0)
+    .sort((a, b) => b.value - a.value);
+
+  return (
+    <div
+      style={{
+        borderRadius: 12,
+        border: "1px solid #e5e7eb",
+        boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
+        background: "#fff",
+        fontSize: 12,
+        padding: "10px 12px",
+        maxHeight: 320,
+        overflowY: "auto",
+      }}
+    >
+      <div style={{ fontWeight: 600, color: "#0f172a", marginBottom: 4 }}>
+        {String(label)}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 16,
+          fontWeight: 700,
+          color: "#0f172a",
+          borderBottom: "1px solid #f1f5f9",
+          paddingBottom: 4,
+          marginBottom: 4,
+        }}
+      >
+        <span>Total</span>
+        <span>{formatMoney(total)}</span>
+      </div>
+      {rows.map((r) => (
+        <div
+          key={r.name}
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 16,
+            color: "#475569",
+            lineHeight: 1.5,
+          }}
+        >
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 2,
+                background: seriesColor(r.name),
+                display: "inline-block",
+              }}
+            />
+            {seriesLabel(r.name)}
+          </span>
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>
+            {formatMoney(r.value)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Card({ title, value, sub }: { title: string; value: string; sub?: string }) {
   return (
     <div className="rounded-2xl border border-zinc-100 bg-white p-5 shadow-sm">
@@ -118,6 +211,11 @@ export default function AwsCosts() {
   const [view, setView] = useState<"chart" | "table">("chart");
   // Year filter: "all" or a 4-digit year present in the data.
   const [yearFilter, setYearFilter] = useState<string>("all");
+  // Optional date-range filter (ISO YYYY-MM-DD). Empty string = unset. Applied
+  // together with the year filter (a row must satisfy both). Lets you scope the
+  // dashboard to a specific span instead of a whole year / everything.
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
 
   useEffect(() => {
     // `loading` is set inside the async callback (not synchronously in the
@@ -164,6 +262,22 @@ export default function AwsCosts() {
     return Array.from(set).sort((a, b) => b.localeCompare(a));
   }, [rawRows]);
 
+  // Earliest / latest day present in the data (ISO), used to bound the
+  // date-range inputs so you can't pick outside the loaded range.
+  const dataBounds = useMemo(() => {
+    if (!rawRows || rawRows.length === 0) return { min: "", max: "" };
+    let min = rawRows[0].day;
+    let max = rawRows[0].day;
+    for (const r of rawRows) {
+      if (r.day < min) min = r.day;
+      if (r.day > max) max = r.day;
+    }
+    return { min, max };
+  }, [rawRows]);
+
+  // Whether a date-range filter is active (either bound set).
+  const dateRangeActive = startDate !== "" || endDate !== "";
+
   // The effective year: fall back to "all" if the selected year isn't present
   // (e.g. after an import changed the data). Clamped here rather than via an
   // effect so there's no cascading setState.
@@ -177,12 +291,17 @@ export default function AwsCosts() {
   // all reflect the selected year.
   const data: AwsCostData | null = useMemo(() => {
     if (!rawRows) return null;
-    const scoped =
-      effectiveYear === "all"
-        ? rawRows
-        : rawRows.filter((r) => r.day.startsWith(effectiveYear));
+    // Apply the year filter and the optional date range together. `day` is ISO
+    // (YYYY-MM-DD) so lexicographic comparison is a correct date comparison.
+    const scoped = rawRows.filter((r) => {
+      if (effectiveYear !== "all" && !r.day.startsWith(effectiveYear))
+        return false;
+      if (startDate && r.day < startDate) return false;
+      if (endDate && r.day > endDate) return false;
+      return true;
+    });
     return buildAwsCostData(scoped, categoryMap, csvCategoryByKey);
-  }, [rawRows, effectiveYear, categoryMap, csvCategoryByKey]);
+  }, [rawRows, effectiveYear, startDate, endDate, categoryMap, csvCategoryByKey]);
 
   // Build the stacked chart data + series for the active grouping.
   const { chartData, series } = useMemo(() => {
@@ -257,6 +376,7 @@ export default function AwsCosts() {
       label: c.category,
       total: c.total,
       avgPerDay: c.avgPerDay,
+      avgPerWeek: (c.total / dayCount) * 7,
       avgPerMonth: (c.total / dayCount) * (365 / 12),
       count: c.usageTypeKeys.length,
     }));
@@ -304,10 +424,33 @@ export default function AwsCosts() {
   }
 
   if (!data || data.usageTypes.length === 0) {
+    const filtered = effectiveYear !== "all" || dateRangeActive;
     return (
       <div className="rounded-2xl border border-zinc-200 bg-white p-6 text-sm text-zinc-500">
-        No usage types average at least {formatMoney(MIN_AVG_COST_PER_DAY)} per
-        day in this export.
+        {filtered ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span>
+              No usage types average at least{" "}
+              {formatMoney(MIN_AVG_COST_PER_DAY)} per day for the selected{" "}
+              {dateRangeActive ? "date range" : "year"}.
+            </span>
+            <button
+              onClick={() => {
+                setYearFilter("all");
+                setStartDate("");
+                setEndDate("");
+              }}
+              className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900"
+            >
+              Clear filters
+            </button>
+          </div>
+        ) : (
+          <>
+            No usage types average at least {formatMoney(MIN_AVG_COST_PER_DAY)}{" "}
+            per day in this export.
+          </>
+        )}
       </div>
     );
   }
@@ -341,6 +484,40 @@ export default function AwsCosts() {
               </option>
             ))}
           </select>
+
+          {/* DATE-RANGE FILTER */}
+          <span className="ml-1 text-xs font-medium text-zinc-500">Dates</span>
+          <input
+            type="date"
+            value={startDate}
+            min={dataBounds.min || undefined}
+            max={endDate || dataBounds.max || undefined}
+            onChange={(e) => setStartDate(e.target.value)}
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-700 outline-none transition hover:border-zinc-300 focus:border-indigo-500"
+            aria-label="From date"
+          />
+          <span className="text-xs text-zinc-400">to</span>
+          <input
+            type="date"
+            value={endDate}
+            min={startDate || dataBounds.min || undefined}
+            max={dataBounds.max || undefined}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-700 outline-none transition hover:border-zinc-300 focus:border-indigo-500"
+            aria-label="To date"
+          />
+          {dateRangeActive && (
+            <button
+              onClick={() => {
+                setStartDate("");
+                setEndDate("");
+              }}
+              className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900"
+              title="Clear the date range"
+            >
+              Clear dates
+            </button>
+          )}
         </div>
       </div>
 
@@ -494,7 +671,7 @@ export default function AwsCosts() {
             </table>
           </div>
         ) : (
-        <div style={{ width: "100%", height: 380, minWidth: 0, overflow: "hidden" }}>
+        <div style={{ width: "100%", height: 380, minWidth: 0, overflow: "visible" }}>
           <ResponsiveContainer width="99%" height="100%">
             <BarChart data={chartData} barCategoryGap="20%">
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
@@ -517,16 +694,11 @@ export default function AwsCosts() {
                 }
               />
               <Tooltip
-                contentStyle={{
-                  borderRadius: "12px",
-                  border: "1px solid #e5e7eb",
-                  boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
-                  fontSize: 12,
-                }}
-                formatter={(value, name) => {
-                  const s = series.find((x) => x.key === String(name));
-                  return [formatMoney(Number(value) || 0), s?.label ?? String(name)];
-                }}
+                // Let the tooltip render outside the plot area so it isn't
+                // clipped by the container / hidden behind the x-axis labels.
+                allowEscapeViewBox={{ x: false, y: true }}
+                wrapperStyle={{ zIndex: 50 }}
+                content={<CostTooltip series={series} />}
               />
               <Legend
                 wrapperStyle={{ fontSize: 11 }}
@@ -554,8 +726,8 @@ export default function AwsCosts() {
       <div className="rounded-2xl border border-zinc-100 bg-white p-6 shadow-sm">
         <h3 className="mb-1 text-lg font-semibold text-zinc-800">Cost by category</h3>
         <p className="mb-4 text-sm text-zinc-500">
-          Usage types summed into your categories. Uncategorised usage types are
-          excluded here (shown in the usage-type table below).
+          Usage types summed into your categories. Anything without a mapped
+          category (Tax, Support, etc.) rolls into “Other”.
         </p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -565,6 +737,7 @@ export default function AwsCosts() {
                 <th className="px-3 py-2 text-right">Usage types</th>
                 <th className="px-3 py-2 text-right">Total</th>
                 <th className="px-3 py-2 text-right">Avg / day</th>
+                <th className="px-3 py-2 text-right">Avg / week</th>
                 <th className="px-3 py-2 text-right">Avg / month</th>
                 <th className="px-3 py-2 text-right">% of total</th>
               </tr>
@@ -581,6 +754,9 @@ export default function AwsCosts() {
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-zinc-600">
                     {formatMoney(r.avgPerDay)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-zinc-600">
+                    {formatMoney(r.avgPerWeek)}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-zinc-600">
                     {formatMoney(r.avgPerMonth)}
@@ -601,6 +777,9 @@ export default function AwsCosts() {
                     {formatMoney(uncategorisedTotal / dayCount)}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
+                    {formatMoney((uncategorisedTotal / dayCount) * 7)}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
                     {formatMoney((uncategorisedTotal / dayCount) * (365 / 12))}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">
@@ -618,6 +797,9 @@ export default function AwsCosts() {
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">
                   {formatMoney(avgPerDay)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {formatMoney(avgPerDay * 7)}
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">
                   {formatMoney(avgPerDay * (365 / 12))}
