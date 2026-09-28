@@ -837,10 +837,12 @@ export default function AccuracyChecksPage() {
           const s = e.sums.get(col.key)!;
           groups[col.key] = s.n > 0 ? s.total / s.n : null;
         }
-        return { analyst: e.analyst, checks: e.checks, groups };
+        const location =
+          locationByName.get(e.analyst.trim().toLowerCase()) ?? "Unknown";
+        return { analyst: e.analyst, location, checks: e.checks, groups };
       })
       .sort((a, b) => (b.groups.overall ?? -1) - (a.groups.overall ?? -1));
-  }, [checks, weekFilter]);
+  }, [checks, weekFilter, locationByName]);
 
   // Sort state for the comparison table.
   const [comparisonSort, setComparisonSort] = useState<{
@@ -861,6 +863,7 @@ export default function AccuracyChecksPage() {
     const mult = dir === "asc" ? 1 : -1;
     const val = (r: (typeof analystComparison)[number]): number | string | null => {
       if (key === "analyst") return r.analyst.toLowerCase();
+      if (key === "location") return r.location.toLowerCase();
       if (key === "checks") return r.checks;
       return r.groups[key as PlayerAccuracyGroupKey];
     };
@@ -2702,6 +2705,7 @@ function RecommendationsPanel({
 // group, sortable, with a calendar-week selector (default = whole season).
 type ComparisonRowData = {
   analyst: string;
+  location: string;
   checks: number;
   groups: Record<PlayerAccuracyGroupKey, number | null>;
 };
@@ -2759,12 +2763,14 @@ function AnalystComparisonTable({
 
     const header = [
       "Analyst",
+      "Location",
       "Checks",
       ...PLAYER_ACCURACY_COLUMNS.map((c) => `${c.label} %`),
     ];
     const lines = visibleRows.map((r) =>
       [
         r.analyst,
+        r.location,
         String(r.checks),
         ...PLAYER_ACCURACY_COLUMNS.map((col) => pctNum(r.groups[col.key])),
       ]
@@ -2851,6 +2857,15 @@ function AnalystComparisonTable({
                   align="left"
                 />
               </th>
+              <th className="px-2.5 py-2">
+                <SortHead
+                  label="Location"
+                  col="location"
+                  sort={sort}
+                  onSort={onSort}
+                  align="left"
+                />
+              </th>
               <th className="px-2.5 py-2 text-right">
                 <SortHead
                   label="Checks"
@@ -2887,6 +2902,9 @@ function AnalystComparisonTable({
                     {r.analyst}
                   </button>
                 </td>
+                <td className="whitespace-nowrap px-2.5 py-2 text-slate-600">
+                  {r.location}
+                </td>
                 <td className="px-2.5 py-2 text-right tabular-nums text-slate-600">
                   {r.checks}
                 </td>
@@ -2908,7 +2926,7 @@ function AnalystComparisonTable({
             {visibleRows.length === 0 && (
               <tr>
                 <td
-                  colSpan={2 + PLAYER_ACCURACY_COLUMNS.length}
+                  colSpan={3 + PLAYER_ACCURACY_COLUMNS.length}
                   className="p-6 text-center text-sm text-slate-400"
                 >
                   {selectedAnalyst

@@ -576,7 +576,7 @@ export function bucketizeByCategory(
 // the currency explicit.
 export function formatMoney(v: number): string {
   return `A$${Number(v || 0).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
   })}`;
 }

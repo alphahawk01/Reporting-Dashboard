@@ -33,6 +33,10 @@ const AwsCosts = dynamic(() => import("./AwsCosts"), {
   ssr: false,
   loading: chartLoading,
 });
+const CloudflareCosts = dynamic(() => import("./CloudflareCosts"), {
+  ssr: false,
+  loading: chartLoading,
+});
 const AveHoursPerGame = dynamic(() => import("./AveHoursPerGame"), {
   ssr: false,
   loading: chartLoading,
@@ -262,6 +266,7 @@ export default function DashboardClient({
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="aws">AWS</TabsTrigger>
+            <TabsTrigger value="cloudflare">Cloudflare</TabsTrigger>
             <TabsTrigger value="tt">TT Games</TabsTrigger>
             <TabsTrigger value="performance">Performance</TabsTrigger>
             <TabsTrigger value="bonus">Bonus</TabsTrigger>
@@ -306,6 +311,13 @@ export default function DashboardClient({
           <TabsContent value="aws">
             <div style={{ marginTop: 20 }}>
               <AwsCosts />
+            </div>
+          </TabsContent>
+
+          {/* CLOUDFLARE COSTS */}
+          <TabsContent value="cloudflare">
+            <div style={{ marginTop: 20 }}>
+              <CloudflareCosts />
             </div>
           </TabsContent>
 
