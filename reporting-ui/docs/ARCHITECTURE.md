@@ -28,6 +28,73 @@ all data access happens in the browser against two backends:
 
 ---
 
+## 1a. Quick Start (local setup from zero)
+
+For a new developer taking over. Requires **Node 20+** and **git**.
+
+```bash
+# 1. Clone
+git clone https://github.com/alphahawk01/Reporting-Dashboard.git
+cd Reporting-Dashboard/reporting-ui      # the Next.js app lives in this subfolder
+
+# 2. Install dependencies
+npm install
+
+# 3. Environment (see keys below) — create the two env files
+#    .env.local  → client-side (NEXT_PUBLIC_*), read by the browser
+#    .env        → server/sync scripts (Supabase service key, Azure/Graph)
+#    Ask an existing dev / super admin for the real values.
+
+# 4. Run the dev server
+npm run dev                               # http://localhost:3000
+
+# 5. Log in
+#    Seeded super admin: username "andydin", password "andydin"
+#    (from migrations/create_user_accounts.sql — change it in production)
+```
+
+**`.env.local` (client) — minimum to run the app:**
+
+```dotenv
+NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key>
+# Optional (LMS provisioning on the Users page):
+NEXT_PUBLIC_LMS_URL=<lms base url>
+NEXT_PUBLIC_LMS_PROVISION_SECRET=<shared secret>
+```
+
+**`.env` (only needed to run the Deputy roster sync script, not the app):**
+
+```dotenv
+SUPABASE_URL=https://<project>.supabase.co
+SUPABASE_SERVICE_KEY=<service role key>
+AZURE_TENANT_ID=… AZURE_CLIENT_ID=… AZURE_CLIENT_SECRET=…
+SITE_ID=… DRIVE_ID=… FILE_ID=…   # SharePoint roster source
+DIRECT_DOWNLOAD_URL=<sharepoint file url>
+```
+
+**First-run notes**
+
+- The app talks to **Supabase directly from the browser** with the anon key —
+  no local backend is needed to develop. Point it at the existing Supabase
+  project (or your own — then run every `migrations/*.sql` in the Supabase SQL
+  editor to create the schema and seed the super admin + permission matrix).
+- **Live-ops pages** (`/operations`, `/computers`, `/fixtures`) call the
+  external .NET API at `downloads.premierdata-technology.com` (hardcoded in
+  `lib/api/config.ts`). Those pages won't load data unless that API is
+  reachable; the rest of the app (accuracy, reporting, analysts, cost tabs)
+  works against Supabase + the CSVs alone.
+- **Cost tabs** read CSVs from `public/data/` (`aws-costs.csv`,
+  `cloudflare_costs.csv`, `cloudflare_usage.csv`) — already in the repo, no
+  setup needed.
+- Type-check any change with `npx tsc --noEmit` before committing.
+
+**Deploy:** push to `main` → Cloudflare Pages auto-builds the static export and
+publishes to `dashboard.premierdata-technology.com` (see §10). Schema changes
+are applied separately by running `migrations/*.sql` in Supabase.
+
+---
+
 ## 2. Tech Stack
 
 | Concern | Choice |
@@ -47,29 +114,35 @@ all data access happens in the browser against two backends:
 
 ## 3. High-Level Diagram
 
-```
-                    ┌──────────────────────────────────────────┐
-   Browser          │  Static site (Cloudflare Pages)           │
-   (all logic) ───► │  Next.js App Router export → out/         │
-                    └──────────────────────────────────────────┘
-                          │                    │             │
-             anon key     │                    │  REST +     │  fetch CSV
-             (client)     ▼                    │  SignalR    ▼
-                    ┌─────────────┐     ┌───────────────┐  ┌──────────────┐
-                    │  Supabase   │     │  .NET Ops API │  │ public/data/ │
-                    │  (Postgres, │     │  downloads.…  │  │  *.csv       │
-                    │   Realtime, │     │  /operationsHub│ └──────────────┘
-                    │   RLS OFF)  │     └───────────────┘
-                    └─────────────┘
-                          ▲
-              service key │  (offline)
-                    ┌─────────────────────────┐
-                    │  sync-deputy.js (Node)   │  ← SharePoint/Graph roster
-                    └─────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph client["Browser (all app logic runs here)"]
+        APP["Next.js App Router<br/>static export → out/<br/>served by Cloudflare Pages"]
+    end
+
+    SUPA[("Supabase<br/>Postgres + Realtime<br/>RLS DISABLED")]
+    OPS["`.NET Ops API<br/>downloads.premierdata-technology.com<br/>REST + /operationsHub`"]
+    CSV["public/data/*.csv<br/>AWS + Cloudflare costs/usage"]
+
+    APP -->|"anon key (client)"| SUPA
+    APP -->|"REST + SignalR"| OPS
+    APP -->|"fetch at runtime"| CSV
+
+    subgraph offline["Offline / CI (not in the browser)"]
+        SYNC["sync-deputy.js (Node)"]
+        SP["SharePoint / MS Graph<br/>roster spreadsheet"]
+    end
+    SP --> SYNC
+    SYNC -->|"service key, upsert"| SUPA
+
+    DEV["Developer"] -->|"git push main"| PAGES["Cloudflare Pages<br/>auto-build + deploy"]
+    PAGES --> APP
+    DEV -.->|"run migrations/*.sql manually"| SUPA
 ```
 
 Key consequence: **data fetching is entirely client-side**. There is no
-Next.js server or API route in production (`app/api/tt-data` is empty).
+Next.js server or API route in production (`app/api/tt-data` is empty). The
+browser holds the Supabase anon key and talks to every backend directly.
 
 ---
 

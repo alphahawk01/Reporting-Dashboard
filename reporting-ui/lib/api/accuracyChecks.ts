@@ -7,11 +7,41 @@ import type {
     ComparisonResult,
     CategoryBreakdown,
     TeamBreakdown,
+    Instance,
 } from "@/lib/comparison/xml-compare";
+import { jsonEventsToInstances } from "@/lib/comparison/json-adapter";
 import {
     computePlayerAccuracyByScope,
     type StoredPlayerAccuracy,
 } from "@/lib/comparison/player-accuracy";
+
+/**
+ * Turn a stored raw source string into instances, regardless of whether it's
+ * SportsCode XML or a JSON event feed. The accuracy page can now grade a JSON
+ * feed on either side, in which case `xml_master`/`xml_analyst` holds JSON
+ * text — running parseInstances (which uses DOMParser and looks for
+ * <instance> elements) on that silently returns [], which is exactly what made
+ * saved checks recompute against an empty side and show a wrong (near-zero)
+ * accuracy vs the live view. Detect JSON by a leading "{" and route it through
+ * the same adapter the UI uses, so the stored numbers match the live ones.
+ */
+export function instancesFromRaw(raw: string | null | undefined): Instance[] {
+    if (!raw) return [];
+    if (raw.trimStart().startsWith("{")) {
+        try {
+            const parsed = JSON.parse(raw) as {
+                allStatistics?: Parameters<typeof jsonEventsToInstances>[0];
+            };
+            if (Array.isArray(parsed.allStatistics)) {
+                return jsonEventsToInstances(parsed.allStatistics, {});
+            }
+            return [];
+        } catch {
+            return [];
+        }
+    }
+    return parseInstances(raw);
+}
 
 /**
  * A saved accuracy check row (mirrors the accuracy_checks table).
@@ -93,8 +123,10 @@ function computeStoredPlayerAccuracy(
 ): StoredPlayerAccuracy | null {
     if (!xmlMaster || !xmlAnalyst) return null;
     try {
-        const master = parseInstances(xmlMaster);
-        const analyst = parseInstances(xmlAnalyst);
+        // Either side may be a JSON feed (not XML) now, so resolve via the
+        // format-aware helper rather than parseInstances directly.
+        const master = instancesFromRaw(xmlMaster);
+        const analyst = instancesFromRaw(xmlAnalyst);
         if (master.length === 0) return null;
         return computePlayerAccuracyByScope(
             master,
@@ -299,7 +331,7 @@ export async function propagateMasterCorrection(
         throw new Error(error.message || "Failed loading checks for master");
     }
 
-    const master = parseInstances(xmlMaster);
+    const master = instancesFromRaw(xmlMaster);
     const analysts = new Set<string>();
     let updated = 0;
 
@@ -310,9 +342,7 @@ export async function propagateMasterCorrection(
         xml_analyst: string | null;
         file_name_master: string | null;
     }[]) {
-        const analystInstances = row.xml_analyst
-            ? parseInstances(row.xml_analyst)
-            : [];
+        const analystInstances = instancesFromRaw(row.xml_analyst);
         const tol = row.tolerance ?? 3;
         // Recompute against this check's own analyst, using the corrected
         // master. (compareInstances canonicalises teams internally.)

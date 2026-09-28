@@ -198,7 +198,7 @@ const STAT_START_OFFSETS: {
  *     clamped so it never runs past the window end.
  *   - Everything else: the midpoint of start and end.
  */
-function codeTime(stat: string, start: number, end: number): number {
+export function codeTime(stat: string, start: number, end: number): number {
   const s = normStat(stat);
   const rule = STAT_START_OFFSETS.find((r) =>
     r.exact ? s === r.keyword : s.includes(r.keyword)

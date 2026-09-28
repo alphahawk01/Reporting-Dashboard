@@ -38,6 +38,7 @@ import {
   recomputeAllPlayerAccuracy,
   diagnoseMasterConsistency,
   fixStaleMasterTotals,
+  instancesFromRaw,
   type AccuracyCheckMeta,
   type MasterConsistencyReport,
   type MasterSiblingCheck,
@@ -146,10 +147,11 @@ function fixtureGroupAccuracy(
     return stored[scope] ?? null;
   }
 
-  // Fallback: compute from XML (only until this check is backfilled).
+  // Fallback: compute from the raw source (only until this check is
+  // backfilled). Either side may be a JSON feed, so resolve format-aware.
   if (!xml?.xml_master || !xml?.xml_analyst) return null;
-  const master = parseInstances(xml.xml_master);
-  const analyst = parseInstances(xml.xml_analyst);
+  const master = instancesFromRaw(xml.xml_master);
+  const analyst = instancesFromRaw(xml.xml_analyst);
   const tol = check.tolerance ?? 3;
   const canon = canonicaliseTeams(master, analyst, tol, check.file_name_master);
 

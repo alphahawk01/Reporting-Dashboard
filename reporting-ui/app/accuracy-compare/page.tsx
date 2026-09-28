@@ -62,6 +62,10 @@ import {
   type StatBreakdown,
 } from "@/lib/comparison/xml-compare";
 import {
+  jsonEventsToInstances,
+  type JsonEvent,
+} from "@/lib/comparison/json-adapter";
+import {
   generateInsights,
   generateRecommendations,
 } from "@/lib/comparison/insights";
@@ -77,7 +81,18 @@ const ACCENT = "red-600"; // was pd-red
 const ACCENT_BG = "bg-red-600";
 const ACCENT_TEXT = "text-red-600";
 
-type LoadedFile = { name: string; instances: Instance[]; raw: string };
+type LoadedFile = {
+  name: string;
+  instances: Instance[];
+  raw: string;
+  /**
+   * Where the instances came from. "xml" = a SportsCode XML export (the
+   * default). "json" = a JSON event feed converted via jsonEventsToInstances
+   * (see the analyst dropzone). Used to badge the source and to skip
+   * XML-only affordances (master edit/serialize) for JSON-sourced files.
+   */
+  kind?: "xml" | "json";
+};
 
 const STATUS_META: Record<
   MatchStatus,
@@ -138,18 +153,88 @@ const TONE_META = {
   },
 };
 
+/**
+ * Shape of the JSON event feed (as delivered by the match data API). The
+ * timed events live in `allStatistics`; the team names/uids give an
+ * authoritative Home/Away signal. Only the fields the adapter needs are
+ * described here — extra fields are ignored.
+ */
+type FeedJson = {
+  homeTeamName?: string;
+  awayTeamName?: string;
+  homeTeamUid?: number;
+  awayTeamUid?: number;
+  allStatistics?: JsonEvent[];
+};
+
+/**
+ * Convert a JSON feed's text into a LoadedFile. Throws with a human-readable
+ * message when the JSON isn't a recognised feed (no `allStatistics` array) so
+ * the dropzone can surface it. The original JSON text is kept as `raw` so it
+ * can be re-downloaded/saved unchanged (it is NOT valid XML, so the master
+ * edit/serialize path is disabled for json-sourced files — see `kind`).
+ */
+function loadedFileFromJson(name: string, text: string): LoadedFile {
+  let parsed: FeedJson;
+  try {
+    parsed = JSON.parse(text) as FeedJson;
+  } catch {
+    throw new Error("That .json file isn't valid JSON.");
+  }
+  const events = parsed.allStatistics;
+  if (!Array.isArray(events)) {
+    throw new Error(
+      'This JSON has no "allStatistics" array — is it a match event feed?'
+    );
+  }
+  const instances = jsonEventsToInstances(events, {});
+  if (instances.length === 0) {
+    throw new Error("No timed events found in this feed.");
+  }
+  return { name, instances, raw: text, kind: "json" };
+}
+
+/**
+ * Rebuild a LoadedFile from stored raw text (used when re-opening a saved
+ * check). Detects a JSON feed by file name (.json) or a leading "{" and routes
+ * it through the adapter; otherwise treats the text as SportsCode XML. Keeps
+ * re-opened checks consistent with how the file was originally uploaded — a
+ * JSON-sourced analyst would otherwise parse to zero instances via
+ * parseInstances and silently vanish on reload.
+ */
+function loadedFileFromRaw(name: string, raw: string): LoadedFile {
+  const isJson = /\.json$/i.test(name) || raw.trimStart().startsWith("{");
+  if (isJson) {
+    try {
+      return loadedFileFromJson(name, raw);
+    } catch {
+      // Fall through to XML parsing if the JSON turns out unreadable, so a
+      // reopen never hard-fails.
+    }
+  }
+  return { name, instances: parseInstances(raw), raw, kind: "xml" };
+}
+
 function Dropzone({
   title,
   subtitle,
   file,
   onLoad,
   onClear,
+  allowJson = false,
 }: {
   title: string;
   subtitle: string;
   file: LoadedFile | null;
   onLoad: (f: LoadedFile) => void;
   onClear: () => void;
+  /**
+   * When true the dropzone also accepts a `.json` event feed, converting it to
+   * instances via jsonEventsToInstances. Used for the analyst side so a match
+   * data feed can be graded against the master XML. The master side stays
+   * XML-only (its edit/serialize/download flow requires real XML).
+   */
+  allowJson?: boolean;
 }) {
   const [error, setError] = useState<string | null>(null);
 
@@ -159,14 +244,25 @@ function Dropzone({
     if (!f) return;
     try {
       const text = await f.text();
+      // Route by extension (falling back to a content sniff): a JSON feed goes
+      // through the adapter, everything else is treated as SportsCode XML.
+      const isJson =
+        allowJson &&
+        (/\.json$/i.test(f.name) || text.trimStart().startsWith("{"));
+      if (isJson) {
+        onLoad(loadedFileFromJson(f.name, text));
+        return;
+      }
       const instances = parseInstances(text);
       if (instances.length === 0) {
         setError("No <instance> entries found in this file.");
         return;
       }
-      onLoad({ name: f.name, instances, raw: text });
-    } catch {
-      setError("Could not read that file.");
+      onLoad({ name: f.name, instances, raw: text, kind: "xml" });
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not read that file."
+      );
     }
   }
 
@@ -186,7 +282,11 @@ function Dropzone({
       >
         <input
           type="file"
-          accept=".xml,text/xml,application/xml"
+          accept={
+            allowJson
+              ? ".xml,.json,text/xml,application/xml,application/json"
+              : ".xml,text/xml,application/xml"
+          }
           className="hidden"
           onChange={(e) => handleFiles(e.target.files)}
         />
@@ -194,11 +294,17 @@ function Dropzone({
           <>
             <FileText className="shrink-0 text-emerald-600" size={20} />
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-slate-900">
-                {file.name}
+              <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-slate-900">
+                <span className="truncate">{file.name}</span>
+                {file.kind === "json" && (
+                  <span className="shrink-0 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-700">
+                    JSON feed
+                  </span>
+                )}
               </p>
               <p className="text-xs text-slate-500">
-                {file.instances.length} instances parsed
+                {file.instances.length}{" "}
+                {file.kind === "json" ? "events converted" : "instances parsed"}
               </p>
             </div>
           </>
@@ -838,8 +944,13 @@ function AccuracyCompareInner() {
   // Only admins/super admins may EDIT the master (fix a mis-coded player/stat,
   // remove a bad instance, or add one the master missed). Edits recompute the
   // accuracy live and can be downloaded / saved as a corrected master.
+  // Master editing is admin-only AND requires a real XML master: the edit /
+  // download / propagate flow serializes back to SportsCode XML, which a JSON
+  // feed can't round-trip through. So a JSON-sourced master is read-only —
+  // still fully comparable, just not correctable in place.
+  const masterIsJson = master?.kind === "json";
   const canEditMaster =
-    user?.role === "admin" || user?.role === "super_admin";
+    (user?.role === "admin" || user?.role === "super_admin") && !masterIsJson;
 
   // Which master instance is being edited (by id), or "new" to add one.
   const [editingMaster, setEditingMaster] = useState<Instance | "new" | null>(
@@ -1345,20 +1456,22 @@ function AccuracyCompareInner() {
       if (!check || cancelled) return;
 
       if (check.xml_master) {
-        const instances = parseInstances(check.xml_master);
-        setMaster({
-          name: check.file_name_master ?? "master.xml",
-          instances,
-          raw: check.xml_master,
-        });
+        setMaster(
+          loadedFileFromRaw(
+            check.file_name_master ?? "master.xml",
+            check.xml_master
+          )
+        );
       }
       if (check.xml_analyst) {
-        const instances = parseInstances(check.xml_analyst);
-        setAnalyst({
-          name: check.file_name_analyst ?? "analyst.xml",
-          instances,
-          raw: check.xml_analyst,
-        });
+        // The analyst side may have been a JSON feed (kind "json"); rebuild it
+        // the same way it was uploaded so it doesn't parse to zero instances.
+        setAnalyst(
+          loadedFileFromRaw(
+            check.file_name_analyst ?? "analyst.xml",
+            check.xml_analyst
+          )
+        );
       }
       if (check.tolerance != null) setTolerance(check.tolerance);
       if (check.master_analyst_name) setMasterAnalyst(check.master_analyst_name);
@@ -2058,9 +2171,10 @@ function AccuracyCompareInner() {
             </h1>
             <div className={`mt-3 h-1 w-12 rounded-full ${ACCENT_BG}`} />
             <p className="mt-3 max-w-2xl text-sm text-slate-600">
-              Upload a master XML and an analyst XML to grade accuracy.
-              Instances are matched by timestamp (within the tolerance), then
-              compared on team, player number and stat.
+              Upload a master and an analyst file (SportsCode XML, or a JSON
+              event feed) to grade accuracy. Instances are matched by timestamp
+              (within the tolerance), then compared on team, player number and
+              stat.
             </p>
           </div>
           <Link
@@ -2131,10 +2245,14 @@ function AccuracyCompareInner() {
               </span>
             </p>
             <Dropzone
-              title="Upload master XML"
-              subtitle="Drag & drop or click"
+              title="Upload master XML or JSON feed"
+              subtitle="Drag & drop or click — .xml or .json"
               file={master}
-              onLoad={setMaster}
+              allowJson
+              onLoad={(f) => {
+                setMaster(f);
+                if (f.kind === "json") setSport("football");
+              }}
               onClear={() => setMaster(null)}
             />
             {savedMasters.length > 0 && (
@@ -2210,10 +2328,17 @@ function AccuracyCompareInner() {
               <span className="font-normal text-slate-400">(being graded)</span>
             </p>
             <Dropzone
-              title="Upload analyst XML"
-              subtitle="Drag & drop or click"
+              title="Upload analyst XML or JSON feed"
+              subtitle="Drag & drop or click — .xml or .json"
               file={analyst}
-              onLoad={setAnalyst}
+              allowJson
+              onLoad={(f) => {
+                setAnalyst(f);
+                // A JSON event feed is football data, so switch the per-player
+                // stats table to Football automatically. (XML uploads leave
+                // the sport as-is / inferred elsewhere.)
+                if (f.kind === "json") setSport("football");
+              }}
               onClear={() => setAnalyst(null)}
             />
             <div className="mt-2">
@@ -2354,6 +2479,35 @@ function AccuracyCompareInner() {
 
         {result && (
           <>
+            {/* Low-score hint. A JSON feed and an XML master are often coded
+                independently (different match clock, event counts and player
+                attribution), so a very low exact-match rate usually means the
+                two sources genuinely disagree rather than the analyst being
+                "wrong". Surfaced only when a JSON feed is involved and the
+                overall accuracy is low, so normal XML-vs-XML checks are
+                unaffected. */}
+            {(master?.kind === "json" || analyst?.kind === "json") &&
+              result.summary.masterTotal > 0 &&
+              result.summary.accuracy < 0.4 && (
+                <div className="mt-4 flex items-start gap-2.5 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+                  <Info className="mt-0.5 shrink-0 text-sky-600" size={16} />
+                  <div>
+                    <p className="font-semibold">
+                      Low match rate — the two sources may be coded
+                      independently.
+                    </p>
+                    <p className="mt-1 text-sky-800">
+                      A JSON feed and an XML file are often produced from
+                      separate coding passes, so their event clocks, counts and
+                      player attribution rarely line up exactly. A low exact-match
+                      rate here usually reflects that genuine disagreement, not an
+                      analyst error. For a meaningful score, compare a JSON feed
+                      against a master coded from the same pass.
+                    </p>
+                  </div>
+                </div>
+              )}
+
             {/* Save allocation bar */}
             <div className="mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="text-sm font-semibold text-slate-700">
