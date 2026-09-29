@@ -17,7 +17,6 @@ import {
   parseUsageDaily,
   usageByDayOfWeek,
   formatMoney,
-  CLOUDFLARE_COST_COLUMNS,
   type CloudflareCostData,
   type CloudflareCostKey,
   type UsageDailyRow,
@@ -34,6 +33,25 @@ const COST_COLORS: Record<CloudflareCostKey, string> = {
   excessData: "#f59e0b", // amber
   excessStorage: "#10b981", // emerald
 };
+
+// The cost segments shown on the chart (bars + tooltip breakdown). Unlike the
+// detail table (which lists every charge type separately), the chart combines
+// Service Cost and Upsell Service into a single "Service" segment. Keyed on
+// ChartRow fields.
+type ChartCostSegment = {
+  key: "serviceTotal" | "excessData" | "excessStorage";
+  label: string;
+  color: string;
+};
+const CHART_COST_SEGMENTS: ChartCostSegment[] = [
+  { key: "serviceTotal", label: "Service", color: COST_COLORS.serviceCost },
+  { key: "excessData", label: "Excess Data", color: COST_COLORS.excessData },
+  {
+    key: "excessStorage",
+    label: "Excess Storage",
+    color: COST_COLORS.excessStorage,
+  },
+];
 const DATA_COLOR = "#334155"; // slate — data-transfer usage line
 const STORAGE_COLOR = "#e11d48"; // rose — storage usage line
 
@@ -64,7 +82,7 @@ function CombinedTooltip({
   if (!active || !payload || payload.length === 0) return null;
   const row = payload[0]?.payload;
   if (!row) return null;
-  const components = CLOUDFLARE_COST_COLUMNS.filter((c) => row[c.key] > 0);
+  const components = CHART_COST_SEGMENTS.filter((c) => row[c.key] > 0);
   return (
     <div
       style={{
@@ -99,32 +117,27 @@ function CombinedTooltip({
       {components.map((c) => (
         <Line2
           key={c.key}
-          color={COST_COLORS[c.key]}
+          color={c.color}
           name={c.label}
           value={formatMoney(row[c.key])}
         />
       ))}
-      {/* Usage lines. */}
+      {/* Excess usage only — the volume OVER the included allowance. When a
+          period is within allowance there's no excess, so it's labelled as
+          such rather than showing the full usage. */}
       <div style={{ borderTop: "1px solid #f1f5f9", marginTop: 4, paddingTop: 4 }}>
         <Line2
           color={DATA_COLOR}
-          name="Data transfer"
-          value={row.dataTB != null ? fmtTB(row.dataTB) : `≤ ${row.dataLimit} TB`}
+          name="Data over allowance"
+          value={row.dataOverTB != null ? fmtTB(row.dataOverTB) : "within allowance"}
         />
-        {row.dataPerDayTB != null && (
-          <Line2
-            color={DATA_COLOR}
-            name="Avg data / day"
-            value={`${row.dataPerDayTB.toFixed(1)} TB`}
-          />
-        )}
         <Line2
           color={STORAGE_COLOR}
-          name="Storage"
+          name="Storage over allowance"
           value={
-            row.storageTB != null
-              ? fmtTB(row.storageTB)
-              : `≤ ${row.storageLimit} TB`
+            row.storageOverTB != null
+              ? fmtTB(row.storageOverTB)
+              : "within allowance"
           }
         />
       </div>
@@ -163,11 +176,12 @@ function Line2({ color, name, value }: { color: string; name: string; value: str
 type ChartRow = {
   label: string;
   cost: number;
-  dataTB: number | null;
-  dataPerDayTB: number | null;
-  storageTB: number | null;
-  dataLimit: number;
-  storageLimit: number;
+  /** Service Cost + Upsell Service combined (the chart's "Service" segment). */
+  serviceTotal: number;
+  /** TB of DATA over the included allowance (null = within allowance). */
+  dataOverTB: number | null;
+  /** TB of STORAGE over the included allowance (null = within allowance). */
+  storageOverTB: number | null;
 } & Record<CloudflareCostKey, number>;
 
 export default function CloudflareCosts() {
@@ -217,33 +231,30 @@ export default function CloudflareCosts() {
     };
   }, []);
 
-  // One row per billed period: total cost (bars) + derived usage in TB (lines).
+  // One row per billed period: total cost (bars) + the EXCESS usage in TB
+  // (lines) — i.e. only the volume OVER the included allowance, not the full
+  // amount. A null means the period stayed within allowance (no excess), so
+  // the line has a gap there rather than a point.
   const chartData = useMemo<ChartRow[]>(() => {
     if (!data) return [];
     return data.periods.map((p) => {
-      // Prefer the EXACT data transfer from the usage sheet; fall back to the
-      // excess-derived figure when the usage sheet doesn't cover the period.
-      const dataTB =
-        p.usage.dataActualTB != null
-          ? p.usage.dataActualTB
-          : p.usage.dataTB != null
-            ? Number(p.usage.dataTB.toFixed(2))
-            : null;
       return {
         label: p.label,
         cost: Number(p.total.toFixed(2)),
         serviceCost: Number(p.costs.serviceCost.toFixed(2)),
         upsellService: Number(p.costs.upsellService.toFixed(2)),
+        // Service Cost + Upsell Service shown as one combined bar segment.
+        serviceTotal: Number(
+          (p.costs.serviceCost + p.costs.upsellService).toFixed(2)
+        ),
         excessData: Number(p.costs.excessData.toFixed(2)),
         excessStorage: Number(p.costs.excessStorage.toFixed(2)),
-        dataTB,
-        dataPerDayTB: p.usage.dataActualPerDayTB,
-        storageTB:
-          p.usage.storageTB != null
-            ? Number(p.usage.storageTB.toFixed(2))
+        dataOverTB:
+          p.usage.dataOverTB > 0 ? Number(p.usage.dataOverTB.toFixed(2)) : null,
+        storageOverTB:
+          p.usage.storageOverTB > 0
+            ? Number(p.usage.storageOverTB.toFixed(2))
             : null,
-        dataLimit: p.usage.tier.dataLimitTB,
-        storageLimit: p.usage.tier.storageLimitTB,
       };
     });
   }, [data]);
@@ -320,6 +331,15 @@ export default function CloudflareCosts() {
   const first = data.periods[0];
   const last = data.periods[data.periods.length - 1];
 
+  // Table column totals, using the same grouping as the chart: "Service" =
+  // Service Cost + Upsell Service; "Usage-driven" = Excess Data + Excess
+  // Storage only. (data.baseTotal/excessTotal use a different split, so derive
+  // these from the per-component totals instead.)
+  const serviceTotal =
+    data.componentTotals.serviceCost + data.componentTotals.upsellService;
+  const usageDrivenTotal =
+    data.componentTotals.excessData + data.componentTotals.excessStorage;
+
   return (
     <div className="space-y-5">
       <p className="text-xs text-zinc-500">Figures in AUD (USD × 1.4)</p>
@@ -337,14 +357,18 @@ export default function CloudflareCosts() {
           sub={`${periodCount} billing periods`}
         />
         <Card
-          title="Base subscription"
-          value={formatMoney(data.baseTotal)}
-          sub="fixed monthly plan"
+          title="Service"
+          value={formatMoney(serviceTotal)}
+          sub="subscription + upsell"
         />
         <Card
           title="Usage-driven"
-          value={formatMoney(data.excessTotal)}
-          sub={`+${data.pctOverBase.toFixed(0)}% over base`}
+          value={formatMoney(usageDrivenTotal)}
+          sub={
+            serviceTotal > 0
+              ? `+${((usageDrivenTotal / serviceTotal) * 100).toFixed(0)}% over service`
+              : "excess data + storage"
+          }
         />
       </div>
 
@@ -356,9 +380,10 @@ export default function CloudflareCosts() {
           </h3>
           <p className="text-sm text-zinc-500">
             Bars = cost per billing period, stacked by charge type (left axis).
-            Lines = data transfer and storage in TB (right axis). A gap in the
-            storage line = usage stayed within the included allowance that
-            period, so the exact volume isn&apos;t billed.
+            Lines = data transfer and storage OVER the included allowance, in TB
+            (right axis) — only the excess is shown, not the full usage. A gap
+            in a line = that period stayed within allowance, so nothing was
+            billed for it.
           </p>
         </div>
 
@@ -400,16 +425,16 @@ export default function CloudflareCosts() {
                 content={<CombinedTooltip />}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              {CLOUDFLARE_COST_COLUMNS.map((c, i) => (
+              {CHART_COST_SEGMENTS.map((c, i) => (
                 <Bar
                   key={c.key}
                   yAxisId="cost"
                   dataKey={c.key}
                   name={c.label}
                   stackId="cost"
-                  fill={COST_COLORS[c.key]}
+                  fill={c.color}
                   radius={
-                    i === CLOUDFLARE_COST_COLUMNS.length - 1
+                    i === CHART_COST_SEGMENTS.length - 1
                       ? [6, 6, 0, 0]
                       : undefined
                   }
@@ -419,8 +444,8 @@ export default function CloudflareCosts() {
               <Line
                 yAxisId="tb"
                 type="monotone"
-                dataKey="dataTB"
-                name="Data transfer (TB)"
+                dataKey="dataOverTB"
+                name="Data over allowance (TB)"
                 stroke={DATA_COLOR}
                 strokeWidth={2.5}
                 dot={{ r: 3 }}
@@ -429,8 +454,8 @@ export default function CloudflareCosts() {
               <Line
                 yAxisId="tb"
                 type="monotone"
-                dataKey="storageTB"
-                name="Storage (TB)"
+                dataKey="storageOverTB"
+                name="Storage over allowance (TB)"
                 stroke={STORAGE_COLOR}
                 strokeWidth={2.5}
                 dot={{ r: 3 }}
@@ -454,7 +479,7 @@ export default function CloudflareCosts() {
                 <th className="px-3 py-2 text-right">Data transfer</th>
                 <th className="px-3 py-2 text-right">Data / day</th>
                 <th className="px-3 py-2 text-right">Storage</th>
-                <th className="px-3 py-2 text-right">Base</th>
+                <th className="px-3 py-2 text-right">Service</th>
                 <th className="px-3 py-2 text-right">Usage-driven</th>
                 <th className="px-3 py-2 text-right font-semibold text-zinc-700">
                   Total cost
@@ -504,10 +529,12 @@ export default function CloudflareCosts() {
                     )}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-zinc-600">
-                    {formatMoney(p.base)}
+                    {formatMoney(p.costs.serviceCost + p.costs.upsellService)}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums text-zinc-600">
-                    {p.excess > 0 ? formatMoney(p.excess) : "—"}
+                    {p.costs.excessData + p.costs.excessStorage > 0
+                      ? formatMoney(p.costs.excessData + p.costs.excessStorage)
+                      : "—"}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right font-semibold tabular-nums text-zinc-800">
                     {formatMoney(p.total)}
@@ -519,10 +546,10 @@ export default function CloudflareCosts() {
                   Total ({periodCount} periods)
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
-                  {formatMoney(data.baseTotal)}
+                  {formatMoney(serviceTotal)}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
-                  {formatMoney(data.excessTotal)}
+                  {formatMoney(usageDrivenTotal)}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
                   {formatMoney(data.grandTotal)}
