@@ -27,6 +27,8 @@ import {
   MessageSquare,
   GraduationCap,
   ExternalLink,
+  CloudDownload,
+  ListVideo,
 } from "lucide-react";
 
 import { useEffect, useState } from "react";
@@ -97,6 +99,16 @@ const sections = [
       title: "Fixtures",
       href: "/fixtures",
       icon: CalendarDays,
+    },
+    {
+      title: "Comp Fixtures",
+      href: "/comp-fixtures",
+      icon: CloudDownload,
+    },
+    {
+      title: "Fixture Review",
+      href: "/fixture-review",
+      icon: ListVideo,
     },
     {
       title: "Competitions",

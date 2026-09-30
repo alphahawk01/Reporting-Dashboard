@@ -35,6 +35,7 @@ import type { DeputyShift } from "@/types/deputy";
 import type { TTGame } from "@/types/ttgame";
 import { supabase } from "@/lib/supabase";
 import { buildAnalystMetrics } from "@/lib/analytics/buildAnalystMetrics";
+import { getCompAllocationGames } from "@/lib/api/compFixtures";
 import type { AnalystMetrics } from "@/types/analyst";
 import { useAuth } from "@/components/auth/AuthContext";
 
@@ -119,6 +120,58 @@ async function fetchAll<T>(table: string): Promise<T[]> {
 
 const shiftsData = await fetchAll<DeputyShift>("deputy_shifts");
 const gamesData = await fetchAll<TTGame>("TT_Games");
+
+      // Merge comp-fixture allocations (home/away team-side analyst) so a
+      // fixture shows in an analyst's profile when they're allocated to either
+      // side — even if it isn't in TT_Games (or has no allocation there yet).
+      // We only ADD an allocation the TT_Games set doesn't already carry (same
+      // game_key + side + analyst), so games aren't double-counted.
+      try {
+        const compGames = await getCompAllocationGames();
+        if (compGames.length > 0) {
+          const norm = (v: unknown) =>
+            String(v ?? "").trim().toLowerCase();
+          // Existing (game_key|side|analyst) tuples from TT_Games.
+          const existing = new Set<string>();
+          for (const g of gamesData) {
+            const gk = norm(g.game_key);
+            if (g.home_allocated)
+              existing.add(`${gk}|home|${norm(g.home_allocated)}`);
+            if (g.away_allocated)
+              existing.add(`${gk}|away|${norm(g.away_allocated)}`);
+          }
+
+          let nextId = -1; // synthetic negative ids so they don't clash
+          for (const cg of compGames) {
+            const gk = norm(cg.game_key);
+            const side = cg.home_allocated ? "home" : "away";
+            const analyst = cg.home_allocated ?? cg.away_allocated ?? "";
+            const tupleKey = `${gk}|${side}|${norm(analyst)}`;
+            if (existing.has(tupleKey)) continue; // already counted
+            existing.add(tupleKey);
+
+            gamesData.push({
+              id: nextId--,
+              downloadPercent: null,
+              fileSizeBytes: null,
+              Week: cg.Week,
+              Date: cg.Date,
+              Competition: cg.Competition,
+              Round: cg.Round,
+              home_team: cg.home_team,
+              away_team: cg.away_team,
+              home_allocated: cg.home_allocated,
+              away_allocated: cg.away_allocated,
+              expected_day: null,
+              game_key: cg.game_key,
+              videoURL: cg.videoURL,
+            });
+          }
+        }
+      } catch (err) {
+        // Comp allocations are supplementary — never block the profile.
+        console.error("Failed merging comp-fixture allocations:", err);
+      }
 
       // Fetch team logos from Supabase
       try {

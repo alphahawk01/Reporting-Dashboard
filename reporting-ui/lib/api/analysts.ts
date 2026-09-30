@@ -695,3 +695,63 @@ export async function getPlatformAnalystNames(): Promise<string[]> {
 
     return names.sort((a, b) => a.localeCompare(b));
 }
+
+
+/**
+ * A single, consolidated analyst identity used across the platform. `id` is the
+ * .NET AutoDownload analyst id when known (else null); `name` is the canonical
+ * display name and the stable key used for matching everywhere else.
+ */
+export interface ConsolidatedAnalyst {
+    /** .NET AutoDownload analyst id, when this name exists there; else null. */
+    id: number | null;
+    name: string;
+}
+
+/**
+ * The consolidated analyst list — the SAME set Analyst Management shows: the
+ * .NET AutoDownload analysts merged with the shared Supabase `analysts` table,
+ * de-duplicated by (lowercased) name. This is the platform's single source of
+ * truth for "who are the analysts" and should be used anywhere the app needs to
+ * pick an analyst (e.g. allocating a fixture).
+ *
+ * Each source is caught independently: if the .NET API is unreachable (as in
+ * local dev), the Supabase analysts still return — mirroring how Analyst
+ * Management degrades. Names are returned sorted.
+ */
+export async function getAllAnalysts(): Promise<ConsolidatedAnalyst[]> {
+    const byLower = new Map<string, ConsolidatedAnalyst>();
+
+    const add = (name: string | null | undefined, id: number | null) => {
+        const clean = (name ?? "").trim();
+        if (!clean) return;
+        const key = clean.toLowerCase();
+        const existing = byLower.get(key);
+        if (!existing) {
+            byLower.set(key, { id, name: clean });
+        } else if (existing.id == null && id != null) {
+            // Prefer the entry that carries a .NET id (so allocation can use it).
+            existing.id = id;
+        }
+    };
+
+    // .NET AutoDownload analysts (may be unreachable in dev — caught).
+    try {
+        const dotnet = await getAnalysts();
+        for (const a of dotnet) add(a.name, a.id);
+    } catch (err) {
+        console.error("getAllAnalysts: .NET analysts failed", err);
+    }
+
+    // Shared Supabase analysts table (platform source of truth).
+    try {
+        const platform = await getPlatformAnalysts();
+        for (const a of platform) add(a.name, null);
+    } catch (err) {
+        console.error("getAllAnalysts: platform analysts failed", err);
+    }
+
+    return Array.from(byLower.values()).sort((a, b) =>
+        a.name.localeCompare(b.name)
+    );
+}

@@ -127,6 +127,13 @@ export async function getFixtures() {
 }
 
 
+// The size-check endpoint is a pure, read-only Cloudflare HEAD lookup that
+// works against the DEPLOYED API even from a dev machine. The Fixtures tab
+// keeps using the environment-specific API_URL (its download/assignment flow
+// needs the local pipeline), but callers that only want a size — e.g. the
+// Comp Fixtures tab — can use this to avoid depending on a local API running.
+const SIZE_CHECK_API = "https://downloads.premierdata-technology.com";
+
 export async function checkFileSize(videoUrl: string): Promise<number | null> {
 
     try {
@@ -139,6 +146,30 @@ export async function checkFileSize(videoUrl: string): Promise<number | null> {
 
         const data = await response.json();
 
+        return data.fileSizeBytes ?? null;
+    } catch {
+        return null;
+    }
+}
+
+
+/**
+ * Same Cloudflare HEAD size check as checkFileSize, but ALWAYS against the
+ * deployed API (never localhost). Use from tabs that just need a file size and
+ * shouldn't depend on the local download API running (e.g. Comp Fixtures).
+ */
+export async function checkFileSizeRemote(
+    videoUrl: string
+): Promise<number | null> {
+    try {
+        const response = await fetch(
+            `${SIZE_CHECK_API}/api/fixtures/check-size?url=${encodeURIComponent(
+                videoUrl
+            )}`,
+            { cache: "no-store" }
+        );
+        if (!response.ok) return null;
+        const data = await response.json();
         return data.fileSizeBytes ?? null;
     } catch {
         return null;
