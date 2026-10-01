@@ -89,13 +89,13 @@ export async function getReviewFixturesFromComps(filters: {
   });
 }
 
-/** Human title for a fixture, e.g. "Brighton Grammar vs Geelong College — APS R11". */
+/** Human title for a fixture, e.g. "APS Round 11 - Brighton Grammar vs Geelong College". */
 export function fixtureTitle(f: ReviewFixture): string {
   const teams = `${f.homeTeam} vs ${f.awayTeam}`;
-  const comp = [f.competition, f.round ? `R${f.round}` : ""]
+  const comp = [f.competition, f.round ? `Round ${f.round}` : ""]
     .filter(Boolean)
     .join(" ");
-  return comp ? `${teams} — ${comp}` : teams;
+  return comp ? `${comp} - ${teams}` : teams;
 }
 
 /**
