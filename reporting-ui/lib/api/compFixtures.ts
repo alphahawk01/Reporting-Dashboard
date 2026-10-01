@@ -887,7 +887,21 @@ export async function incrementalSync(opts?: {
     async (uid) => {
       const head = await headCompetition(uid, opts?.signal);
       done += 1;
-      if (head.status === "ok" && head.lastModified !== known.get(uid)) {
+      // Decide whether to refetch this comp:
+      //  - HEAD ok + Last-Modified changed  → definitely changed, refetch.
+      //  - HEAD ok but no Last-Modified     → can't compare, refetch to be safe.
+      //  - HEAD "error" (e.g. CORS blocks HEAD on the S3 object in the browser,
+      //    or a transient failure) → can't tell, refetch rather than silently
+      //    skip. A GET works even when HEAD doesn't, so this self-heals the
+      //    case where an edited comp was being missed.
+      // Only a definitive "missing" (403/404 → the file doesn't exist) is
+      // skipped, since there's nothing to fetch.
+      const refetch =
+        (head.status === "ok" &&
+          (head.lastModified == null ||
+            head.lastModified !== known.get(uid))) ||
+        head.status === "error";
+      if (refetch) {
         const r = await syncOne(uid, opts?.signal);
         if (r.status === "ok") {
           changed += 1;
