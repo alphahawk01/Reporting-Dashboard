@@ -866,6 +866,26 @@ export async function fullSync(opts?: {
  *   2. Probe for NEW comp ids past the highest known one.
  * This is what a scheduled/regular job (or an on-load-if-stale trigger) runs.
  */
+/**
+ * Force a re-fetch + re-store of specific competition uids, ignoring the
+ * HEAD/last-modified short-circuit that incrementalSync uses. Needed when the
+ * PARSING rules change (not the source file) — e.g. accuracy comps that were
+ * previously dropped by compToFixtures and so never written, even though their
+ * S3 file is unchanged. Returns per-uid fixture counts.
+ */
+export async function resyncCompetitions(
+  uids: number[],
+  signal?: AbortSignal
+): Promise<{ uid: number; status: string; fixtures: number }[]> {
+  const out: { uid: number; status: string; fixtures: number }[] = [];
+  for (const uid of uids) {
+    if (signal?.aborted) break;
+    const r = await syncOne(uid, signal);
+    out.push({ uid, status: r.status, fixtures: r.fixtures });
+  }
+  return out;
+}
+
 export async function incrementalSync(opts?: {
   onProgress?: (p: SyncProgress) => void;
   concurrency?: number;
