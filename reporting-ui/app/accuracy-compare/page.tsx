@@ -1,6 +1,13 @@
 "use client";
 
-import { useMemo, useState, useEffect, useRef, Suspense } from "react";
+import {
+  useMemo,
+  useState,
+  useEffect,
+  useRef,
+  Suspense,
+  type MutableRefObject,
+} from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -1425,6 +1432,10 @@ function AccuracyCompareInner() {
   // mount→cleanup→mount cycle doesn't cancel the one and only fetch.
   const loadedFixtureRef = useRef<string | null>(null);
   const fetchingFixtureRef = useRef<string | null>(null);
+  // Same de-dupe pair for the ANALYST side (loaded from its own fixture report
+  // on S3 via ?analystFixtureId=…).
+  const loadedAnalystFixtureRef = useRef<string | null>(null);
+  const fetchingAnalystFixtureRef = useRef<string | null>(null);
 
   // Re-open a saved check: if the URL has ?check=<id>, load that check
   // from Supabase, parse its stored XML back into master/analyst, and
@@ -1432,64 +1443,86 @@ function AccuracyCompareInner() {
   useEffect(() => {
     const checkId = searchParams.get("check");
     const fixtureId = searchParams.get("fixtureId");
+    const analystFixtureId = searchParams.get("analystFixtureId");
 
-    // Deep-link from the Fixture Accuracy picker: ?fixtureId=<jadeUid>&sport=…
-    // loads the master timeline straight from the S3 fixture report (JSON), so
-    // the analyst only has to drop their own file in. Handled before the
-    // ?check= path; the two are mutually exclusive.
-    if (fixtureId && !checkId) {
-      // Skip if this fixture's master is already loaded, or a fetch for it is
-      // already in flight (guards the Strict Mode double-invoke in dev).
-      if (
-        loadedFixtureRef.current === fixtureId ||
-        fetchingFixtureRef.current === fixtureId
-      ) {
-        return;
-      }
-      fetchingFixtureRef.current = fixtureId;
-      loadedFromUrlRef.current = `fixture:${fixtureId}`;
-
+    // Deep-link from the Fixture Accuracy picker: ?fixtureId=<jadeUid> loads
+    // the MASTER timeline from that fixture's S3 report (JSON), and the
+    // optional ?analystFixtureId=<jadeUid> loads the ANALYST timeline from its
+    // own fixture report — so a comparison can be built entirely from S3 with
+    // no manual uploads. Handled before the ?check= path (mutually exclusive).
+    if ((fixtureId || analystFixtureId) && !checkId) {
       const sportParam = searchParams.get("sport");
       if (sportParam === "afl" || sportParam === "football") {
         setSport(sportParam);
       }
 
-      (async () => {
-        try {
-          const report = await fetchFixtureReport(fixtureId, {
-            cache: "no-store",
-          });
-          const events = Array.isArray(report.allStatistics)
-            ? (report.allStatistics as unknown as JsonEvent[])
-            : [];
-          const instances = jsonEventsToInstances(events, {});
-          const home = report.homeTeamName?.trim();
-          const away = report.awayTeamName?.trim();
-          const label =
-            home && away ? `${home} vs ${away}` : `Fixture ${fixtureId}`;
-          // kind "json": a feed-sourced master — fully comparable, but the
-          // XML-only master edit/serialize affordances stay disabled.
-          setMaster({
-            name: `${label}.json`,
-            instances,
-            raw: JSON.stringify(report),
-            kind: "json",
-          });
-          // Clear any previously-loaded saved check so this is a fresh compare.
-          setLoadedCheckId(null);
-          setCheckAnalystName(null);
-          setDisputes([]);
-          loadedFixtureRef.current = fixtureId;
-        } catch (err) {
-          console.error("Failed loading fixture master from S3:", err);
-          window.alert(
-            `Could not load the master timeline for fixture ${fixtureId}. ` +
-              `The report may not exist yet (it's created once the match is finalised).`
-          );
-        } finally {
-          fetchingFixtureRef.current = null;
-        }
-      })();
+      // Load one side (master or analyst) from a fixture report. De-dupe via a
+      // loaded/fetching ref pair so React 18 Strict Mode's double effect invoke
+      // in dev can't cancel the one fetch (same fix as the master side).
+      const loadSide = (
+        id: string,
+        side: "master" | "analyst",
+        loadedRef: MutableRefObject<string | null>,
+        fetchingRef: MutableRefObject<string | null>
+      ) => {
+        if (loadedRef.current === id || fetchingRef.current === id) return;
+        fetchingRef.current = id;
+        (async () => {
+          try {
+            const report = await fetchFixtureReport(id, { cache: "no-store" });
+            const events = Array.isArray(report.allStatistics)
+              ? (report.allStatistics as unknown as JsonEvent[])
+              : [];
+            const instances = jsonEventsToInstances(events, {});
+            const home = report.homeTeamName?.trim();
+            const away = report.awayTeamName?.trim();
+            const label =
+              home && away ? `${home} vs ${away}` : `Fixture ${id}`;
+            // kind "json": feed-sourced — fully comparable, but XML-only
+            // affordances (master edit/serialize) stay disabled.
+            const loaded: LoadedFile = {
+              name: `${label}.json`,
+              instances,
+              raw: JSON.stringify(report),
+              kind: "json",
+            };
+            if (side === "master") {
+              setMaster(loaded);
+              // Fresh compare — drop any previously-loaded saved check.
+              setLoadedCheckId(null);
+              setCheckAnalystName(null);
+              setDisputes([]);
+            } else {
+              setAnalyst(loaded);
+            }
+            loadedRef.current = id;
+          } catch (err) {
+            console.error(
+              `Failed loading ${side} fixture ${id} from S3:`,
+              err
+            );
+            window.alert(
+              `Could not load the ${side} timeline for fixture ${id}. ` +
+                `The report may not exist yet (it's created once the match is finalised).`
+            );
+          } finally {
+            fetchingRef.current = null;
+          }
+        })();
+      };
+
+      if (fixtureId) {
+        loadedFromUrlRef.current = `fixture:${fixtureId}`;
+        loadSide(fixtureId, "master", loadedFixtureRef, fetchingFixtureRef);
+      }
+      if (analystFixtureId) {
+        loadSide(
+          analystFixtureId,
+          "analyst",
+          loadedAnalystFixtureRef,
+          fetchingAnalystFixtureRef
+        );
+      }
 
       return;
     }

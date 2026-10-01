@@ -75,7 +75,11 @@ export default function AccuracyFixturePage() {
   const [sport, setSport] = useState<string>("Australian Rules Football");
   const [year, setYear] = useState<string>(String(new Date().getFullYear()));
   const [week, setWeek] = useState<string>(currentWeekThursday());
+  // The MASTER fixture (the reference timeline) and the ANALYST fixture (the
+  // one being graded). Both are pulled from S3 by their own fixture id; they
+  // are usually the same match coded under two different fixture ids.
   const [selectedId, setSelectedId] = useState<string>("");
+  const [analystId, setAnalystId] = useState<string>("");
 
   const [sportOptions, setSportOptions] = useState<
     { sport: string; count: number }[]
@@ -198,11 +202,18 @@ export default function AccuracyFixturePage() {
     if (selectedId && !gamesForWeek.some((f) => f.id === selectedId)) {
       setSelectedId("");
     }
-  }, [gamesForWeek, selectedId]);
+    if (analystId && !gamesForWeek.some((f) => f.id === analystId)) {
+      setAnalystId("");
+    }
+  }, [gamesForWeek, selectedId, analystId]);
 
   const selected = useMemo(
     () => gamesForWeek.find((f) => f.id === selectedId) ?? null,
     [gamesForWeek, selectedId]
+  );
+  const analystSelected = useMemo(
+    () => gamesForWeek.find((f) => f.id === analystId) ?? null,
+    [gamesForWeek, analystId]
   );
 
   function startComparison() {
@@ -211,6 +222,10 @@ export default function AccuracyFixturePage() {
       fixtureId: String(selected.jadeFixtureUid),
       sport: sportFlag(selected.sport),
     });
+    // Optional analyst timeline, also pulled from S3 by its fixture id.
+    if (analystSelected?.jadeFixtureUid) {
+      params.set("analystFixtureId", String(analystSelected.jadeFixtureUid));
+    }
     router.push(`/accuracy-compare?${params.toString()}`);
   }
 
@@ -224,9 +239,10 @@ export default function AccuracyFixturePage() {
           <FileCheck2 size={26} /> Fixture Accuracy
         </h1>
         <p className="mt-2 max-w-2xl text-sm text-slate-600">
-          Pick a finalised fixture and we&apos;ll pull its master timeline
-          straight from the match report — no XML upload needed. Then drop in the
-          analyst&apos;s file on the comparison page to grade it.
+          Pick the master fixture (the reference) and, optionally, the analyst
+          fixture being graded. Both timelines are pulled straight from their
+          match reports — no XML upload needed. You can still add or swap the
+          analyst file on the comparison screen.
         </p>
       </div>
 
@@ -241,6 +257,7 @@ export default function AccuracyFixturePage() {
               onChange={(e) => {
                 setSport(e.target.value);
                 setSelectedId("");
+                setAnalystId("");
               }}
               className={selectClass}
             >
@@ -262,6 +279,7 @@ export default function AccuracyFixturePage() {
               onChange={(e) => {
                 setYear(e.target.value);
                 setSelectedId("");
+                setAnalystId("");
               }}
               className={selectClass}
             >
@@ -283,6 +301,7 @@ export default function AccuracyFixturePage() {
               onChange={(e) => {
                 setWeek(e.target.value);
                 setSelectedId("");
+                setAnalystId("");
               }}
               className={selectClass}
               disabled={weekOptions.length === 0}
@@ -297,44 +316,72 @@ export default function AccuracyFixturePage() {
           </div>
         </div>
 
-        <div className="mt-4">
-          <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
-            Game
-          </label>
-          {loadingFixtures ? (
-            <div className="flex items-center gap-2 py-2 text-sm text-slate-500">
-              <Loader2 size={15} className="animate-spin" /> Loading games…
-            </div>
-          ) : fixturesError ? (
-            <div className="flex items-center gap-2 py-2 text-sm text-red-600">
-              <AlertTriangle size={15} /> {fixturesError}
-            </div>
-          ) : (
-            <select
-              value={selectedId}
-              onChange={(e) => setSelectedId(e.target.value)}
-              className={selectClass}
-              disabled={gamesForWeek.length === 0}
-            >
-              <option value="">
-                {gamesForWeek.length === 0
-                  ? "No games this week"
-                  : `Select a game (${gamesForWeek.length})`}
-              </option>
-              {gamesForWeek.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {fixtureTitle(f)}
+        {loadingFixtures ? (
+          <div className="mt-4 flex items-center gap-2 py-2 text-sm text-slate-500">
+            <Loader2 size={15} className="animate-spin" /> Loading games…
+          </div>
+        ) : fixturesError ? (
+          <div className="mt-4 flex items-center gap-2 py-2 text-sm text-red-600">
+            <AlertTriangle size={15} /> {fixturesError}
+          </div>
+        ) : (
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
+                Master game (reference)
+              </label>
+              <select
+                value={selectedId}
+                onChange={(e) => setSelectedId(e.target.value)}
+                className={selectClass}
+                disabled={gamesForWeek.length === 0}
+              >
+                <option value="">
+                  {gamesForWeek.length === 0
+                    ? "No games this week"
+                    : `Select a game (${gamesForWeek.length})`}
                 </option>
-              ))}
-            </select>
-          )}
-        </div>
+                {gamesForWeek.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {fixtureTitle(f)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
+                Analyst game (being graded) — optional
+              </label>
+              <select
+                value={analystId}
+                onChange={(e) => setAnalystId(e.target.value)}
+                className={selectClass}
+                disabled={gamesForWeek.length === 0}
+              >
+                <option value="">
+                  {gamesForWeek.length === 0
+                    ? "No games this week"
+                    : "Select a game, or add it on the next screen"}
+                </option>
+                {gamesForWeek.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {fixtureTitle(f)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
 
         <div className="mt-5 flex items-center justify-between gap-3">
           <p className="text-xs text-slate-400">
             {selected
-              ? `Fixture report #${selected.jadeFixtureUid}`
-              : "The master timeline is loaded from the match report (created once the match is finalised)."}
+              ? `Master #${selected.jadeFixtureUid}` +
+                (analystSelected
+                  ? ` · Analyst #${analystSelected.jadeFixtureUid}`
+                  : " · analyst can be added on the comparison screen")
+              : "Timelines are pulled from the match reports (created once a match is finalised)."}
           </p>
           <button
             onClick={startComparison}
