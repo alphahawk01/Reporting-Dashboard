@@ -54,8 +54,10 @@ import {
   canonicaliseTeams,
   compareInstances,
   parseHomeAwayFromFileName,
+  serializeInstances,
   type Instance,
 } from "@/lib/comparison/xml-compare";
+import { serializeInstancesToJson } from "@/lib/comparison/json-adapter";
 import {
   computePlayerAccuracy,
   type PlayerAccuracy,
@@ -1119,6 +1121,59 @@ export default function AccuracyChecksPage() {
     );
   }, [masterFixtureGroups, fixtureSearch]);
 
+  // Per-master timeline download (XML or native-schema JSON). The latest
+  // master timeline is the `xml_master` stored on any check of this master
+  // (propagateMasterCorrection keeps every sibling identical). We grab one
+  // check, use its cached XML if present else fetch it, parse to instances
+  // and re-serialise in the requested format. Keyed by group key so a single
+  // button can show a per-row "…" busy state.
+  const [downloadingMaster, setDownloadingMaster] = useState<string | null>(
+    null
+  );
+  async function downloadMasterTimeline(
+    group: { key: string; label: string; rows: FixtureRow[] },
+    format: "xml" | "json"
+  ) {
+    const first = group.rows[0]?.check;
+    if (!first) return;
+    setDownloadingMaster(`${group.key}:${format}`);
+    try {
+      let raw = xmlById.get(first.id)?.xml_master ?? null;
+      if (!raw) {
+        const fetched = await getAccuracyChecksXml([first.id]);
+        raw = fetched.get(first.id)?.xml_master ?? null;
+      }
+      const instances = instancesFromRaw(raw);
+      if (instances.length === 0) {
+        window.alert(
+          "No master timeline is stored for this fixture, so there is nothing to export."
+        );
+        return;
+      }
+      const content =
+        format === "json"
+          ? serializeInstancesToJson(instances)
+          : serializeInstances(instances);
+      const blob = new Blob([content], {
+        type: format === "json" ? "application/json" : "application/xml",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const base =
+        (group.label || "master").replace(/\.(xml|json)$/i, "").trim() ||
+        "master";
+      a.download = `${base}.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Master timeline export failed:", e);
+      window.alert("Could not export the master timeline. Please try again.");
+    } finally {
+      setDownloadingMaster(null);
+    }
+  }
+
   // The "Saved checks" card — the full list of every saved check, sorted +
   // week-filterable, in a ~10-row scroll region. Rendered in the History tab
   // (all checks) AND, when an analyst is selected, in their detail section.
@@ -1644,26 +1699,59 @@ export default function AccuracyChecksPage() {
                 const isOpen = expandedFixture === g.key;
                 return (
                   <div key={g.key}>
-                    <button
-                      onClick={() =>
-                        setExpandedFixture(isOpen ? null : g.key)
-                      }
-                      className="flex w-full items-center gap-3 px-5 py-3 text-left hover:bg-slate-50"
-                    >
-                      <span className="shrink-0 text-slate-400">
-                        {isOpen ? "▾" : "▸"}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-slate-800">
-                          {g.label}
-                        </p>
-                        <p className="truncate text-xs text-slate-500">
-                          {g.masterBy ? `Master by ${g.masterBy} · ` : ""}
-                          {g.rows.length} check
-                          {g.rows.length === 1 ? "" : "s"}
-                        </p>
+                    <div className="flex w-full items-center gap-3 px-5 py-3 hover:bg-slate-50">
+                      <button
+                        onClick={() =>
+                          setExpandedFixture(isOpen ? null : g.key)
+                        }
+                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                      >
+                        <span className="shrink-0 text-slate-400">
+                          {isOpen ? "▾" : "▸"}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-slate-800">
+                            {g.label}
+                          </p>
+                          <p className="truncate text-xs text-slate-500">
+                            {g.masterBy ? `Master by ${g.masterBy} · ` : ""}
+                            {g.rows.length} check
+                            {g.rows.length === 1 ? "" : "s"}
+                          </p>
+                        </div>
+                      </button>
+                      {/* Export the latest master timeline for this fixture. */}
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            downloadMasterTimeline(g, "xml");
+                          }}
+                          disabled={downloadingMaster === `${g.key}:xml`}
+                          title="Download the latest master timeline as XML"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                        >
+                          <Download size={13} />
+                          {downloadingMaster === `${g.key}:xml`
+                            ? "…"
+                            : "XML"}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            downloadMasterTimeline(g, "json");
+                          }}
+                          disabled={downloadingMaster === `${g.key}:json`}
+                          title="Download the latest master timeline as JSON"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                        >
+                          <Download size={13} />
+                          {downloadingMaster === `${g.key}:json`
+                            ? "…"
+                            : "JSON"}
+                        </button>
                       </div>
-                    </button>
+                    </div>
 
                     {isOpen && (
                       <div className="overflow-x-auto bg-slate-50/60 px-5 pb-4">
