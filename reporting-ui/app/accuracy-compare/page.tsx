@@ -925,11 +925,13 @@ function AccuracyCompareInner() {
   } | null>(null);
 
   // Only the analyst a check is saved to may FLAG (raise) disputes — this is
-  // their review of their own game.
+  // their review of their own game. ANY role may flag — the gate is that the
+  // check is allocated to THIS user (their analyst_name matches the check's),
+  // so e.g. an admin who is also the allocated analyst can raise disputes on
+  // their own check. (Resolving stays admin-only, below.)
   const canFlag =
     loadedCheckId != null &&
     !!user &&
-    user.role === "analyst" &&
     !!user.analyst_name &&
     !!checkAnalystName &&
     user.analyst_name.trim().toLowerCase() ===
