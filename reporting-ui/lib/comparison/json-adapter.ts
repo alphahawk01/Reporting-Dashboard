@@ -329,3 +329,49 @@ export function homeAwayFromTeamUid(
   if (teamUid === 2) return "away";
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// Instance[] -> JSON events (the reverse of jsonEventsToInstances)
+// ---------------------------------------------------------------------------
+//
+// Produces the SAME wrapper shape the compare page's JSON dropzone and
+// `instancesFromRaw` expect: { allStatistics: JsonEvent[] }. The goal is a
+// faithful ROUND TRIP — feeding the output back through jsonEventsToInstances
+// must reproduce the original instances (same id/start/mid/team/player/stat).
+//
+// How the round trip stays faithful:
+//   - `relativeTime` <- instance.start. jsonEventsToInstances re-derives `mid`
+//     from start via codeTime(), so we do NOT need to persist mid.
+//   - The canonical stat label is written to `statTypeName` and `statTypeCode`
+//     is left EMPTY. On re-import, defaultMapStatName sees no code and falls
+//     back to the name verbatim, so the exact label survives. (Going through
+//     statTypeCode would be lossy: STAT_CODE_MAP is one-way and many labels
+//     have no code, so empty-code + name is the reliable path.)
+//   - category is not part of JsonEvent; on re-import defaultMapCategory falls
+//     back to the stat label. The master timeline's category is cosmetic for
+//     the comparison (matching is driven by the stat), so this is acceptable.
+
+/** Convert parsed `Instance[]` back into JSON feed events. */
+export function instancesToJsonEvents(instances: Instance[]): JsonEvent[] {
+  return instances.map((inst) => ({
+    uid: inst.id,
+    relativeTime: inst.start,
+    // Carry the canonical stat in the NAME with an empty CODE so re-import
+    // falls back to the name verbatim (see defaultMapStatName).
+    statTypeCode: "",
+    statTypeName: inst.stat,
+    playerName: inst.playerRaw || undefined,
+    playerNumber: inst.playerNumber,
+    teamName: inst.team || undefined,
+  }));
+}
+
+/**
+ * Serialize parsed `Instance[]` to a pretty-printed JSON string in the
+ * `{ allStatistics: [...] }` wrapper that instancesFromRaw / the compare
+ * page's JSON import recognise. Round-trip compatible with
+ * jsonEventsToInstances.
+ */
+export function serializeInstancesToJson(instances: Instance[]): string {
+  return JSON.stringify({ allStatistics: instancesToJsonEvents(instances) }, null, 2);
+}

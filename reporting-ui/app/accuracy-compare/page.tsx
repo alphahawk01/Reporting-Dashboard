@@ -63,6 +63,7 @@ import {
 } from "@/lib/comparison/xml-compare";
 import {
   jsonEventsToInstances,
+  serializeInstancesToJson,
   type JsonEvent,
 } from "@/lib/comparison/json-adapter";
 import {
@@ -1028,6 +1029,22 @@ function AccuracyCompareInner() {
     a.href = url;
     const base = master.name.replace(/\.xml$/i, "");
     a.download = `${base}-corrected.xml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Download the (possibly edited) master timeline as JSON, built from the
+  // parsed instances (independent of the master's source format). Round-trips
+  // through jsonEventsToInstances / instancesFromRaw.
+  const downloadMasterJson = () => {
+    if (!master) return;
+    const json = serializeInstancesToJson(master.instances);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const base = master.name.replace(/\.(xml|json)$/i, "");
+    a.download = `${base}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -3176,6 +3193,12 @@ function AccuracyCompareInner() {
                       className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                     >
                       <Download size={13} /> Download corrected
+                    </button>
+                    <button
+                      onClick={downloadMasterJson}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      <Download size={13} /> Download JSON
                     </button>
                     {loadedCheckId != null && (
                       <button
