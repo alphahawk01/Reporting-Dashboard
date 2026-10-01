@@ -17,6 +17,7 @@ import {
   fetchCompetitionWithMeta,
   headCompetition,
   isExcludedCompetition,
+  isAccuracyCompetition,
   normaliseKeyPart,
   COMP_ID_MIN,
   COMP_ID_MAX,
@@ -66,6 +67,15 @@ export type CompFixtureFilters = {
   search?: string;
   /** Competition names to exclude. */
   excludeCompetitions?: string[];
+  /**
+   * How to treat "Accuracy" comps (e.g. "PD Soccer Accuracy Comp"), which hold
+   * the analyst-coded games:
+   *   - undefined/false (default): HIDE them — the normal fixture views (Comp
+   *     Fixtures, Fixture Review, the master picker) never show accuracy comps.
+   *   - true: return ONLY accuracy comps — used by the analyst picker on the
+   *     Fixture Accuracy tool.
+   */
+  accuracyOnly?: boolean;
 };
 
 // Convert a CompFixture (from the JSON adapter) into a DB row. `fixture_date`
@@ -151,9 +161,15 @@ export async function queryCompFixtures(
     from += PAGE_SIZE;
   }
 
-  // Always drop internal/non-real comps (practice/test/accuracy), in case any
-  // were synced before that source filter existed.
+  // Always drop truly-internal comps (practice/test), in case any were synced
+  // before that source filter existed.
   let result = rows.filter((r) => !isExcludedCompetition(r.competition));
+
+  // Accuracy comps hold the analyst-coded games: show ONLY them when the caller
+  // asks (the analyst picker), and HIDE them from every normal view otherwise.
+  result = filters.accuracyOnly
+    ? result.filter((r) => isAccuracyCompetition(r.competition))
+    : result.filter((r) => !isAccuracyCompetition(r.competition));
 
   // Client-side user exclusion (small list; keeps the query simple).
   const exclude = new Set(
@@ -170,7 +186,9 @@ export async function queryCompFixtures(
  * Supabase's JS client has no GROUP BY, so we page through the two small
  * columns and tally client-side (cheap — only sport + season are selected).
  */
-export async function getCompFacets(): Promise<{
+export async function getCompFacets(
+  options: { accuracyOnly?: boolean } = {}
+): Promise<{
   sports: { sport: string; count: number }[];
   years: { year: string; count: number }[];
 }> {
@@ -189,8 +207,12 @@ export async function getCompFacets(): Promise<{
       season: number | null;
       competition: string;
     }[]) {
-      // Skip internal/non-real comps so they don't inflate the facet counts.
+      // Skip truly-internal comps (practice/test) so they don't inflate counts.
       if (isExcludedCompetition(r.competition)) continue;
+      // Accuracy comps: count ONLY them when asked, else EXCLUDE them (they
+      // don't belong in the normal sport/year dropdowns).
+      const isAccuracy = isAccuracyCompetition(r.competition);
+      if (options.accuracyOnly ? !isAccuracy : isAccuracy) continue;
       const s = (r.sport ?? "").trim();
       if (s) sportCounts.set(s, (sportCounts.get(s) ?? 0) + 1);
       if (r.season != null) {

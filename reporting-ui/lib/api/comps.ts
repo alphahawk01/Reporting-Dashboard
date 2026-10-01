@@ -142,23 +142,41 @@ function parseFixtureDate(date?: string, time?: string): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-// Competitions whose NAME contains any of these words are excluded entirely —
-// they're internal/non-real comps (practice sessions, test comps, accuracy
-// checks), not fixtures anyone schedules. Matched case-insensitively as
-// substrings. Filtered at the source so they never enter the database.
-const EXCLUDED_COMP_KEYWORDS = ["practice", "test", "accuracy"];
+// Competitions whose NAME contains any of these words are internal/non-real
+// (practice sessions, test comps), not fixtures anyone schedules. They're
+// filtered at the source so they never enter the database. Matched
+// case-insensitively as substrings.
+//
+// NOTE: "accuracy" is deliberately NOT here. Accuracy comps (e.g. "PD Soccer
+// Accuracy Comp") hold the analyst-coded games used by the Fixture Accuracy
+// tool, so they ARE synced into comp_fixtures — but they're hidden from the
+// normal fixture views (see isAccuracyCompetition / the accuracyOnly query
+// option) so they don't clutter Comp Fixtures / Fixture Review / the master
+// picker.
+const EXCLUDED_COMP_KEYWORDS = ["practice", "test"];
 
-/** True when a competition name is an internal/non-real comp to skip. */
+/** True when a competition name is an internal/non-real comp to skip entirely. */
 export function isExcludedCompetition(name: string | null | undefined): boolean {
   const n = (name ?? "").toLowerCase();
   return EXCLUDED_COMP_KEYWORDS.some((k) => n.includes(k));
+}
+
+/**
+ * True when a competition is an "Accuracy" comp (name contains "accuracy").
+ * These hold the analyst-coded games for accuracy comparisons. They're synced
+ * to the DB but hidden from the normal fixture views, and surfaced only where
+ * explicitly requested (the analyst picker on the Fixture Accuracy tool).
+ */
+export function isAccuracyCompetition(name: string | null | undefined): boolean {
+  return (name ?? "").toLowerCase().includes("accuracy");
 }
 
 /** Turn one competition object into a flat list of fixtures. */
 export function compToFixtures(comp: Competition): CompFixture[] {
   const out: CompFixture[] = [];
   const competition = (comp.name ?? "").trim();
-  // Skip whole competitions flagged as internal/non-real (practice/test/etc).
+  // Skip whole competitions flagged as internal/non-real (practice/test).
+  // Accuracy comps are NOT skipped — they're needed for the analyst picker.
   if (isExcludedCompetition(competition)) return out;
   const season = typeof comp.season === "number" ? comp.season : null;
   const sport = (comp.sportName ?? "").trim();

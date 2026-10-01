@@ -52,6 +52,12 @@ export async function getReviewFixturesFromComps(filters: {
   season?: number | null;
   dateFrom?: string | null;
   dateTo?: string | null;
+  /**
+   * When true, return ONLY "Accuracy" comps (the analyst-coded games). When
+   * false/omitted, accuracy comps are hidden (the normal fixture views). Used
+   * by the analyst picker on the Fixture Accuracy tool.
+   */
+  accuracyOnly?: boolean;
 }): Promise<ReviewFixture[]> {
   const { queryCompFixtures } = await import("./compFixtures");
   const rows = await queryCompFixtures({
@@ -59,6 +65,7 @@ export async function getReviewFixturesFromComps(filters: {
     season: filters.season ?? undefined,
     dateFrom: filters.dateFrom ?? undefined,
     dateTo: filters.dateTo ?? undefined,
+    accuracyOnly: filters.accuracyOnly,
   });
 
   return rows.map((r) => {
