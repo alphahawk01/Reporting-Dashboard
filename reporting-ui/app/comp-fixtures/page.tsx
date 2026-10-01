@@ -969,7 +969,19 @@ export default function CompFixturesPage() {
               Retry failed{summary.failed > 0 ? ` (${summary.failed})` : ""}
             </button>
             <button
-              onClick={() => runQuery()}
+              onClick={() => {
+                // Drop cached "checking"/"unknown" size results so Reload
+                // re-checks files that had no size before (e.g. a video that
+                // has since been uploaded). Real numeric sizes are kept.
+                setSizes((prev) => {
+                  const next = new Map<string, SizeState>();
+                  for (const [u, s] of prev) {
+                    if (typeof s === "number") next.set(u, s);
+                  }
+                  return next;
+                });
+                runQuery();
+              }}
               disabled={loading || syncing}
               title="Reload from the database"
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-[#0f1b2d] px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800 disabled:opacity-50"
