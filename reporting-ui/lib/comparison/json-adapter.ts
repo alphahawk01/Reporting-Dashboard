@@ -260,6 +260,9 @@ const STAT_CODE_MAP: Record<string, { stat: string; category: string }> = {
   ballrecovery: { stat: "Ball Recoverys", category: "General Play" },
   clearance: { stat: "Clearances", category: "General Play" },
   interception: { stat: "Intercepts", category: "General Play" },
+  // The S3 feed emits the code "Intercept" (singular); alias it so native
+  // exports round-trip back to the same canonical label.
+  intercept: { stat: "Intercepts", category: "General Play" },
   aerialwin: { stat: "Aerial Wins", category: "General Play" },
   foul: { stat: "Fouls", category: "General Play" },
   fouldrawn: { stat: "Fouls Drawn", category: "General Play" },
@@ -331,47 +334,186 @@ export function homeAwayFromTeamUid(
 }
 
 // ---------------------------------------------------------------------------
-// Instance[] -> JSON events (the reverse of jsonEventsToInstances)
+// Instance[] -> native S3 `allStatistics` event (the reverse of the adapter)
 // ---------------------------------------------------------------------------
 //
-// Produces the SAME wrapper shape the compare page's JSON dropzone and
-// `instancesFromRaw` expect: { allStatistics: JsonEvent[] }. The goal is a
-// faithful ROUND TRIP — feeding the output back through jsonEventsToInstances
-// must reproduce the original instances (same id/start/mid/team/player/stat).
+// Produces JSON that mirrors the SHAPE of the real JADE/S3 fixture feed
+// (s3://premierdata01/JSON/Fixture/Reports{id}.json -> `allStatistics`), not
+// a minimal round-trip blob. Each exported event carries the full native
+// field set and uses the native stat ENCODING: the fine-grained
+// `statTypeCode` (e.g. "ShortPassEffective") plus the coarse singular
+// `statTypeName` (e.g. "Short Pass Successful"), exactly like the source.
 //
-// How the round trip stays faithful:
-//   - `relativeTime` <- instance.start. jsonEventsToInstances re-derives `mid`
-//     from start via codeTime(), so we do NOT need to persist mid.
-//   - The canonical stat label is written to `statTypeName` and `statTypeCode`
-//     is left EMPTY. On re-import, defaultMapStatName sees no code and falls
-//     back to the name verbatim, so the exact label survives. (Going through
-//     statTypeCode would be lossy: STAT_CODE_MAP is one-way and many labels
-//     have no code, so empty-code + name is the reliable path.)
-//   - category is not part of JsonEvent; on re-import defaultMapCategory falls
-//     back to the stat label. The master timeline's category is cosmetic for
-//     the comparison (matching is driven by the stat), so this is acceptable.
+// Verified against Reports32159.json (Cymru League South, 2026). The 49
+// code -> name pairs below are the authoritative native vocabulary observed
+// in that feed.
+//
+// RECOVERABLE vs LOST (the compare engine's `Instance` is lossy):
+//   - uid           <- inst.id
+//   - relativeTime  <- inst.start (whole-match seconds)
+//   - statTypeCode  <- reverse lookup from inst.stat (CANONICAL_TO_NATIVE)
+//   - statTypeName  <- native coarse name from the same table
+//   - playerName    <- inst.playerRaw
+//   - playerNumber  <- inst.playerNumber (NOTE: the native feed omits this on
+//                      the event itself and derives it from allParticipants;
+//                      we include it since we have it, harmless to consumers)
+//   - teamName      <- inst.team
+//   - quarter, teamUid, startWidth/Height, endX/Y, and the many boolean/empty
+//     fields are NOT carried on an Instance, so they default to 0 / false /
+//     "" just as the native feed does for events that lack them. `quarter`
+//     cannot be reconstructed from relativeTime (the half-time gap varies),
+//     so it is emitted as 0.
+//
+// For stats with no known native code (unmapped XML labels), statTypeCode is
+// left "" and the Instance's stat label is used as statTypeName so the event
+// is still legible and re-imports via defaultMapStatName's name fallback.
 
-/** Convert parsed `Instance[]` back into JSON feed events. */
-export function instancesToJsonEvents(instances: Instance[]): JsonEvent[] {
-  return instances.map((inst) => ({
-    uid: inst.id,
-    relativeTime: inst.start,
-    // Carry the canonical stat in the NAME with an empty CODE so re-import
-    // falls back to the name verbatim (see defaultMapStatName).
-    statTypeCode: "",
-    statTypeName: inst.stat,
-    playerName: inst.playerRaw || undefined,
-    playerNumber: inst.playerNumber,
-    teamName: inst.team || undefined,
-  }));
+/**
+ * The native event shape as delivered by the S3 fixture feed's
+ * `allStatistics` array. A superset of the fields the matcher needs; the
+ * extras are reproduced so exported files look like the real feed.
+ */
+export type NativeStatEvent = {
+  uid: number | string;
+  quarter: number;
+  relativeTime: number;
+  statTypeCode: string;
+  statTypeName: string;
+  playerName: string;
+  playerNumber: number | null;
+  playerUid: number;
+  teamName: string;
+  teamUid: number;
+  startWidth: number;
+  startHeight: number;
+  endWidth: number;
+  endHeight: number;
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  effective: boolean;
+  contested: boolean;
+  turnover: boolean;
+  analystInitials: string;
+  notes: string;
+};
+
+// Canonical XML stat label (what Instance.stat holds, from STAT_CODE_MAP /
+// the XML) -> native { statTypeCode, statTypeName } used by the S3 feed.
+// Keyed by the lowercased canonical label for case-insensitive lookup.
+//
+// Built from the 49 code/name pairs observed in Reports32159.json cross-
+// referenced with STAT_CODE_MAP's canonical labels. The native statTypeName
+// is the SINGULAR coarse form; the canonical label is the pluralised XML form.
+const CANONICAL_TO_NATIVE: Record<
+  string,
+  { statTypeCode: string; statTypeName: string }
+> = {
+  // Passing
+  "short passes successful": { statTypeCode: "ShortPassEffective", statTypeName: "Short Pass Successful" },
+  "short passes unsuccessful": { statTypeCode: "ShortPassIneffective", statTypeName: "Short Pass Unsuccessful" },
+  "long passes successful": { statTypeCode: "LongPassEffective", statTypeName: "Long Pass Successful" },
+  "long passes unsuccessful": { statTypeCode: "LongPassIneffective", statTypeName: "Long Pass Unsuccessful" },
+  "through balls successful": { statTypeCode: "ThroughBallEffective", statTypeName: "Through Ball Successful" },
+  "through balls unsuccessful": { statTypeCode: "ThroughBallIneffective", statTypeName: "Through Ball Unsuccessful" },
+  // XML misspells "Unsuccesful" (one 's') for crosses; native matches it.
+  "crosses successful": { statTypeCode: "CrossEffective", statTypeName: "Cross Successful" },
+  "crosses unsuccesful": { statTypeCode: "CrossIneffective", statTypeName: "Cross Unsuccesful" },
+  "free kick passes": { statTypeCode: "FreeKickPass", statTypeName: "Free Kick Pass" },
+  carries: { statTypeCode: "Carry", statTypeName: "Carry" },
+  touch: { statTypeCode: "Touch", statTypeName: "Touch" },
+  header: { statTypeCode: "Header", statTypeName: "Header" },
+
+  // Event / set pieces
+  corners: { statTypeCode: "Corner", statTypeName: "Corner" },
+  "throw ins": { statTypeCode: "ThrowIn", statTypeName: "Throw In" },
+  "kick offs": { statTypeCode: "KickOff", statTypeName: "Kick Off" },
+
+  // General Play
+  "dribbles successful": { statTypeCode: "DribbleEffective", statTypeName: "Dribble Successful" },
+  "dribbles unsuccessful": { statTypeCode: "DribbleIneffective", statTypeName: "Dribble Unsuccessful" },
+  "tackles successful": { statTypeCode: "TackleEffective", statTypeName: "Tackle Successful" },
+  "tackles unsuccessful": { statTypeCode: "TackleIneffective", statTypeName: "Tackle Unsuccessful" },
+  "ball recoverys": { statTypeCode: "BallRecovery", statTypeName: "Ball Recovery" },
+  clearances: { statTypeCode: "Clearance", statTypeName: "Clearance" },
+  intercepts: { statTypeCode: "Intercept", statTypeName: "Intercept" },
+  "aerial wins": { statTypeCode: "AerialWin", statTypeName: "Aerial Win" },
+  fouls: { statTypeCode: "Foul", statTypeName: "Foul" },
+  "fouls drawn": { statTypeCode: "FoulDrawn", statTypeName: "Foul Drawn" },
+
+  // Goal Keeper
+  saves: { statTypeCode: "Save", statTypeName: "Save" },
+  blocks: { statTypeCode: "Block", statTypeName: "Block" },
+
+  // Shots
+  "shots off target": { statTypeCode: "ShotOffTarget", statTypeName: "Shot Off Target" },
+  goals: { statTypeCode: "Goal", statTypeName: "Goal" },
+};
+
+/**
+ * Reverse a canonical Instance.stat label to the native code/name. Returns
+ * null when the label has no known native code (unmapped stats), so the
+ * caller can fall back to an empty code + the raw label as statTypeName.
+ */
+function nativeFromCanonicalStat(
+  stat: string
+): { statTypeCode: string; statTypeName: string } | null {
+  return CANONICAL_TO_NATIVE[stat.trim().toLowerCase()] ?? null;
 }
 
 /**
- * Serialize parsed `Instance[]` to a pretty-printed JSON string in the
- * `{ allStatistics: [...] }` wrapper that instancesFromRaw / the compare
- * page's JSON import recognise. Round-trip compatible with
- * jsonEventsToInstances.
+ * Convert parsed `Instance[]` into native-shaped `allStatistics` events that
+ * mirror the S3 fixture feed. Stat encoding uses the native statTypeCode +
+ * coarse statTypeName; fields the Instance does not carry default to the same
+ * zero/empty values the native feed uses.
+ */
+export function instancesToNativeStatEvents(
+  instances: Instance[]
+): NativeStatEvent[] {
+  return instances.map((inst) => {
+    const native = nativeFromCanonicalStat(inst.stat);
+    return {
+      uid: inst.id,
+      // quarter is not retained on an Instance (half-time gap makes it
+      // non-derivable from relativeTime), so emit 0 as the native feed does
+      // for events without a period.
+      quarter: 0,
+      relativeTime: inst.start,
+      statTypeCode: native?.statTypeCode ?? "",
+      statTypeName: native?.statTypeName ?? inst.stat,
+      playerName: inst.playerRaw ?? "",
+      playerNumber: inst.playerNumber,
+      playerUid: 0,
+      teamName: inst.team ?? "",
+      teamUid: 0,
+      startWidth: 0,
+      startHeight: 0,
+      endWidth: 0,
+      endHeight: 0,
+      startX: 0,
+      startY: 0,
+      endX: 0,
+      endY: 0,
+      effective: false,
+      contested: false,
+      turnover: false,
+      analystInitials: "",
+      notes: "",
+    };
+  });
+}
+
+/**
+ * Serialize parsed `Instance[]` to a pretty-printed JSON string in the native
+ * `{ allStatistics: [...] }` wrapper the S3 fixture feed uses. Re-imports
+ * cleanly via instancesFromRaw / jsonEventsToInstances: the native statTypeCode
+ * round-trips through STAT_CODE_MAP back to the same canonical label.
  */
 export function serializeInstancesToJson(instances: Instance[]): string {
-  return JSON.stringify({ allStatistics: instancesToJsonEvents(instances) }, null, 2);
+  return JSON.stringify(
+    { allStatistics: instancesToNativeStatEvents(instances) },
+    null,
+    2
+  );
 }
