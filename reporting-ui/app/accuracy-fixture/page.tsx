@@ -75,6 +75,10 @@ export default function AccuracyFixturePage() {
   const [sport, setSport] = useState<string>("Australian Rules Football");
   const [year, setYear] = useState<string>(String(new Date().getFullYear()));
   const [week, setWeek] = useState<string>(currentWeekThursday());
+  // The analyst game may be in a DIFFERENT week than the master, so it gets its
+  // own week selector (sport/year stay shared — they're almost always the same
+  // for both sides of a comparison).
+  const [analystWeek, setAnalystWeek] = useState<string>(currentWeekThursday());
   // The MASTER fixture (the reference timeline) and the ANALYST fixture (the
   // one being graded). Both are pulled from S3 by their own fixture id; they
   // are usually the same match coded under two different fixture ids.
@@ -197,23 +201,56 @@ export default function AccuracyFixturePage() {
       );
   }, [fixtures, weekRange]);
 
-  // Clear a stale selection when the visible games change.
+  // Keep the analyst week valid for the current data (same logic as master).
+  useEffect(() => {
+    if (weekOptions.length === 0) return;
+    if (weekOptions.some((w) => w.thu === analystWeek)) return;
+    const current = currentWeekThursday();
+    const fallback = weekOptions.some((w) => w.thu === current)
+      ? current
+      : weekOptions[0].thu;
+    setAnalystWeek(fallback);
+  }, [weekOptions, analystWeek]);
+
+  const analystWeekRange = useMemo(() => {
+    const from = new Date(`${analystWeek}T00:00:00`);
+    const to = new Date(from);
+    to.setDate(from.getDate() + 6);
+    return { from: toDateInput(from), to: toDateInput(to) };
+  }, [analystWeek]);
+
+  const analystGamesForWeek = useMemo(() => {
+    return fixtures
+      .filter((f) => {
+        const k = dateKey(f.date);
+        return k && k >= analystWeekRange.from && k <= analystWeekRange.to;
+      })
+      .sort((a, b) =>
+        `${a.competition} ${a.homeTeam}`.localeCompare(
+          `${b.competition} ${b.homeTeam}`
+        )
+      );
+  }, [fixtures, analystWeekRange]);
+
+  // Clear a stale selection when its visible games change.
   useEffect(() => {
     if (selectedId && !gamesForWeek.some((f) => f.id === selectedId)) {
       setSelectedId("");
     }
-    if (analystId && !gamesForWeek.some((f) => f.id === analystId)) {
+  }, [gamesForWeek, selectedId]);
+  useEffect(() => {
+    if (analystId && !analystGamesForWeek.some((f) => f.id === analystId)) {
       setAnalystId("");
     }
-  }, [gamesForWeek, selectedId, analystId]);
+  }, [analystGamesForWeek, analystId]);
 
   const selected = useMemo(
     () => gamesForWeek.find((f) => f.id === selectedId) ?? null,
     [gamesForWeek, selectedId]
   );
   const analystSelected = useMemo(
-    () => gamesForWeek.find((f) => f.id === analystId) ?? null,
-    [gamesForWeek, analystId]
+    () => analystGamesForWeek.find((f) => f.id === analystId) ?? null,
+    [analystGamesForWeek, analystId]
   );
 
   function startComparison() {
@@ -294,14 +331,13 @@ export default function AccuracyFixturePage() {
 
           <div>
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
-              Week
+              Master week
             </label>
             <select
               value={week}
               onChange={(e) => {
                 setWeek(e.target.value);
                 setSelectedId("");
-                setAnalystId("");
               }}
               className={selectClass}
               disabled={weekOptions.length === 0}
@@ -325,8 +361,9 @@ export default function AccuracyFixturePage() {
             <AlertTriangle size={15} /> {fixturesError}
           </div>
         ) : (
-          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
+          <>
+            {/* MASTER: uses the shared Week filter above. */}
+            <div className="mt-4">
               <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
                 Master game (reference)
               </label>
@@ -349,29 +386,56 @@ export default function AccuracyFixturePage() {
               </select>
             </div>
 
-            <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
-                Analyst game (being graded) — optional
-              </label>
-              <select
-                value={analystId}
-                onChange={(e) => setAnalystId(e.target.value)}
-                className={selectClass}
-                disabled={gamesForWeek.length === 0}
-              >
-                <option value="">
-                  {gamesForWeek.length === 0
-                    ? "No games this week"
-                    : "Select a game, or add it on the next screen"}
-                </option>
-                {gamesForWeek.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {fixtureTitle(f)}
+            {/* ANALYST: its own Week filter so it can be in a different week
+                than the master (sport/year stay shared). */}
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[200px_minmax(0,1fr)]">
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Analyst week
+                </label>
+                <select
+                  value={analystWeek}
+                  onChange={(e) => {
+                    setAnalystWeek(e.target.value);
+                    setAnalystId("");
+                  }}
+                  className={selectClass}
+                  disabled={weekOptions.length === 0}
+                >
+                  {weekOptions.length === 0 && (
+                    <option value={analystWeek}>—</option>
+                  )}
+                  {weekOptions.map((w) => (
+                    <option key={w.thu} value={w.thu}>
+                      {weekLabel(w.thu)} ({w.count})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Analyst game (being graded) — optional
+                </label>
+                <select
+                  value={analystId}
+                  onChange={(e) => setAnalystId(e.target.value)}
+                  className={selectClass}
+                  disabled={analystGamesForWeek.length === 0}
+                >
+                  <option value="">
+                    {analystGamesForWeek.length === 0
+                      ? "No games this week"
+                      : "Select a game, or add it on the next screen"}
                   </option>
-                ))}
-              </select>
+                  {analystGamesForWeek.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {fixtureTitle(f)}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-          </div>
+          </>
         )}
 
         <div className="mt-5 flex items-center justify-between gap-3">
