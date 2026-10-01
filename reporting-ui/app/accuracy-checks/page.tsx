@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Download,
   RotateCcw,
+  Film,
 } from "lucide-react";
 
 // Accuracy trend chart pulls in recharts — load lazily so recharts stays out
@@ -1697,6 +1698,12 @@ export default function AccuracyChecksPage() {
             <div className="max-h-[340px] divide-y divide-slate-100 overflow-y-auto">
               {filteredFixtureGroups.map((g) => {
                 const isOpen = expandedFixture === g.key;
+                // The game video for this master fixture — siblings share it,
+                // so take the first check that has one.
+                const videoUrl =
+                  g.rows
+                    .map((r) => (r.check.video_url ?? "").trim())
+                    .find((u) => u.length > 0) ?? "";
                 return (
                   <div key={g.key}>
                     <div className="flex w-full items-center gap-3 px-5 py-3 hover:bg-slate-50">
@@ -1720,8 +1727,27 @@ export default function AccuracyChecksPage() {
                           </p>
                         </div>
                       </button>
-                      {/* Export the latest master timeline for this fixture. */}
+                      {/* View video + export the latest master timeline. */}
                       <div className="flex shrink-0 items-center gap-1.5">
+                        {videoUrl ? (
+                          <a
+                            href={videoUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            title="Open the game video in a new tab"
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            <Film size={13} /> Video
+                          </a>
+                        ) : (
+                          <span
+                            title="No game video saved for this fixture"
+                            className="inline-flex cursor-default items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-300"
+                          >
+                            <Film size={13} /> Video
+                          </span>
+                        )}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
