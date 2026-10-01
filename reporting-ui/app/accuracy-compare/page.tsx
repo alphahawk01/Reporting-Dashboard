@@ -66,6 +66,7 @@ import {
   serializeInstancesToJson,
   type JsonEvent,
 } from "@/lib/comparison/json-adapter";
+import { fetchFixtureReport } from "@/lib/api/fixtureReports";
 import {
   generateInsights,
   generateRecommendations,
@@ -1423,6 +1424,65 @@ function AccuracyCompareInner() {
   // restore the allocation/label so the full comparison is rebuilt.
   useEffect(() => {
     const checkId = searchParams.get("check");
+    const fixtureId = searchParams.get("fixtureId");
+
+    // Deep-link from the Fixture Accuracy picker: ?fixtureId=<jadeUid>&sport=…
+    // loads the master timeline straight from the S3 fixture report (JSON), so
+    // the analyst only has to drop their own file in. Handled before the
+    // ?check= path; the two are mutually exclusive.
+    if (fixtureId && !checkId) {
+      const urlKey = `fixture:${fixtureId}`;
+      // Already loaded this fixture's master — don't refetch (and don't wipe
+      // an analyst file the user has since dropped in).
+      if (loadedFromUrlRef.current === urlKey) return;
+      loadedFromUrlRef.current = urlKey;
+
+      const sportParam = searchParams.get("sport");
+      if (sportParam === "afl" || sportParam === "football") {
+        setSport(sportParam);
+      }
+
+      let cancelled = false;
+      (async () => {
+        try {
+          const report = await fetchFixtureReport(fixtureId, {
+            cache: "no-store",
+          });
+          if (cancelled) return;
+          const events = Array.isArray(report.allStatistics)
+            ? (report.allStatistics as unknown as JsonEvent[])
+            : [];
+          const instances = jsonEventsToInstances(events, {});
+          const home = report.homeTeamName?.trim();
+          const away = report.awayTeamName?.trim();
+          const label =
+            home && away ? `${home} vs ${away}` : `Fixture ${fixtureId}`;
+          // kind "json": a feed-sourced master — fully comparable, but the
+          // XML-only master edit/serialize affordances stay disabled.
+          setMaster({
+            name: `${label}.json`,
+            instances,
+            raw: JSON.stringify(report),
+            kind: "json",
+          });
+          // Clear any previously-loaded saved check so this is a fresh compare.
+          setLoadedCheckId(null);
+          setCheckAnalystName(null);
+          setDisputes([]);
+        } catch (err) {
+          if (cancelled) return;
+          console.error("Failed loading fixture master from S3:", err);
+          window.alert(
+            `Could not load the master timeline for fixture ${fixtureId}. ` +
+              `The report may not exist yet (it's created once the match is finalised).`
+          );
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+    }
 
     // Skip re-fetching ONLY when this exact check is already loaded into state
     // (guards against `searchParams` changing reference on unrelated

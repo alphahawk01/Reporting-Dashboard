@@ -19,6 +19,7 @@ import {
   GitCompare,
   Globe,
   FileCheck2,
+  FileSearch,
   History,
   KeyRound,
   UserCog,
@@ -171,6 +172,11 @@ const sections = [
         title: "Accuracy Comparison",
         href: "/accuracy-compare",
         icon: FileCheck2,
+      },
+      {
+        title: "Fixture Accuracy",
+        href: "/accuracy-fixture",
+        icon: FileSearch,
       },
       {
         title: "Accuracy History",

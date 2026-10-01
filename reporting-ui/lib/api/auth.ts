@@ -67,6 +67,7 @@ export const PAGES: PageDef[] = [
     { key: "leaderboard", label: "Leaderboard", href: "/leaderboard" },
     { key: "analyst-compare", label: "Analyst Comparison", href: "/analyst-compare" },
     { key: "accuracy-compare", label: "Accuracy Comparison", href: "/accuracy-compare" },
+    { key: "accuracy-fixture", label: "Fixture Accuracy", href: "/accuracy-fixture" },
     { key: "accuracy-checks", label: "Accuracy History", href: "/accuracy-checks" },
     { key: "settings", label: "Settings", href: "/settings" },
     { key: "disputes", label: "Disputes", href: "/disputes" },
