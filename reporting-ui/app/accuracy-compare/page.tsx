@@ -1418,6 +1418,13 @@ function AccuracyCompareInner() {
   // `searchParams` changes reference on unrelated re-renders — e.g. after an
   // admin edits a master instance and setMaster triggers a render.
   const loadedFromUrlRef = useRef<string | null>(null);
+  // The fixture id whose master is currently loaded (or being fetched). Used
+  // to de-dupe the S3 fetch WITHOUT falling foul of React 18 Strict Mode's
+  // double effect invoke in dev: the ref is set only AFTER a successful load,
+  // and a fetch already in flight for this id is tracked separately, so the
+  // mount→cleanup→mount cycle doesn't cancel the one and only fetch.
+  const loadedFixtureRef = useRef<string | null>(null);
+  const fetchingFixtureRef = useRef<string | null>(null);
 
   // Re-open a saved check: if the URL has ?check=<id>, load that check
   // from Supabase, parse its stored XML back into master/analyst, and
@@ -1431,24 +1438,27 @@ function AccuracyCompareInner() {
     // the analyst only has to drop their own file in. Handled before the
     // ?check= path; the two are mutually exclusive.
     if (fixtureId && !checkId) {
-      const urlKey = `fixture:${fixtureId}`;
-      // Already loaded this fixture's master — don't refetch (and don't wipe
-      // an analyst file the user has since dropped in).
-      if (loadedFromUrlRef.current === urlKey) return;
-      loadedFromUrlRef.current = urlKey;
+      // Skip if this fixture's master is already loaded, or a fetch for it is
+      // already in flight (guards the Strict Mode double-invoke in dev).
+      if (
+        loadedFixtureRef.current === fixtureId ||
+        fetchingFixtureRef.current === fixtureId
+      ) {
+        return;
+      }
+      fetchingFixtureRef.current = fixtureId;
+      loadedFromUrlRef.current = `fixture:${fixtureId}`;
 
       const sportParam = searchParams.get("sport");
       if (sportParam === "afl" || sportParam === "football") {
         setSport(sportParam);
       }
 
-      let cancelled = false;
       (async () => {
         try {
           const report = await fetchFixtureReport(fixtureId, {
             cache: "no-store",
           });
-          if (cancelled) return;
           const events = Array.isArray(report.allStatistics)
             ? (report.allStatistics as unknown as JsonEvent[])
             : [];
@@ -1469,19 +1479,19 @@ function AccuracyCompareInner() {
           setLoadedCheckId(null);
           setCheckAnalystName(null);
           setDisputes([]);
+          loadedFixtureRef.current = fixtureId;
         } catch (err) {
-          if (cancelled) return;
           console.error("Failed loading fixture master from S3:", err);
           window.alert(
             `Could not load the master timeline for fixture ${fixtureId}. ` +
               `The report may not exist yet (it's created once the match is finalised).`
           );
+        } finally {
+          fetchingFixtureRef.current = null;
         }
       })();
 
-      return () => {
-        cancelled = true;
-      };
+      return;
     }
 
     // Skip re-fetching ONLY when this exact check is already loaded into state
