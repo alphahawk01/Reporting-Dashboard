@@ -491,6 +491,36 @@ function normStat(s: string): string {
 }
 
 /**
+ * The "base action" of a stat, with any OUTCOME suffix removed — i.e.
+ * "successful" / "unsuccessful" / "unsuccesful" (the source's one-'s'
+ * misspelling), plus trailing plural 's'. So:
+ *   "crosses" / "crosses successful" / "crosses unsuccesful"  -> "cross"
+ *   "through balls" / "through balls successful/unsuccessful" -> "through ball"
+ * Lets a coder's BARE action (e.g. "Crosses") count as the SAME action as
+ * another coder's outcome-tagged version ("Crosses Successful") — a coding-
+ * granularity difference, not a different action.
+ */
+function baseAction(s: string): string {
+  return normStat(s)
+    .replace(/\b(unsuccessful|unsuccesful|successful|effective|ineffective)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Two stats are the SAME action when their labels are identical, OR they share
+ * the same base action after stripping the outcome suffix (so a bare
+ * "Crosses" == "Crosses Successful"). Used for "exact" scoring so differing
+ * only in outcome granularity still counts as a correct match.
+ */
+function sameBaseAction(a: string, b: string): boolean {
+  if (normStat(a) === normStat(b)) return true;
+  const ba = baseAction(a);
+  const bb = baseAction(b);
+  return ba.length > 0 && ba === bb;
+}
+
+/**
  * Game-flow "events" (centre bounces, around-the-ground bounces, throw-ins)
  * aren't attributed to a specific player/team. If both files log the same
  * event in the same time window, that's a correct match regardless of the
@@ -881,7 +911,7 @@ export function canonicaliseTeams(
   for (const m of master) {
     for (const a of analyst) {
       if (Math.abs(a.mid - m.mid) > tolerance) continue;
-      const statOk = normStat(m.stat) === normStat(a.stat);
+      const statOk = sameBaseAction(m.stat, a.stat);
       const playerOk =
         m.playerNumber != null &&
         a.playerNumber != null &&
@@ -998,7 +1028,10 @@ export function compareInstances(
   const usedMaster = new Set<number>();
 
   const fieldsOk = (m: Instance, a: Instance) => {
-    const statOk = normStat(m.stat) === normStat(a.stat);
+    // Same action if identical OR same base action ignoring outcome granularity
+    // (bare "Crosses" == "Crosses Successful"), so differing only in outcome
+    // detail still scores as exact.
+    const statOk = sameBaseAction(m.stat, a.stat);
     // Game-flow events aren't tied to a player/team. When the stat matches and
     // it's an event, team/player don't apply, so treat them as agreeing.
     if (statOk && isEventStat(m.stat)) {
