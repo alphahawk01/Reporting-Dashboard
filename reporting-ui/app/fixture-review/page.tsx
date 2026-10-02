@@ -486,14 +486,14 @@ export default function FixtureReviewPage() {
     [timeline, activeEventUid]
   );
 
-  // Auto-scroll the timeline so the active event stays in view as the video
-  // plays. `block: "nearest"` only scrolls when the row is off-screen (no jitter
-  // while it's already visible) and scrolls the timeline's own container rather
-  // than the whole page.
+  // Auto-scroll the timeline so the active event sits at the TOP of the
+  // scroll area (just under the sticky header), so the current stat and the
+  // upcoming ones are what's visible. `block: "start"` scrolls the row to the
+  // top of its nearest scroll container (the timeline's own overflow box).
   useEffect(() => {
     if (activeEventUid == null) return;
     const row = rowRefs.current.get(activeEventUid);
-    row?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    row?.scrollIntoView({ block: "start", behavior: "smooth" });
   }, [activeEventUid]);
 
   function seekToEvent(e: FixtureStatEvent) {
@@ -1017,7 +1017,7 @@ export default function FixtureReviewPage() {
                       className="overflow-hidden rounded-xl border"
                       style={{ borderColor: THEME.border }}
                     >
-                    <div className="max-h-[78vh] overflow-auto">
+                    <div className="max-h-[39vh] overflow-auto">
                       <table className="w-full border-collapse text-sm">
                         <thead className="sticky top-0">
                           <tr className="bg-[#111f35] text-left text-xs uppercase tracking-wide text-slate-400">
@@ -1038,6 +1038,10 @@ export default function FixtureReviewPage() {
                                   else rowRefs.current.delete(e.uid);
                                 }}
                                 onClick={() => seekToEvent(e)}
+                                // Offset the scroll target by the sticky header
+                                // height so the active row isn't hidden under it
+                                // when it scrolls to the top.
+                                style={{ scrollMarginTop: 34 }}
                                 className={`cursor-pointer border-t border-slate-800/60 transition hover:brightness-125 ${rowTint(
                                   e.teamUid,
                                   isActive
