@@ -14,7 +14,8 @@
 //   - an ARROW start→end for events that travel.
 // Colour is by team (home / away) to match the timeline.
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
+import type React from "react";
 import type { FixtureStatEvent } from "@/types/fixtureReport";
 
 export type PitchEvent = Pick<
@@ -155,6 +156,20 @@ export default function SoccerPitch({
     return out;
   }, [events, homeTeamUid, awayTeamUid]);
 
+  // Pointer-drag support for edit mode: whether a drag is in progress, and a
+  // helper that maps a pointer event to a 0..1 fraction of the PLAYING area
+  // (inside the PAD border) and reports it via onSetCoord.
+  const dragging = useRef(false);
+  const emitCoord = (ev: React.PointerEvent<SVGSVGElement>) => {
+    if (!onSetCoord) return;
+    const rect = ev.currentTarget.getBoundingClientRect();
+    const vx = ((ev.clientX - rect.left) / rect.width) * W;
+    const vy = ((ev.clientY - rect.top) / rect.height) * H;
+    const fx = Math.max(0, Math.min(1, (vx - PAD) / PW));
+    const fy = Math.max(0, Math.min(1, (vy - PAD) / PH));
+    onSetCoord(fx, fy);
+  };
+
   return (
     <div>
       <svg
@@ -164,19 +179,39 @@ export default function SoccerPitch({
         // Cap the pitch height so it doesn't dominate the column — the SVG
         // keeps its aspect ratio and letterboxes within this height, leaving
         // room for the timeline below to line up with the video.
-        style={{ background: "#0b3d1f", maxHeight: maxHeight, height: "auto" }}
-        onClick={
+        style={{
+          background: "#0b3d1f",
+          maxHeight: maxHeight,
+          height: "auto",
+          touchAction: editMode ? "none" : undefined,
+        }}
+        // In edit mode, press-and-drag anywhere to set the selected point's
+        // location continuously (click also works — it's a zero-length drag).
+        onPointerDown={
           editMode && onSetCoord
             ? (ev) => {
-                // Map the click to a 0..1 fraction of the PLAYING area (inside
-                // the PAD border), clamped. viewBox units map linearly to the
-                // rendered box, so use the element's bounding rect.
-                const rect = ev.currentTarget.getBoundingClientRect();
-                const vx = ((ev.clientX - rect.left) / rect.width) * W;
-                const vy = ((ev.clientY - rect.top) / rect.height) * H;
-                const fx = Math.max(0, Math.min(1, (vx - PAD) / PW));
-                const fy = Math.max(0, Math.min(1, (vy - PAD) / PH));
-                onSetCoord(fx, fy);
+                dragging.current = true;
+                ev.currentTarget.setPointerCapture(ev.pointerId);
+                emitCoord(ev);
+              }
+            : undefined
+        }
+        onPointerMove={
+          editMode && onSetCoord
+            ? (ev) => {
+                if (dragging.current) emitCoord(ev);
+              }
+            : undefined
+        }
+        onPointerUp={
+          editMode
+            ? (ev) => {
+                dragging.current = false;
+                try {
+                  ev.currentTarget.releasePointerCapture(ev.pointerId);
+                } catch {
+                  /* capture may already be released */
+                }
               }
             : undefined
         }

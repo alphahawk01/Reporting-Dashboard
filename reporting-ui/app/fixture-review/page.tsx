@@ -507,6 +507,70 @@ export default function FixtureReviewPage() {
       }));
   }, [timeline]);
 
+  // ----- Edit dropdown option sources (no free text) ---------------------
+
+  // Distinct stat types present, keeping BOTH name + code so selecting one in
+  // the editor sets the pair (statTypeCode drives matching elsewhere).
+  const statTypeOptions = useMemo(() => {
+    if (!timeline) return [] as { code: string; name: string }[];
+    const byName = new Map<string, { code: string; name: string }>();
+    for (const e of timeline.events) {
+      if (e.statTypeName && !byName.has(e.statTypeName)) {
+        byName.set(e.statTypeName, {
+          code: e.statTypeCode ?? "",
+          name: e.statTypeName,
+        });
+      }
+    }
+    return Array.from(byName.values()).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+  }, [timeline]);
+
+  // Full player detail by uid, so picking a player in the editor can set
+  // name + number + uid + team together.
+  const playersByUid = useMemo(() => {
+    const m = new Map<
+      number,
+      { uid: number; name: string; number: number | null; team: string; teamUid: number }
+    >();
+    if (!timeline) return m;
+    for (const e of timeline.events) {
+      if (!e.playerUid || m.has(e.playerUid)) continue;
+      if (!e.playerName) continue;
+      m.set(e.playerUid, {
+        uid: e.playerUid,
+        name: e.playerName,
+        number: e.playerNumber ?? null,
+        team: e.teamName ?? "",
+        teamUid: e.teamUid ?? 0,
+      });
+    }
+    return m;
+  }, [timeline]);
+
+  // The two team { uid, name } sides present in the timeline, for the team
+  // dropdown (home first, away second where known).
+  const teamOptions = useMemo(() => {
+    if (!timeline) return [] as { uid: number; name: string }[];
+    const byUid = new Map<number, string>();
+    for (const e of timeline.events) {
+      if (e.teamUid && e.teamName && !byUid.has(e.teamUid)) {
+        byUid.set(e.teamUid, e.teamName);
+      }
+    }
+    const list = Array.from(byUid.entries()).map(([uid, name]) => ({
+      uid,
+      name,
+    }));
+    // Order home then away when we know them.
+    return list.sort((a, b) => {
+      const rank = (u: number) =>
+        u === homeTeamUid ? 0 : u === awayTeamUid ? 1 : 2;
+      return rank(a.uid) - rank(b.uid);
+    });
+  }, [timeline, homeTeamUid, awayTeamUid]);
+
   // Events after applying the timeline filters (quarter / event / player).
   const filteredEvents = useMemo(() => {
     if (!timeline) return [];
@@ -531,13 +595,14 @@ export default function FixtureReviewPage() {
     return active;
   }, [timeline, videoTime, offset]);
 
-  // The active event object (for the pitch map under the video). Shows just
-  // the one stat happening now, in sync with playback.
-  const activeEvent = useMemo(
-    () =>
-      timeline?.events.find((e) => e.uid === activeEventUid) ?? null,
-    [timeline, activeEventUid]
-  );
+  // The active event object (for the pitch map under the video). During normal
+  // playback this is the stat happening now; while editing a specific event it
+  // is that event (so the pitch shows and edits the one being adjusted).
+  const activeEvent = useMemo(() => {
+    if (!timeline) return null;
+    const uid = editingUid ?? activeEventUid;
+    return timeline.events.find((e) => e.uid === uid) ?? null;
+  }, [timeline, activeEventUid, editingUid]);
 
   // Auto-scroll the timeline so the active event sits at the TOP of the
   // scroll area (just under the sticky header), so the current stat and the
@@ -558,14 +623,27 @@ export default function FixtureReviewPage() {
 
   // ----- Edit / override helpers -----------------------------------------
 
+  // Seek the video to a time WITHOUT playing (freeze on the frame). Used when
+  // clicking a stat in edit mode so the reviewer can study/adjust it.
+  function seekAndPause(seconds: number) {
+    const v = videoRef.current;
+    if (!v) return;
+    v.pause();
+    v.currentTime = Math.max(0, seconds);
+  }
+
   // Open the editor for one event, seeding the draft from its current values.
+  // Also freezes the video on that moment so the pitch shows this event.
   function beginEdit(e: FixtureStatEvent) {
     setEditingUid(e.uid);
     setDraft({
       statTypeName: e.statTypeName,
       statTypeCode: e.statTypeCode,
       playerName: e.playerName,
+      playerNumber: e.playerNumber,
+      playerUid: e.playerUid,
       teamName: e.teamName,
+      teamUid: e.teamUid,
       quarter: e.quarter,
       relativeTime: e.relativeTime,
       startX: e.startX,
@@ -573,6 +651,7 @@ export default function FixtureReviewPage() {
       endX: e.endX,
       endY: e.endY,
     });
+    seekAndPause(e.relativeTime + offset);
   }
 
   function cancelEdit() {
@@ -592,7 +671,13 @@ export default function FixtureReviewPage() {
             statTypeName: draft.statTypeName ?? s.statTypeName,
             statTypeCode: draft.statTypeCode ?? s.statTypeCode,
             playerName: draft.playerName ?? s.playerName,
+            playerNumber:
+              draft.playerNumber !== undefined
+                ? draft.playerNumber
+                : s.playerNumber,
+            playerUid: numOr(draft.playerUid, s.playerUid),
             teamName: draft.teamName ?? s.teamName,
+            teamUid: numOr(draft.teamUid, s.teamUid),
             quarter: numOr(draft.quarter, s.quarter),
             relativeTime: numOr(draft.relativeTime, s.relativeTime),
             startX: numOr(draft.startX, s.startX),
@@ -619,20 +704,34 @@ export default function FixtureReviewPage() {
     gridX: number,
     gridY: number
   ) {
-    if (activeEventUid == null || !editedReport) return;
+    // Target the event being edited (falls back to the playback-active one).
+    const targetUid = editingUid ?? activeEventUid;
+    if (targetUid == null || !editedReport) return;
+    let newCellX = 0;
+    let newCellY = 0;
     const nextStats = (editedReport.allStatistics ?? []).map((s) => {
-      if (s.uid !== activeEventUid) return s;
-      const cellX = Math.round(gridX * (s.startWidth + 2));
-      const cellY = Math.round(gridY * (s.startHeight + 2));
+      if (s.uid !== targetUid) return s;
+      newCellX = Math.round(gridX * (s.startWidth + 2));
+      newCellY = Math.round(gridY * (s.startHeight + 2));
       return which === "start"
-        ? { ...s, startX: cellX, startY: cellY }
-        : { ...s, endX: cellX, endY: cellY };
+        ? { ...s, startX: newCellX, startY: newCellY }
+        : { ...s, endX: newCellX, endY: newCellY };
     });
     const nextReport = { ...editedReport, allStatistics: nextStats };
     setEditedReport(nextReport);
     setTimeline(toFixtureTimeline(nextReport, reportSport));
     setDirty(true);
     setOverrideMsg(null);
+    // Keep the open editor's draft readout in sync with the dragged point.
+    if (editingUid === targetUid) {
+      setDraft((d) =>
+        d
+          ? which === "start"
+            ? { ...d, startX: newCellX, startY: newCellY }
+            : { ...d, endX: newCellX, endY: newCellY }
+          : d
+      );
+    }
   }
 
   // Persist the edited report as the fixture's override (shown to all users).
@@ -1322,7 +1421,11 @@ export default function FixtureReviewPage() {
                                   if (el) rowRefs.current.set(e.uid, el);
                                   else rowRefs.current.delete(e.uid);
                                 }}
-                                onClick={() => seekToEvent(e)}
+                                onClick={() =>
+                                  editMode
+                                    ? seekAndPause(e.relativeTime + offset)
+                                    : seekToEvent(e)
+                                }
                                 // Offset the scroll target by the sticky header
                                 // height so the active row isn't hidden under it
                                 // when it scrolls to the top.
@@ -1375,118 +1478,126 @@ export default function FixtureReviewPage() {
                                 <tr className="border-t border-slate-800/60 bg-[#0b1220]">
                                   <td colSpan={5} className="px-3 py-2">
                                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                      {/* Stat — dropdown of stat types present. */}
                                       <label className="text-[11px] text-slate-400">
                                         Stat
-                                        <input
+                                        <select
                                           value={draft.statTypeName ?? ""}
-                                          onChange={(ev) =>
+                                          onChange={(ev) => {
+                                            const opt = statTypeOptions.find(
+                                              (o) => o.name === ev.target.value
+                                            );
                                             setDraft((d) => ({
                                               ...d,
-                                              statTypeName: ev.target.value,
-                                            }))
-                                          }
+                                              statTypeName: opt?.name ?? ev.target.value,
+                                              statTypeCode: opt?.code ?? d?.statTypeCode,
+                                            }));
+                                          }}
                                           className="mt-0.5 w-full rounded border border-slate-600 bg-[#0f1b2d] px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
-                                        />
+                                        >
+                                          {statTypeOptions.map((o) => (
+                                            <option key={o.name} value={o.name}>
+                                              {o.name}
+                                            </option>
+                                          ))}
+                                        </select>
                                       </label>
+
+                                      {/* Player — dropdown; sets name/number/uid/team. */}
                                       <label className="text-[11px] text-slate-400">
                                         Player
-                                        <input
-                                          value={draft.playerName ?? ""}
-                                          onChange={(ev) =>
+                                        <select
+                                          value={
+                                            draft.playerUid != null
+                                              ? String(draft.playerUid)
+                                              : ""
+                                          }
+                                          onChange={(ev) => {
+                                            const uid = Number(ev.target.value);
+                                            const p = playersByUid.get(uid);
                                             setDraft((d) => ({
                                               ...d,
-                                              playerName: ev.target.value,
-                                            }))
-                                          }
+                                              playerUid: uid,
+                                              playerName: p?.name ?? d?.playerName,
+                                              playerNumber:
+                                                p?.number ?? d?.playerNumber,
+                                              // Keep team in sync with the player.
+                                              teamName: p?.team ?? d?.teamName,
+                                              teamUid: p?.teamUid ?? d?.teamUid,
+                                            }));
+                                          }}
                                           className="mt-0.5 w-full rounded border border-slate-600 bg-[#0f1b2d] px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
-                                        />
+                                        >
+                                          <option value="">— none —</option>
+                                          {playerOptions.map((p) => (
+                                            <option key={p.uid} value={p.uid}>
+                                              {p.label}
+                                            </option>
+                                          ))}
+                                        </select>
                                       </label>
+
+                                      {/* Team — dropdown of the two sides. */}
                                       <label className="text-[11px] text-slate-400">
                                         Team
-                                        <input
-                                          value={draft.teamName ?? ""}
-                                          onChange={(ev) =>
+                                        <select
+                                          value={
+                                            draft.teamUid != null
+                                              ? String(draft.teamUid)
+                                              : ""
+                                          }
+                                          onChange={(ev) => {
+                                            const uid = Number(ev.target.value);
+                                            const t = teamOptions.find(
+                                              (o) => o.uid === uid
+                                            );
                                             setDraft((d) => ({
                                               ...d,
-                                              teamName: ev.target.value,
-                                            }))
-                                          }
+                                              teamUid: uid,
+                                              teamName: t?.name ?? d?.teamName,
+                                            }));
+                                          }}
                                           className="mt-0.5 w-full rounded border border-slate-600 bg-[#0f1b2d] px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
-                                        />
+                                        >
+                                          {teamOptions.map((t) => (
+                                            <option key={t.uid} value={t.uid}>
+                                              {t.name}
+                                            </option>
+                                          ))}
+                                        </select>
                                       </label>
+
+                                      {/* Quarter — dropdown. */}
                                       <label className="text-[11px] text-slate-400">
-                                        Time (s)
-                                        <input
-                                          type="number"
-                                          value={draft.relativeTime ?? 0}
+                                        Quarter
+                                        <select
+                                          value={String(draft.quarter ?? 1)}
                                           onChange={(ev) =>
                                             setDraft((d) => ({
                                               ...d,
-                                              relativeTime: Number(
-                                                ev.target.value
-                                              ),
+                                              quarter: Number(ev.target.value),
                                             }))
                                           }
                                           className="mt-0.5 w-full rounded border border-slate-600 bg-[#0f1b2d] px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
-                                        />
-                                      </label>
-                                      <label className="text-[11px] text-slate-400">
-                                        Start X
-                                        <input
-                                          type="number"
-                                          value={draft.startX ?? 0}
-                                          onChange={(ev) =>
-                                            setDraft((d) => ({
-                                              ...d,
-                                              startX: Number(ev.target.value),
-                                            }))
-                                          }
-                                          className="mt-0.5 w-full rounded border border-slate-600 bg-[#0f1b2d] px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
-                                        />
-                                      </label>
-                                      <label className="text-[11px] text-slate-400">
-                                        Start Y
-                                        <input
-                                          type="number"
-                                          value={draft.startY ?? 0}
-                                          onChange={(ev) =>
-                                            setDraft((d) => ({
-                                              ...d,
-                                              startY: Number(ev.target.value),
-                                            }))
-                                          }
-                                          className="mt-0.5 w-full rounded border border-slate-600 bg-[#0f1b2d] px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
-                                        />
-                                      </label>
-                                      <label className="text-[11px] text-slate-400">
-                                        End X
-                                        <input
-                                          type="number"
-                                          value={draft.endX ?? 0}
-                                          onChange={(ev) =>
-                                            setDraft((d) => ({
-                                              ...d,
-                                              endX: Number(ev.target.value),
-                                            }))
-                                          }
-                                          className="mt-0.5 w-full rounded border border-slate-600 bg-[#0f1b2d] px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
-                                        />
-                                      </label>
-                                      <label className="text-[11px] text-slate-400">
-                                        End Y
-                                        <input
-                                          type="number"
-                                          value={draft.endY ?? 0}
-                                          onChange={(ev) =>
-                                            setDraft((d) => ({
-                                              ...d,
-                                              endY: Number(ev.target.value),
-                                            }))
-                                          }
-                                          className="mt-0.5 w-full rounded border border-slate-600 bg-[#0f1b2d] px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
-                                        />
+                                        >
+                                          {[1, 2, 3, 4].map((q) => (
+                                            <option key={q} value={q}>
+                                              {q}
+                                            </option>
+                                          ))}
+                                        </select>
                                       </label>
                                     </div>
+
+                                    <p className="mt-2 text-[11px] text-slate-500">
+                                      Position:{" "}
+                                      start ({draft.startX ?? 0}, {draft.startY ?? 0})
+                                      {" · "}end ({draft.endX ?? 0}, {draft.endY ?? 0}).
+                                      Use the <strong>Start/End point</strong> buttons
+                                      above the pitch, then drag on the pitch to set
+                                      coordinates.
+                                    </p>
+
                                     <div className="mt-2 flex items-center gap-2">
                                       <button
                                         onClick={applyEdit}
@@ -1500,10 +1611,6 @@ export default function FixtureReviewPage() {
                                       >
                                         Cancel
                                       </button>
-                                      <span className="text-[11px] text-slate-500">
-                                        Tip: tag the event, then use the pitch
-                                        buttons above to drag its start/end.
-                                      </span>
                                     </div>
                                   </td>
                                 </tr>
