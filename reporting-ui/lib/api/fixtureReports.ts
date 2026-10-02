@@ -346,14 +346,37 @@ export async function fetchFixtureReport(
 }
 
 /**
- * Fetch a fixture's report from S3 and return its full stat timeline
- * (chronologically sorted) plus fixture metadata. This is the primary entry
- * point for "pull the full timeline for a fixture".
+ * Resolve a fixture's report, preferring a saved OVERRIDE (edited timeline in
+ * Supabase) over the original S3 file. Falls back to S3 when there's no
+ * override. Returns the report plus a flag indicating which source was used.
+ */
+export async function resolveFixtureReport(
+  fixtureId: number | string,
+  options: FetchFixtureReportOptions & { preferOverride?: boolean } = {}
+): Promise<{ report: FixtureReport; source: "override" | "s3" }> {
+  if (options.preferOverride !== false) {
+    // Lazy import avoids pulling the Supabase client into callers that only
+    // ever read S3, and sidesteps any import-order concerns.
+    const { getFixtureOverride } = await import("./fixtureOverrides");
+    const override = await getFixtureOverride(fixtureId);
+    if (override?.report) {
+      return { report: override.report, source: "override" };
+    }
+  }
+  const report = await fetchFixtureReport(fixtureId, options);
+  return { report, source: "s3" };
+}
+
+/**
+ * Fetch a fixture's report and return its full stat timeline (chronologically
+ * sorted) plus fixture metadata. This is the primary entry point for "pull the
+ * full timeline for a fixture". Prefers a saved override over the S3 original
+ * (pass preferOverride: false to force the raw S3 file).
  */
 export async function getFixtureTimeline(
   fixtureId: number | string,
-  options: FetchFixtureReportOptions = {}
+  options: FetchFixtureReportOptions & { preferOverride?: boolean } = {}
 ): Promise<FixtureTimeline> {
-  const report = await fetchFixtureReport(fixtureId, options);
+  const { report } = await resolveFixtureReport(fixtureId, options);
   return toFixtureTimeline(report, options.sport);
 }

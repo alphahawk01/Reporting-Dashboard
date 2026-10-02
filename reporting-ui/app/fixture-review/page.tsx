@@ -20,7 +20,7 @@
 // whole-game seconds; an adjustable offset aligns the video clock to match
 // time when the recording doesn't start exactly at the first bounce.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { ListVideo, Loader2, AlertTriangle, Film, CalendarDays } from "lucide-react";
 
 import { THEME } from "@/lib/theme";
@@ -32,20 +32,33 @@ import {
 } from "@/lib/api/reviewFixtures";
 import { getCompFacets } from "@/lib/api/compFixtures";
 import {
-  getFixtureTimeline,
+  resolveFixtureReport,
+  toFixtureTimeline,
   statColumnsForSport,
   totalQuarterForSport,
   type StatColumn,
 } from "@/lib/api/fixtureReports";
+import {
+  saveFixtureOverride,
+  deleteFixtureOverride,
+} from "@/lib/api/fixtureOverrides";
 import { resolveJadeUidByVideo } from "@/lib/api/jadeCompMap";
 import { compIdForName } from "@/lib/api/jadeComps";
 import { getAllocatedVideoUrlsForAnalyst } from "@/lib/api/compFixtures";
 import { useAuth } from "@/components/auth/AuthContext";
 import type {
+  FixtureReport,
   FixtureTimeline,
   FixtureStatEvent,
   StatQuarter,
 } from "@/types/fixtureReport";
+
+// Coerce a possibly-undefined/NaN draft value to a number, falling back to the
+// current value. Used when applying edits so a blank field keeps the original.
+function numOr(v: unknown, fallback: number): number {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
 
 // Format whole seconds as a clock, matching the HTML5 video player: H:MM:SS
 // once past an hour (e.g. 4993 → "1:23:13"), otherwise M:SS (e.g. 137 → "2:17").
@@ -127,6 +140,10 @@ export default function FixtureReviewPage() {
   const { user } = useAuth();
   const isAnalystRole = user?.role === "analyst";
   const myName = user?.analyst_name?.trim() ?? "";
+  // Editing writes a shared override shown to everyone, so restrict it to
+  // admins/super-admins. (Exporting the JSON stays available to all.)
+  const canEditTimeline =
+    user?.role === "admin" || user?.role === "super_admin";
 
   // --- Game list ----------------------------------------------------------
   const [fixtures, setFixtures] = useState<ReviewFixture[]>([]);
@@ -182,6 +199,28 @@ export default function FixtureReviewPage() {
   const [timelineError, setTimelineError] = useState<string | null>(null);
   const [loadingTimeline, setLoadingTimeline] = useState(false);
   const [manualUid, setManualUid] = useState("");
+
+  // --- Edit / override ----------------------------------------------------
+  // The full report object (same shape as the S3 file) backing the current
+  // timeline — kept so edits can be applied to allStatistics and the whole
+  // thing saved as an override / exported. The displayed `timeline` is
+  // re-derived from this via toFixtureTimeline whenever it changes.
+  const [editedReport, setEditedReport] = useState<FixtureReport | null>(null);
+  const [reportSport, setReportSport] = useState<string | null>(null);
+  const [reportSource, setReportSource] = useState<"override" | "s3" | null>(
+    null
+  );
+  // The JADE fixture id the current report is for (for save/export).
+  const [reportUid, setReportUid] = useState<number | null>(null);
+  // Which event (by uid) is being edited, and the draft field values.
+  const [editingUid, setEditingUid] = useState<number | null>(null);
+  const [draft, setDraft] = useState<Partial<FixtureStatEvent> | null>(null);
+  const [dirty, setDirty] = useState(false); // unsaved edits exist
+  const [savingOverride, setSavingOverride] = useState(false);
+  const [overrideMsg, setOverrideMsg] = useState<string | null>(null);
+  // Master edit toggle, and which coordinate (start/end) a pitch click moves.
+  const [editMode, setEditMode] = useState(false);
+  const [pitchEdit, setPitchEdit] = useState<"start" | "end" | null>(null);
 
   // --- Video sync ---------------------------------------------------------
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -363,10 +402,22 @@ export default function FixtureReviewPage() {
     setLoadingTimeline(true);
     setTimelineError(null);
     try {
-      const result = await getFixtureTimeline(uid, {
+      // Resolve the raw report (prefers a saved override over the S3 original)
+      // so we keep the full object for editing/saving, and derive the timeline
+      // from it for display.
+      const { report, source } = await resolveFixtureReport(uid, {
         cache: "no-store",
         sport: fixture.sport,
       });
+      const result = toFixtureTimeline(report, fixture.sport);
+      setEditedReport(report);
+      setReportSport(fixture.sport);
+      setReportSource(source);
+      setReportUid(uid);
+      setEditingUid(null);
+      setDraft(null);
+      setDirty(false);
+      setOverrideMsg(null);
       setTimeline(result);
       if (result.eventCount === 0) {
         setTimelineError(
@@ -375,6 +426,8 @@ export default function FixtureReviewPage() {
       }
     } catch (err) {
       setTimeline(null);
+      setEditedReport(null);
+      setReportUid(null);
       const message = err instanceof Error ? err.message : "Unknown error";
       setTimelineError(
         /HTTP 404/.test(message)
@@ -501,6 +554,145 @@ export default function FixtureReviewPage() {
     if (!v) return;
     v.currentTime = Math.max(0, e.relativeTime + offset);
     v.play().catch(() => {});
+  }
+
+  // ----- Edit / override helpers -----------------------------------------
+
+  // Open the editor for one event, seeding the draft from its current values.
+  function beginEdit(e: FixtureStatEvent) {
+    setEditingUid(e.uid);
+    setDraft({
+      statTypeName: e.statTypeName,
+      statTypeCode: e.statTypeCode,
+      playerName: e.playerName,
+      teamName: e.teamName,
+      quarter: e.quarter,
+      relativeTime: e.relativeTime,
+      startX: e.startX,
+      startY: e.startY,
+      endX: e.endX,
+      endY: e.endY,
+    });
+  }
+
+  function cancelEdit() {
+    setEditingUid(null);
+    setDraft(null);
+  }
+
+  // Apply the draft to the backing report's allStatistics entry (by uid) and
+  // re-derive the displayed timeline. Keeps editedReport authoritative for
+  // save/export.
+  function applyEdit() {
+    if (editingUid == null || !draft || !editedReport) return;
+    const nextStats = (editedReport.allStatistics ?? []).map((s) =>
+      s.uid === editingUid
+        ? {
+            ...s,
+            statTypeName: draft.statTypeName ?? s.statTypeName,
+            statTypeCode: draft.statTypeCode ?? s.statTypeCode,
+            playerName: draft.playerName ?? s.playerName,
+            teamName: draft.teamName ?? s.teamName,
+            quarter: numOr(draft.quarter, s.quarter),
+            relativeTime: numOr(draft.relativeTime, s.relativeTime),
+            startX: numOr(draft.startX, s.startX),
+            startY: numOr(draft.startY, s.startY),
+            endX: numOr(draft.endX, s.endX),
+            endY: numOr(draft.endY, s.endY),
+          }
+        : s
+    );
+    const nextReport = { ...editedReport, allStatistics: nextStats };
+    setEditedReport(nextReport);
+    setTimeline(toFixtureTimeline(nextReport, reportSport));
+    setDirty(true);
+    setEditingUid(null);
+    setDraft(null);
+    setOverrideMsg(null);
+  }
+
+  // Nudge the active event's pitch coordinates by dragging on the pitch (start
+  // or end cell). gridX/gridY are 0..1 fractions of the pitch; we convert back
+  // to the event's own grid cells. Marks the report dirty.
+  function setActiveCoord(
+    which: "start" | "end",
+    gridX: number,
+    gridY: number
+  ) {
+    if (activeEventUid == null || !editedReport) return;
+    const nextStats = (editedReport.allStatistics ?? []).map((s) => {
+      if (s.uid !== activeEventUid) return s;
+      const cellX = Math.round(gridX * (s.startWidth + 2));
+      const cellY = Math.round(gridY * (s.startHeight + 2));
+      return which === "start"
+        ? { ...s, startX: cellX, startY: cellY }
+        : { ...s, endX: cellX, endY: cellY };
+    });
+    const nextReport = { ...editedReport, allStatistics: nextStats };
+    setEditedReport(nextReport);
+    setTimeline(toFixtureTimeline(nextReport, reportSport));
+    setDirty(true);
+    setOverrideMsg(null);
+  }
+
+  // Persist the edited report as the fixture's override (shown to all users).
+  async function saveOverride() {
+    if (!editedReport || reportUid == null) return;
+    setSavingOverride(true);
+    setOverrideMsg(null);
+    try {
+      await saveFixtureOverride({
+        fixtureId: reportUid,
+        report: editedReport,
+        updatedBy: user?.username ?? user?.analyst_name ?? null,
+      });
+      setDirty(false);
+      setReportSource("override");
+      setOverrideMsg("Saved. This edited timeline now loads for everyone.");
+    } catch (err) {
+      setOverrideMsg(
+        err instanceof Error ? err.message : "Failed to save the override."
+      );
+    } finally {
+      setSavingOverride(false);
+    }
+  }
+
+  // Discard the override and reload the original S3 report.
+  async function revertOverride() {
+    if (reportUid == null || !selected) return;
+    if (
+      !window.confirm(
+        "Discard the saved edits and revert this fixture to the original timeline?"
+      )
+    )
+      return;
+    setSavingOverride(true);
+    try {
+      await deleteFixtureOverride(reportUid);
+      setOverrideMsg(null);
+      await loadTimelineFor(selected, reportUid);
+    } catch (err) {
+      setOverrideMsg(
+        err instanceof Error ? err.message : "Failed to revert."
+      );
+    } finally {
+      setSavingOverride(false);
+    }
+  }
+
+  // Download the (edited) report as Reports{id}.json for manual S3 upload.
+  function exportReportJson() {
+    if (!editedReport || reportUid == null) return;
+    const blob = new Blob([JSON.stringify(editedReport)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Reports${reportUid}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   function rowTint(teamUid: number, isActive: boolean): string {
@@ -876,6 +1068,35 @@ export default function FixtureReviewPage() {
                         </span>
                       )}
                     </div>
+
+                    {/* In edit mode, choose which coordinate a pitch click
+                        moves for the ACTIVE event. */}
+                    {editMode && activeEvent && (
+                      <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
+                        <span className="text-slate-400">Click pitch to set:</span>
+                        {(["start", "end"] as const).map((w) => (
+                          <button
+                            key={w}
+                            onClick={() =>
+                              setPitchEdit(pitchEdit === w ? null : w)
+                            }
+                            className={`rounded-md px-2 py-1 font-semibold transition ${
+                              pitchEdit === w
+                                ? "bg-sky-600 text-white"
+                                : "bg-[#0b1220] text-slate-300 hover:bg-[#111f35]"
+                            }`}
+                          >
+                            {w === "start" ? "Start point" : "End point"}
+                          </button>
+                        ))}
+                        {pitchEdit && (
+                          <span className="text-sky-300">
+                            Click the pitch to place the {pitchEdit} point
+                          </span>
+                        )}
+                      </div>
+                    )}
+
                     <SoccerPitch
                       events={activeEvent ? [activeEvent] : []}
                       homeTeamUid={homeTeamUid}
@@ -883,6 +1104,10 @@ export default function FixtureReviewPage() {
                       homeTeamName={selected?.homeTeam}
                       awayTeamName={selected?.awayTeam}
                       emphasize
+                      editMode={editMode ? pitchEdit : null}
+                      onSetCoord={(fx, fy) =>
+                        pitchEdit && setActiveCoord(pitchEdit, fx, fy)
+                      }
                     />
                   </div>
                 )}
@@ -926,6 +1151,74 @@ export default function FixtureReviewPage() {
 
                 {timeline && timeline.eventCount > 0 && (
                   <>
+                    {/* Edit toolbar: toggle editing, save the override, export
+                        the corrected JSON, or revert to the S3 original.
+                        Editing writes a shared override, so it's admin-gated;
+                        everyone can still Export the JSON. */}
+                    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-slate-700 bg-[#0f1b2d] px-3 py-2">
+                      {canEditTimeline && (
+                        <button
+                          onClick={() => {
+                            setEditMode((v) => !v);
+                            setPitchEdit(null);
+                            setEditingUid(null);
+                            setDraft(null);
+                          }}
+                          className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                            editMode
+                              ? "bg-sky-600 text-white"
+                              : "bg-[#0b1220] text-slate-300 hover:bg-[#111f35]"
+                          }`}
+                        >
+                          {editMode ? "Editing — done" : "Edit timeline"}
+                        </button>
+                      )}
+
+                      {reportSource === "override" && (
+                        <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[11px] font-semibold text-amber-300">
+                          Edited version
+                        </span>
+                      )}
+                      {dirty && (
+                        <span className="text-[11px] text-amber-300">
+                          Unsaved changes
+                        </span>
+                      )}
+
+                      <div className="ml-auto flex items-center gap-2">
+                        <button
+                          onClick={exportReportJson}
+                          title="Download the (edited) report as Reports{id}.json"
+                          className="rounded-md border border-slate-600 bg-[#0b1220] px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-[#111f35]"
+                        >
+                          Export JSON
+                        </button>
+                        {canEditTimeline && reportSource === "override" && (
+                          <button
+                            onClick={revertOverride}
+                            disabled={savingOverride}
+                            className="rounded-md border border-slate-600 bg-[#0b1220] px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-[#111f35] disabled:opacity-40"
+                          >
+                            Revert to original
+                          </button>
+                        )}
+                        {canEditTimeline && (
+                          <button
+                            onClick={saveOverride}
+                            disabled={savingOverride || !dirty}
+                            className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-40"
+                          >
+                            {savingOverride ? "Saving…" : "Save edits"}
+                          </button>
+                        )}
+                      </div>
+                      {overrideMsg && (
+                        <p className="w-full text-[11px] text-slate-300">
+                          {overrideMsg}
+                        </p>
+                      )}
+                    </div>
+
                     {/* Timeline filters: quarter / event / player */}
                     <div className="mb-3 flex flex-wrap items-center gap-2">
                       <select
@@ -1013,14 +1306,18 @@ export default function FixtureReviewPage() {
                             <th className="px-3 py-2 font-medium">Time</th>
                             <th className="px-3 py-2 font-medium">Event</th>
                             <th className="px-3 py-2 font-medium">Result</th>
+                            {editMode && (
+                              <th className="px-3 py-2 font-medium">Edit</th>
+                            )}
                           </tr>
                         </thead>
                         <tbody>
                           {filteredEvents.map((e) => {
                             const isActive = e.uid === activeEventUid;
+                            const isEditing = editingUid === e.uid;
                             return (
+                              <Fragment key={e.uid}>
                               <tr
-                                key={e.uid}
                                 ref={(el) => {
                                   if (el) rowRefs.current.set(e.uid, el);
                                   else rowRefs.current.delete(e.uid);
@@ -1059,7 +1356,159 @@ export default function FixtureReviewPage() {
                                     e.teamName || ""
                                   )}
                                 </td>
+                                {editMode && (
+                                  <td className="px-3 py-1.5">
+                                    <button
+                                      onClick={(ev) => {
+                                        ev.stopPropagation();
+                                        if (isEditing) cancelEdit();
+                                        else beginEdit(e);
+                                      }}
+                                      className="rounded border border-slate-600 bg-[#0b1220] px-2 py-0.5 text-[11px] font-semibold text-slate-200 hover:bg-[#111f35]"
+                                    >
+                                      {isEditing ? "Close" : "Edit"}
+                                    </button>
+                                  </td>
+                                )}
                               </tr>
+                              {editMode && isEditing && draft && (
+                                <tr className="border-t border-slate-800/60 bg-[#0b1220]">
+                                  <td colSpan={5} className="px-3 py-2">
+                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                      <label className="text-[11px] text-slate-400">
+                                        Stat
+                                        <input
+                                          value={draft.statTypeName ?? ""}
+                                          onChange={(ev) =>
+                                            setDraft((d) => ({
+                                              ...d,
+                                              statTypeName: ev.target.value,
+                                            }))
+                                          }
+                                          className="mt-0.5 w-full rounded border border-slate-600 bg-[#0f1b2d] px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
+                                        />
+                                      </label>
+                                      <label className="text-[11px] text-slate-400">
+                                        Player
+                                        <input
+                                          value={draft.playerName ?? ""}
+                                          onChange={(ev) =>
+                                            setDraft((d) => ({
+                                              ...d,
+                                              playerName: ev.target.value,
+                                            }))
+                                          }
+                                          className="mt-0.5 w-full rounded border border-slate-600 bg-[#0f1b2d] px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
+                                        />
+                                      </label>
+                                      <label className="text-[11px] text-slate-400">
+                                        Team
+                                        <input
+                                          value={draft.teamName ?? ""}
+                                          onChange={(ev) =>
+                                            setDraft((d) => ({
+                                              ...d,
+                                              teamName: ev.target.value,
+                                            }))
+                                          }
+                                          className="mt-0.5 w-full rounded border border-slate-600 bg-[#0f1b2d] px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
+                                        />
+                                      </label>
+                                      <label className="text-[11px] text-slate-400">
+                                        Time (s)
+                                        <input
+                                          type="number"
+                                          value={draft.relativeTime ?? 0}
+                                          onChange={(ev) =>
+                                            setDraft((d) => ({
+                                              ...d,
+                                              relativeTime: Number(
+                                                ev.target.value
+                                              ),
+                                            }))
+                                          }
+                                          className="mt-0.5 w-full rounded border border-slate-600 bg-[#0f1b2d] px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
+                                        />
+                                      </label>
+                                      <label className="text-[11px] text-slate-400">
+                                        Start X
+                                        <input
+                                          type="number"
+                                          value={draft.startX ?? 0}
+                                          onChange={(ev) =>
+                                            setDraft((d) => ({
+                                              ...d,
+                                              startX: Number(ev.target.value),
+                                            }))
+                                          }
+                                          className="mt-0.5 w-full rounded border border-slate-600 bg-[#0f1b2d] px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
+                                        />
+                                      </label>
+                                      <label className="text-[11px] text-slate-400">
+                                        Start Y
+                                        <input
+                                          type="number"
+                                          value={draft.startY ?? 0}
+                                          onChange={(ev) =>
+                                            setDraft((d) => ({
+                                              ...d,
+                                              startY: Number(ev.target.value),
+                                            }))
+                                          }
+                                          className="mt-0.5 w-full rounded border border-slate-600 bg-[#0f1b2d] px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
+                                        />
+                                      </label>
+                                      <label className="text-[11px] text-slate-400">
+                                        End X
+                                        <input
+                                          type="number"
+                                          value={draft.endX ?? 0}
+                                          onChange={(ev) =>
+                                            setDraft((d) => ({
+                                              ...d,
+                                              endX: Number(ev.target.value),
+                                            }))
+                                          }
+                                          className="mt-0.5 w-full rounded border border-slate-600 bg-[#0f1b2d] px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
+                                        />
+                                      </label>
+                                      <label className="text-[11px] text-slate-400">
+                                        End Y
+                                        <input
+                                          type="number"
+                                          value={draft.endY ?? 0}
+                                          onChange={(ev) =>
+                                            setDraft((d) => ({
+                                              ...d,
+                                              endY: Number(ev.target.value),
+                                            }))
+                                          }
+                                          className="mt-0.5 w-full rounded border border-slate-600 bg-[#0f1b2d] px-2 py-1 text-xs text-slate-100 outline-none focus:border-sky-500"
+                                        />
+                                      </label>
+                                    </div>
+                                    <div className="mt-2 flex items-center gap-2">
+                                      <button
+                                        onClick={applyEdit}
+                                        className="rounded bg-sky-600 px-3 py-1 text-xs font-semibold text-white hover:bg-sky-500"
+                                      >
+                                        Apply
+                                      </button>
+                                      <button
+                                        onClick={cancelEdit}
+                                        className="rounded border border-slate-600 px-3 py-1 text-xs font-semibold text-slate-300 hover:bg-[#111f35]"
+                                      >
+                                        Cancel
+                                      </button>
+                                      <span className="text-[11px] text-slate-500">
+                                        Tip: tag the event, then use the pitch
+                                        buttons above to drag its start/end.
+                                      </span>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                              </Fragment>
                             );
                           })}
                         </tbody>

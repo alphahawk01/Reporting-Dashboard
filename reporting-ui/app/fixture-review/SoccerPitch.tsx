@@ -48,6 +48,13 @@ type Props = {
   emphasize?: boolean;
   /** CSS max-height for the pitch SVG (keeps aspect ratio, letterboxes). */
   maxHeight?: number | string;
+  /**
+   * When set, clicking the pitch reports the clicked location (as 0..1
+   * fractions of the pitch) via onSetCoord, to move the active event's start
+   * or end cell. Null disables editing.
+   */
+  editMode?: "start" | "end" | null;
+  onSetCoord?: (fx: number, fy: number) => void;
 };
 
 // Pitch drawing constants (SVG user units). The playing area is PAD inset from
@@ -93,6 +100,8 @@ export default function SoccerPitch({
   awayTeamName,
   emphasize = false,
   maxHeight = "none",
+  editMode = null,
+  onSetCoord,
 }: Props) {
   const plotted = useMemo(() => {
     const out: {
@@ -151,11 +160,26 @@ export default function SoccerPitch({
       <svg
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="xMidYMid meet"
-        className="w-full rounded-xl"
+        className={`w-full rounded-xl ${editMode ? "cursor-crosshair" : ""}`}
         // Cap the pitch height so it doesn't dominate the column — the SVG
         // keeps its aspect ratio and letterboxes within this height, leaving
         // room for the timeline below to line up with the video.
         style={{ background: "#0b3d1f", maxHeight: maxHeight, height: "auto" }}
+        onClick={
+          editMode && onSetCoord
+            ? (ev) => {
+                // Map the click to a 0..1 fraction of the PLAYING area (inside
+                // the PAD border), clamped. viewBox units map linearly to the
+                // rendered box, so use the element's bounding rect.
+                const rect = ev.currentTarget.getBoundingClientRect();
+                const vx = ((ev.clientX - rect.left) / rect.width) * W;
+                const vy = ((ev.clientY - rect.top) / rect.height) * H;
+                const fx = Math.max(0, Math.min(1, (vx - PAD) / PW));
+                const fy = Math.max(0, Math.min(1, (vy - PAD) / PH));
+                onSetCoord(fx, fy);
+              }
+            : undefined
+        }
       >
         {/* Pitch markings (white lines). */}
         <g
