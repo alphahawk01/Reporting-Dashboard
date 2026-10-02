@@ -102,6 +102,9 @@ export function bumpFootball(c: FootballCounts, s: string): void {
     c.throughUnsucc += 1;
   else if (s.includes("through ball") && s.includes("successful"))
     c.throughSucc += 1;
+  // Bare "Through Balls" (no outcome) — count toward through balls so they
+  // still contribute to the Passing group.
+  else if (s.includes("through ball")) c.throughSucc += 1;
   // Crosses — source misspells "Unsuccesful" (one 's'), so match both.
   else if (
     s.includes("cross") &&
@@ -109,6 +112,8 @@ export function bumpFootball(c: FootballCounts, s: string): void {
   )
     c.crossUnsucc += 1;
   else if (s.includes("cross") && s.includes("successful")) c.crossSucc += 1;
+  // Bare "Crosses" (no outcome) — count so they contribute to Passing.
+  else if (s.includes("cross")) c.crossSucc += 1;
   // On-ball
   else if (s.includes("touch")) c.touches += 1;
   else if (s.includes("carr")) c.carries += 1;
