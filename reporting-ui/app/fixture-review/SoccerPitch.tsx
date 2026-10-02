@@ -41,6 +41,11 @@ type Props = {
   /** Display names for the legend. */
   homeTeamName?: string;
   awayTeamName?: string;
+  /**
+   * Emphasise markers (bigger dot + glow) — used when a single live event is
+   * shown in sync with video playback, so it reads clearly at a glance.
+   */
+  emphasize?: boolean;
 };
 
 // Pitch drawing constants (SVG user units). The playing area is PAD inset from
@@ -80,6 +85,7 @@ export default function SoccerPitch({
   awayTeamUid,
   homeTeamName,
   awayTeamName,
+  emphasize = false,
 }: Props) {
   const plotted = useMemo(() => {
     const out: {
@@ -192,12 +198,29 @@ export default function SoccerPitch({
                 x2={p.ex}
                 y2={p.ey}
                 stroke={p.color}
-                strokeWidth={2.5}
-                strokeOpacity={0.85}
+                strokeWidth={emphasize ? 4 : 2.5}
+                strokeOpacity={0.9}
                 markerEnd="url(#pitch-arrow)"
               />
             ) : null}
-            <circle cx={p.sx} cy={p.sy} r={6} fill={p.color} fillOpacity={0.9} />
+            {emphasize && (
+              <circle
+                cx={p.sx}
+                cy={p.sy}
+                r={16}
+                fill={p.color}
+                fillOpacity={0.25}
+              />
+            )}
+            <circle
+              cx={p.sx}
+              cy={p.sy}
+              r={emphasize ? 9 : 6}
+              fill={p.color}
+              fillOpacity={0.95}
+              stroke={emphasize ? "white" : "none"}
+              strokeWidth={emphasize ? 2 : 0}
+            />
           </g>
         ))}
       </svg>
@@ -212,7 +235,9 @@ export default function SoccerPitch({
           <span className="inline-block h-3 w-3 rounded-full" style={{ background: AWAY_COLOR }} />
           {awayTeamName || "Away"} (attacks →, mirrored)
         </span>
-        <span>{plotted.length.toLocaleString()} located events</span>
+        {!emphasize && (
+          <span>{plotted.length.toLocaleString()} located events</span>
+        )}
       </div>
     </div>
   );

@@ -162,7 +162,7 @@ export default function FixtureReviewPage() {
   const [tlPlayer, setTlPlayer] = useState<number | "all">("all"); // playerUid
 
   // --- In-page tab + Player Stats filters --------------------------------
-  const [tab, setTab] = useState<"review" | "stats" | "pitch">("review");
+  const [tab, setTab] = useState<"review" | "stats">("review");
   // Which quarter/period to show: the sport's TOTAL by default (AFL=5,
   // Soccer=3). Set from the loaded fixture's sport.
   const [statQuarter, setStatQuarter] = useState<StatQuarter>(5);
@@ -478,6 +478,14 @@ export default function FixtureReviewPage() {
     return active;
   }, [timeline, videoTime, offset]);
 
+  // The active event object (for the pitch map under the video). Shows just
+  // the one stat happening now, in sync with playback.
+  const activeEvent = useMemo(
+    () =>
+      timeline?.events.find((e) => e.uid === activeEventUid) ?? null,
+    [timeline, activeEventUid]
+  );
+
   // Auto-scroll the timeline so the active event stays in view as the video
   // plays. `block: "nearest"` only scrolls when the row is off-screen (no jitter
   // while it's already visible) and scrolls the timeline's own container rather
@@ -789,7 +797,6 @@ export default function FixtureReviewPage() {
               {[
                 { id: "review" as const, label: "Timeline & Video" },
                 { id: "stats" as const, label: "Player Stats" },
-                { id: "pitch" as const, label: "Pitch Map" },
               ].map((t) => (
                 <button
                   key={t.id}
@@ -850,6 +857,43 @@ export default function FixtureReviewPage() {
                 ) : (
                   <div className="rounded-xl border border-slate-700 bg-[#0f1b2d] p-4 text-sm text-slate-400">
                     No video URL for this fixture.
+                  </div>
+                )}
+
+                {/* Pitch map — shows ONLY the stat active at the current video
+                    position, so you see where on the pitch it was clicked as
+                    the video plays. */}
+                {timeline && timeline.eventCount > 0 && (
+                  <div className="mt-3">
+                    <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
+                      <span className="font-semibold uppercase tracking-wide">
+                        Pitch location
+                      </span>
+                      {activeEvent ? (
+                        <span className="truncate">
+                          {activeEvent.statTypeName}
+                          {activeEvent.playerName
+                            ? ` — ${
+                                activeEvent.playerNumber != null
+                                  ? `#${activeEvent.playerNumber} `
+                                  : ""
+                              }${activeEvent.playerName}`
+                            : ""}
+                        </span>
+                      ) : (
+                        <span className="text-slate-500">
+                          Play the video to track events
+                        </span>
+                      )}
+                    </div>
+                    <SoccerPitch
+                      events={activeEvent ? [activeEvent] : []}
+                      homeTeamUid={homeTeamUid}
+                      awayTeamUid={awayTeamUid}
+                      homeTeamName={selected?.homeTeam}
+                      awayTeamName={selected?.awayTeam}
+                      emphasize
+                    />
                   </div>
                 )}
               </div>
@@ -1209,116 +1253,6 @@ export default function FixtureReviewPage() {
               </div>
             )}
 
-            {/* TAB: PITCH MAP — where on the pitch each stat was clicked.
-                Reuses the quarter / event / player filters so a single stat or
-                player can be isolated. */}
-            {tab === "pitch" && (
-              <div>
-                {loadingTimeline && (
-                  <div className="flex items-center gap-2 p-3 text-sm text-slate-400">
-                    <Loader2 size={15} className="animate-spin" /> Loading
-                    pitch…
-                  </div>
-                )}
-                {timelineError && !timeline && (
-                  <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-300">
-                    {timelineError}
-                  </div>
-                )}
-                {timeline && (
-                  <>
-                    {/* Filters (quarter / event / player) — same as the
-                        timeline tab, so the pitch reflects the same scope. */}
-                    <div className="mb-3 flex flex-wrap items-center gap-2">
-                      <select
-                        value={tlQuarter === "all" ? "all" : String(tlQuarter)}
-                        onChange={(e) =>
-                          setTlQuarter(
-                            e.target.value === "all"
-                              ? "all"
-                              : Number(e.target.value)
-                          )
-                        }
-                        className="rounded-lg border border-slate-600 bg-[#0b1220] px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-sky-500"
-                      >
-                        <option value="all">All quarters</option>
-                        {[1, 2, 3, 4].map((q) => (
-                          <option key={q} value={q}>
-                            Q{q}
-                          </option>
-                        ))}
-                      </select>
-
-                      <select
-                        value={tlEvent}
-                        onChange={(e) => setTlEvent(e.target.value)}
-                        className="max-w-[180px] rounded-lg border border-slate-600 bg-[#0b1220] px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-sky-500"
-                      >
-                        <option value="all">All events</option>
-                        {eventOptions.map((ev) => (
-                          <option key={ev} value={ev}>
-                            {ev}
-                          </option>
-                        ))}
-                      </select>
-
-                      <select
-                        value={tlPlayer === "all" ? "all" : String(tlPlayer)}
-                        onChange={(e) =>
-                          setTlPlayer(
-                            e.target.value === "all"
-                              ? "all"
-                              : Number(e.target.value)
-                          )
-                        }
-                        className="max-w-[240px] rounded-lg border border-slate-600 bg-[#0b1220] px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-sky-500"
-                      >
-                        <option value="all">All players</option>
-                        {playerOptions.map((pl) => (
-                          <option key={pl.uid} value={pl.uid}>
-                            {pl.label}
-                          </option>
-                        ))}
-                      </select>
-
-                      {(tlQuarter !== "all" ||
-                        tlEvent !== "all" ||
-                        tlPlayer !== "all") && (
-                        <button
-                          onClick={() => {
-                            setTlQuarter("all");
-                            setTlEvent("all");
-                            setTlPlayer("all");
-                          }}
-                          className="text-xs font-medium text-sky-400 hover:text-sky-300"
-                        >
-                          Clear
-                        </button>
-                      )}
-                    </div>
-
-                    <SoccerPitch
-                      events={filteredEvents}
-                      homeTeamUid={homeTeamUid}
-                      awayTeamUid={awayTeamUid}
-                      homeTeamName={selected?.homeTeam}
-                      awayTeamName={selected?.awayTeam}
-                    />
-
-                    <p className="mt-2 text-[11px] text-slate-500">
-                      Dots mark where a stat was clicked; arrows show
-                      travelling events (passes, carries, crosses…) from start
-                      to end. Both teams are drawn attacking the same way.
-                    </p>
-                  </>
-                )}
-                {!timeline && !loadingTimeline && !timelineError && (
-                  <div className="rounded-xl border border-slate-700 bg-[#0f1b2d] p-4 text-sm text-slate-400">
-                    Select a game to see its pitch map.
-                  </div>
-                )}
-              </div>
-            )}
           </>
         )}
       </div>
