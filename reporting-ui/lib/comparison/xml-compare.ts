@@ -294,6 +294,29 @@ export function detectSportFromXml(
   return detectSportFromInstances(parseInstances(xml));
 }
 
+// Non-action markers excluded from the comparison and the by-category table:
+// substitutions, half markers, and pitch zones. Mirrors isExcludedStatLabel in
+// json-adapter.ts (kept inline to avoid a circular import). Matched
+// case-insensitively against a stat or category label.
+const EXCLUDED_COMPARE_LABELS = new Set([
+  "substitution",
+  "substitute",
+  "start half",
+  "starthalf",
+  "end half",
+  "endhalf",
+  "back",
+  "middle",
+  "front",
+  "penalty box",
+  "penaltybox",
+]);
+
+function isExcludedCompareLabel(label: string): boolean {
+  const v = (label ?? "").trim().toLowerCase();
+  return v.length > 0 && EXCLUDED_COMPARE_LABELS.has(v);
+}
+
 export function parseInstances(xml: string): Instance[] {
   const instances: Instance[] = [];
   if (typeof window === "undefined" || typeof DOMParser === "undefined") {
@@ -347,10 +370,15 @@ export function parseInstances(xml: string): Instance[] {
     const safeEnd = Number.isNaN(end) ? start : end;
     const cleanStat = stat.trim();
 
-    // Exclude substitutions — roster changes, not coded on-field actions — so
-    // they never count toward accuracy. (Kept inline here rather than imported
-    // to avoid a circular dependency with the JSON adapter.)
-    if (cleanStat.toLowerCase() === "substitution") continue;
+    // Exclude non-action markers (substitutions, Start/End Half, pitch zones:
+    // Back/Middle/Front/Penalty Box) from the comparison and the by-category
+    // table. Matched on the stat OR category label. (Kept inline rather than
+    // imported to avoid a circular dependency with the JSON adapter.)
+    if (
+      isExcludedCompareLabel(cleanStat) ||
+      isExcludedCompareLabel(category)
+    )
+      continue;
 
     // Code time = the actual moment of the coded action within the
     // lead/lag window. Most stats sit at the midpoint, but some stats

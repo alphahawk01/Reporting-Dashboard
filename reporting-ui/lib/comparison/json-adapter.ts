@@ -123,6 +123,42 @@ export function isSubstitutionEvent(
   return code === "substitute" || name === "substitution";
 }
 
+// Non-action markers excluded from EVERY comparison and timeline (lowercased
+// for matching). These are match administration / pitch-zone markers, not
+// coded on-field actions, so they must not appear in the accuracy-by-stat-
+// category table or count toward accuracy:
+//   - half markers: Start Half / End Half (StartHalf / EndHalf)
+//   - pitch zones:  Back / Middle / Front / Penalty Box
+const EXCLUDED_STAT_LABELS = new Set([
+  "substitution",
+  "substitute",
+  "start half",
+  "starthalf",
+  "end half",
+  "endhalf",
+  "back",
+  "middle",
+  "front",
+  "penalty box",
+  "penaltybox",
+]);
+
+/**
+ * True when a stat/category label is a non-action marker (substitution, half
+ * marker, or pitch zone) that should be excluded from all comparisons and
+ * timelines. Checks any of the provided label strings (stat name, code, or
+ * category) so both the JSON feed and XML masters are covered.
+ */
+export function isExcludedStatLabel(
+  ...labels: (string | null | undefined)[]
+): boolean {
+  for (const l of labels) {
+    const v = (l ?? "").trim().toLowerCase();
+    if (v && EXCLUDED_STAT_LABELS.has(v)) return true;
+  }
+  return false;
+}
+
 /**
  * Convert one JSON event into the whole-match code time (seconds), applying
  * the unit conversion and per-quarter offset. Returns NaN if relativeTime is
@@ -161,9 +197,9 @@ export function jsonEventsToInstances(
   const instances: Instance[] = [];
 
   for (const ev of events) {
-    // Substitutions are roster events, not coded on-field actions — exclude
-    // them from every comparison timeline so they never count toward accuracy.
-    if (isSubstitutionEvent(ev.statTypeCode, ev.statTypeName)) continue;
+    // Exclude non-action markers (substitutions, Start/End Half, pitch zones)
+    // from every comparison timeline so they never count toward accuracy.
+    if (isExcludedStatLabel(ev.statTypeCode, ev.statTypeName)) continue;
 
     const start = eventTime(ev, opts);
     if (Number.isNaN(start)) continue;
