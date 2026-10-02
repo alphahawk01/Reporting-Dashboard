@@ -859,12 +859,16 @@ export default function FixtureReviewPage() {
                     No video URL for this fixture.
                   </div>
                 )}
+              </div>
 
+              {/* Timeline column — pitch map on top (aligned with the video
+                  player's top), then the event timeline below. */}
+              <div className="min-w-0">
                 {/* Pitch map — shows ONLY the stat active at the current video
                     position, so you see where on the pitch it was clicked as
                     the video plays. */}
                 {timeline && timeline.eventCount > 0 && (
-                  <div className="mt-3">
+                  <div className="mb-4">
                     <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
                       <span className="font-semibold uppercase tracking-wide">
                         Pitch location
@@ -896,10 +900,7 @@ export default function FixtureReviewPage() {
                     />
                   </div>
                 )}
-              </div>
 
-              {/* Timeline */}
-              <div className="min-w-0">
                 {loadingTimeline && (
                   <div className="flex items-center gap-2 p-3 text-sm text-slate-400">
                     <Loader2 size={15} className="animate-spin" /> Loading
