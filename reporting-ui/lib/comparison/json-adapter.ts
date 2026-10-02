@@ -136,9 +136,14 @@ const EXCLUDED_STAT_LABELS = new Set([
   "starthalf",
   "end half",
   "endhalf",
-  "back",
-  "middle",
-  "front",
+  // Pitch zones — the feed/XML name them "Back/Middle/Front Third" and
+  // "Penalty Box" (codes BackThird/MiddleThird/FrontThird/PenaltyBox).
+  "back third",
+  "backthird",
+  "middle third",
+  "middlethird",
+  "front third",
+  "frontthird",
   "penalty box",
   "penaltybox",
 ]);

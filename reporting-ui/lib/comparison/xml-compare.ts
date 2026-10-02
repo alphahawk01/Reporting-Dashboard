@@ -305,9 +305,13 @@ const EXCLUDED_COMPARE_LABELS = new Set([
   "starthalf",
   "end half",
   "endhalf",
-  "back",
-  "middle",
-  "front",
+  // Pitch zones — named "Back/Middle/Front Third" and "Penalty Box".
+  "back third",
+  "backthird",
+  "middle third",
+  "middlethird",
+  "front third",
+  "frontthird",
   "penalty box",
   "penaltybox",
 ]);
