@@ -3448,7 +3448,7 @@ function AccuracyCompareInner() {
 
       {/* Split-screen review pop-up: video on the left half, both
           timelines (clickable) on the right half. */}
-      {videoOpen && videoUrl.trim() && (
+      {videoOpen && (
         <div className="fixed inset-0 z-50 flex flex-col bg-slate-900/80 p-2 backdrop-blur-sm">
           <div className="mx-auto flex h-full w-full max-w-[1800px] flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
             {/* Header */}
@@ -3597,15 +3597,23 @@ function AccuracyCompareInner() {
 
             {/* Body: video (left, larger) + timelines (right) */}
             <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[2fr_1fr]">
-              {/* Left: video */}
+              {/* Left: video (or a placeholder when no video is available —
+                  the filtered instance list on the right still works). */}
               <div className="flex min-h-0 items-center justify-center bg-black p-2">
-                <video
-                  ref={videoRef}
-                  src={videoUrl.trim()}
-                  controls
-                  onTimeUpdate={handleVideoTimeUpdate}
-                  className="max-h-full max-w-full"
-                />
+                {videoUrl.trim() ? (
+                  <video
+                    ref={videoRef}
+                    src={videoUrl.trim()}
+                    controls
+                    onTimeUpdate={handleVideoTimeUpdate}
+                    className="max-h-full max-w-full"
+                  />
+                ) : (
+                  <div className="px-6 text-center text-sm text-slate-400">
+                    No game video for this fixture. The filtered instances are
+                    listed on the right.
+                  </div>
+                )}
               </div>
 
               {/* Right: timelines */}
