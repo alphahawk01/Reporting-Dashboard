@@ -71,6 +71,7 @@ import {
 import {
   jsonEventsToInstances,
   serializeInstancesToJson,
+  playerNumberMapFromReport,
   type JsonEvent,
 } from "@/lib/comparison/json-adapter";
 import { fetchFixtureReport } from "@/lib/api/fixtureReports";
@@ -174,6 +175,8 @@ type FeedJson = {
   homeTeamUid?: number;
   awayTeamUid?: number;
   allStatistics?: JsonEvent[];
+  // Carries playerUid -> jersey number; raw events have no number of their own.
+  allParticipants?: { playerUid?: number | null; playerNumber?: number | null }[];
 };
 
 /**
@@ -196,7 +199,9 @@ function loadedFileFromJson(name: string, text: string): LoadedFile {
       'This JSON has no "allStatistics" array — is it a match event feed?'
     );
   }
-  const instances = jsonEventsToInstances(events, {});
+  const instances = jsonEventsToInstances(events, {
+    playerNumberByUid: playerNumberMapFromReport(parsed),
+  });
   if (instances.length === 0) {
     throw new Error("No timed events found in this feed.");
   }
@@ -1473,7 +1478,10 @@ function AccuracyCompareInner() {
             const events = Array.isArray(report.allStatistics)
               ? (report.allStatistics as unknown as JsonEvent[])
               : [];
-            const instances = jsonEventsToInstances(events, {});
+            // Raw events carry no jersey number — join it from participants.
+            const instances = jsonEventsToInstances(events, {
+              playerNumberByUid: playerNumberMapFromReport(report),
+            });
             const home = report.homeTeamName?.trim();
             const away = report.awayTeamName?.trim();
             const label =

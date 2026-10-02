@@ -55,6 +55,12 @@ export type JsonEvent = {
   statTypeName: string;
   playerName?: string;
   playerNumber?: number | null;
+  /**
+   * Player identity. The raw S3 stat events carry NO jersey number, only a
+   * `playerUid`; the number is joined from the report's `allParticipants` via
+   * JsonAdapterOptions.playerNumberByUid.
+   */
+  playerUid?: number;
   teamName?: string;
   /** Team identity. Conventionally 1 = home, 2 = away. */
   teamUid?: number;
@@ -69,6 +75,13 @@ export type JsonAdapterOptions = {
    * inputs are divided by 1000. Default: "seconds".
    */
   timeUnit?: "seconds" | "milliseconds";
+
+  /**
+   * playerUid -> jersey number, built from the report's `allParticipants`.
+   * The raw S3 stat events have no number of their own, so this join is the
+   * only way to attach it. Used when the event's own `playerNumber` is absent.
+   */
+  playerNumberByUid?: Map<number, number>;
 
   /**
    * Seconds to ADD to `relativeTime` for each quarter, keyed by the `quarter`
@@ -106,6 +119,26 @@ export type JsonAdapterOptions = {
    */
   mapCategory?: (event: JsonEvent, mappedStat: string) => string;
 };
+
+/**
+ * Build a playerUid -> jersey number map from a report's `allParticipants`.
+ * Raw stat events carry no number, so this join is how the number is attached.
+ * Pass the result as JsonAdapterOptions.playerNumberByUid.
+ */
+export function playerNumberMapFromReport(report: {
+  allParticipants?: {
+    playerUid?: number | null;
+    playerNumber?: number | null;
+  }[];
+}): Map<number, number> {
+  const m = new Map<number, number>();
+  for (const p of report?.allParticipants ?? []) {
+    if (p && p.playerUid != null && p.playerNumber != null) {
+      m.set(Number(p.playerUid), Number(p.playerNumber));
+    }
+  }
+  return m;
+}
 
 /**
  * True when an event is a substitution (roster change), identified by the
@@ -217,8 +250,14 @@ export function jsonEventsToInstances(
       : defaultMapCategory(ev.statTypeCode, stat);
 
     const team = (ev.teamName ?? "").trim();
+    // Prefer the event's own number; else join playerUid -> number from the
+    // participants map (raw S3 events carry no jersey number of their own).
     const playerNumber =
-      typeof ev.playerNumber === "number" ? ev.playerNumber : null;
+      typeof ev.playerNumber === "number"
+        ? ev.playerNumber
+        : ev.playerUid != null && opts.playerNumberByUid
+          ? opts.playerNumberByUid.get(Number(ev.playerUid)) ?? null
+          : null;
     const playerRaw = ev.playerName?.trim() ?? "";
 
     // Build a code string in the same "<Team> - #<n>. <name>" convention the

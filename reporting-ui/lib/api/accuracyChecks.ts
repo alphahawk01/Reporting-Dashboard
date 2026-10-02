@@ -9,7 +9,10 @@ import type {
     TeamBreakdown,
     Instance,
 } from "@/lib/comparison/xml-compare";
-import { jsonEventsToInstances } from "@/lib/comparison/json-adapter";
+import {
+    jsonEventsToInstances,
+    playerNumberMapFromReport,
+} from "@/lib/comparison/json-adapter";
 import {
     computePlayerAccuracyByScope,
     type StoredPlayerAccuracy,
@@ -31,9 +34,17 @@ export function instancesFromRaw(raw: string | null | undefined): Instance[] {
         try {
             const parsed = JSON.parse(raw) as {
                 allStatistics?: Parameters<typeof jsonEventsToInstances>[0];
+                allParticipants?: {
+                    playerUid?: number | null;
+                    playerNumber?: number | null;
+                }[];
             };
             if (Array.isArray(parsed.allStatistics)) {
-                return jsonEventsToInstances(parsed.allStatistics, {});
+                // Raw stat events carry no jersey number — join it from the
+                // report's participants (playerUid -> number).
+                return jsonEventsToInstances(parsed.allStatistics, {
+                    playerNumberByUid: playerNumberMapFromReport(parsed),
+                });
             }
             return [];
         } catch {
