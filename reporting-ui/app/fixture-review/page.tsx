@@ -1003,7 +1003,9 @@ export default function FixtureReviewPage() {
                       className="overflow-hidden rounded-xl border"
                       style={{ borderColor: THEME.border }}
                     >
-                    <div className="max-h-[56vh] overflow-auto">
+                    {/* ~10 rows visible at a time: sticky header (~34px) +
+                        10 rows (~30px each). The rest scroll. */}
+                    <div className="max-h-[334px] overflow-auto">
                       <table className="w-full border-collapse text-sm">
                         <thead className="sticky top-0">
                           <tr className="bg-[#111f35] text-left text-xs uppercase tracking-wide text-slate-400">
