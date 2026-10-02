@@ -108,6 +108,22 @@ export type JsonAdapterOptions = {
 };
 
 /**
+ * True when an event is a substitution (roster change), identified by the
+ * native code "Substitute" / name "Substitution". These are not coded on-field
+ * actions, so they're excluded from every comparison and timeline — a sub's
+ * timestamp must never count toward accuracy or appear in the event list.
+ * Shared so the comparison adapter and the fixture timeline filter identically.
+ */
+export function isSubstitutionEvent(
+  statTypeCode?: string | null,
+  statTypeName?: string | null
+): boolean {
+  const code = (statTypeCode ?? "").trim().toLowerCase();
+  const name = (statTypeName ?? "").trim().toLowerCase();
+  return code === "substitute" || name === "substitution";
+}
+
+/**
  * Convert one JSON event into the whole-match code time (seconds), applying
  * the unit conversion and per-quarter offset. Returns NaN if relativeTime is
  * not a finite number (such events are dropped by jsonEventsToInstances).
@@ -145,6 +161,10 @@ export function jsonEventsToInstances(
   const instances: Instance[] = [];
 
   for (const ev of events) {
+    // Substitutions are roster events, not coded on-field actions — exclude
+    // them from every comparison timeline so they never count toward accuracy.
+    if (isSubstitutionEvent(ev.statTypeCode, ev.statTypeName)) continue;
+
     const start = eventTime(ev, opts);
     if (Number.isNaN(start)) continue;
 

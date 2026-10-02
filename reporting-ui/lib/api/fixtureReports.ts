@@ -18,6 +18,7 @@ import type {
   StatQuarter,
   RawPlayerStats,
 } from "@/types/fixtureReport";
+import { isSubstitutionEvent } from "@/lib/comparison/json-adapter";
 
 // One Player Stats column. `key` is the stable id, `label`/`title` for display,
 // `statTypes` the JADE statType(s) in allPlayerStats[].allStatistics to sum for
@@ -276,6 +277,9 @@ export function toFixtureTimeline(
     : [];
 
   const events = dropMirrorDuplicates(raw)
+    // Drop substitutions — roster changes, not coded on-field actions — so
+    // they never appear in the timeline/pitch (matches the comparison adapter).
+    .filter((e) => !isSubstitutionEvent(e.statTypeCode, e.statTypeName))
     // Copy is implicit (filter returns a new array). Attach the joined jumper
     // number to each event, then sort chronologically.
     .map((e) => ({

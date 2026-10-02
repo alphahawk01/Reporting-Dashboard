@@ -347,6 +347,11 @@ export function parseInstances(xml: string): Instance[] {
     const safeEnd = Number.isNaN(end) ? start : end;
     const cleanStat = stat.trim();
 
+    // Exclude substitutions — roster changes, not coded on-field actions — so
+    // they never count toward accuracy. (Kept inline here rather than imported
+    // to avoid a circular dependency with the JSON adapter.)
+    if (cleanStat.toLowerCase() === "substitution") continue;
+
     // Code time = the actual moment of the coded action within the
     // lead/lag window. Most stats sit at the midpoint, but some stats
     // are coded with a consistent fixed offset from the start instead
