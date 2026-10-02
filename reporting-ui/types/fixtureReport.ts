@@ -38,6 +38,15 @@ export interface FixtureStatEvent {
   startY: number;
   endX: number;
   endY: number;
+  /**
+   * Grid dimensions the start/end cells are indexed within (soccer ~10 × 8).
+   * startX/startY are 1-based cells inside this grid. 0 when no location was
+   * captured. The end cells share the start grid's dimensions.
+   */
+  startWidth: number;
+  startHeight: number;
+  endWidth: number;
+  endHeight: number;
   /** Coarse field zone. */
   zone: number;
   groundSide: string;

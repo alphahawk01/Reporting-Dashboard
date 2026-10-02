@@ -24,6 +24,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ListVideo, Loader2, AlertTriangle, Film, CalendarDays } from "lucide-react";
 
 import { THEME } from "@/lib/theme";
+import SoccerPitch from "./SoccerPitch";
 import {
   getReviewFixturesFromComps,
   fixtureTitle,
@@ -161,7 +162,7 @@ export default function FixtureReviewPage() {
   const [tlPlayer, setTlPlayer] = useState<number | "all">("all"); // playerUid
 
   // --- In-page tab + Player Stats filters --------------------------------
-  const [tab, setTab] = useState<"review" | "stats">("review");
+  const [tab, setTab] = useState<"review" | "stats" | "pitch">("review");
   // Which quarter/period to show: the sport's TOTAL by default (AFL=5,
   // Soccer=3). Set from the loaded fixture's sport.
   const [statQuarter, setStatQuarter] = useState<StatQuarter>(5);
@@ -788,6 +789,7 @@ export default function FixtureReviewPage() {
               {[
                 { id: "review" as const, label: "Timeline & Video" },
                 { id: "stats" as const, label: "Player Stats" },
+                { id: "pitch" as const, label: "Pitch Map" },
               ].map((t) => (
                 <button
                   key={t.id}
@@ -1202,6 +1204,117 @@ export default function FixtureReviewPage() {
                 {timeline && timeline.players.length === 0 && (
                   <div className="rounded-xl border border-slate-700 bg-[#0f1b2d] p-4 text-sm text-slate-400">
                     No player stats in this report.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB: PITCH MAP — where on the pitch each stat was clicked.
+                Reuses the quarter / event / player filters so a single stat or
+                player can be isolated. */}
+            {tab === "pitch" && (
+              <div>
+                {loadingTimeline && (
+                  <div className="flex items-center gap-2 p-3 text-sm text-slate-400">
+                    <Loader2 size={15} className="animate-spin" /> Loading
+                    pitch…
+                  </div>
+                )}
+                {timelineError && !timeline && (
+                  <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-300">
+                    {timelineError}
+                  </div>
+                )}
+                {timeline && (
+                  <>
+                    {/* Filters (quarter / event / player) — same as the
+                        timeline tab, so the pitch reflects the same scope. */}
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      <select
+                        value={tlQuarter === "all" ? "all" : String(tlQuarter)}
+                        onChange={(e) =>
+                          setTlQuarter(
+                            e.target.value === "all"
+                              ? "all"
+                              : Number(e.target.value)
+                          )
+                        }
+                        className="rounded-lg border border-slate-600 bg-[#0b1220] px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-sky-500"
+                      >
+                        <option value="all">All quarters</option>
+                        {[1, 2, 3, 4].map((q) => (
+                          <option key={q} value={q}>
+                            Q{q}
+                          </option>
+                        ))}
+                      </select>
+
+                      <select
+                        value={tlEvent}
+                        onChange={(e) => setTlEvent(e.target.value)}
+                        className="max-w-[180px] rounded-lg border border-slate-600 bg-[#0b1220] px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-sky-500"
+                      >
+                        <option value="all">All events</option>
+                        {eventOptions.map((ev) => (
+                          <option key={ev} value={ev}>
+                            {ev}
+                          </option>
+                        ))}
+                      </select>
+
+                      <select
+                        value={tlPlayer === "all" ? "all" : String(tlPlayer)}
+                        onChange={(e) =>
+                          setTlPlayer(
+                            e.target.value === "all"
+                              ? "all"
+                              : Number(e.target.value)
+                          )
+                        }
+                        className="max-w-[240px] rounded-lg border border-slate-600 bg-[#0b1220] px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-sky-500"
+                      >
+                        <option value="all">All players</option>
+                        {playerOptions.map((pl) => (
+                          <option key={pl.uid} value={pl.uid}>
+                            {pl.label}
+                          </option>
+                        ))}
+                      </select>
+
+                      {(tlQuarter !== "all" ||
+                        tlEvent !== "all" ||
+                        tlPlayer !== "all") && (
+                        <button
+                          onClick={() => {
+                            setTlQuarter("all");
+                            setTlEvent("all");
+                            setTlPlayer("all");
+                          }}
+                          className="text-xs font-medium text-sky-400 hover:text-sky-300"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+
+                    <SoccerPitch
+                      events={filteredEvents}
+                      homeTeamUid={homeTeamUid}
+                      awayTeamUid={awayTeamUid}
+                      homeTeamName={selected?.homeTeam}
+                      awayTeamName={selected?.awayTeam}
+                    />
+
+                    <p className="mt-2 text-[11px] text-slate-500">
+                      Dots mark where a stat was clicked; arrows show
+                      travelling events (passes, carries, crosses…) from start
+                      to end. Both teams are drawn attacking the same way.
+                    </p>
+                  </>
+                )}
+                {!timeline && !loadingTimeline && !timelineError && (
+                  <div className="rounded-xl border border-slate-700 bg-[#0f1b2d] p-4 text-sm text-slate-400">
+                    Select a game to see its pitch map.
                   </div>
                 )}
               </div>
