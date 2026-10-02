@@ -92,7 +92,7 @@ export default function SoccerPitch({
   homeTeamName,
   awayTeamName,
   emphasize = false,
-  maxHeight = 260,
+  maxHeight = "none",
 }: Props) {
   const plotted = useMemo(() => {
     const out: {
