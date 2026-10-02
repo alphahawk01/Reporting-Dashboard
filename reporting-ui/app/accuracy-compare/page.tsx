@@ -1298,10 +1298,18 @@ function AccuracyCompareInner() {
       }
     }
 
-    if (firstStart !== null) {
-      // seekVideo also opens the modal.
-      seekVideo(firstStart);
+    // Open the video review on the first matching instance when a video is
+    // available; the review list is filtered to this player either way.
+    if (videoUrl.trim()) {
+      if (firstStart !== null) {
+        // seekVideo also opens the modal.
+        seekVideo(firstStart);
+      } else {
+        setVideoOpen(true);
+      }
     } else {
+      // No video: still open the review panel so the filtered instance list
+      // (missed / extra / exact for this player+stat) is visible.
       setVideoOpen(true);
     }
   };
@@ -1498,14 +1506,24 @@ function AccuracyCompareInner() {
               raw: JSON.stringify(report),
               kind: "json",
             };
+            // Auto-fill the game video from the report so the review timeline
+            // and player-table drill-down have a video to play. Prefer the
+            // analyst's video (the side being reviewed); fall back to master.
+            const vid = (
+              (report as { myMatchVideo?: { videoFileName?: string } })
+                .myMatchVideo?.videoFileName ?? ""
+            ).trim();
             if (side === "master") {
               setMaster(loaded);
               // Fresh compare — drop any previously-loaded saved check.
               setLoadedCheckId(null);
               setCheckAnalystName(null);
               setDisputes([]);
+              // Only set master's video if we won't also load an analyst.
+              if (vid && !analystFixtureId) setVideoUrl(vid);
             } else {
               setAnalyst(loaded);
+              if (vid) setVideoUrl(vid);
             }
             loadedRef.current = id;
           } catch (err) {
@@ -3062,11 +3080,11 @@ function AccuracyCompareInner() {
                                 master={m}
                                 analyst={a}
                                 mismatch={mismatch}
-                                onClick={
-                                  videoUrl.trim()
-                                    ? () => openPlayerReview(p, col)
-                                    : undefined
-                                }
+                                // Always clickable: filters the review
+                                // timeline to this player's instances of the
+                                // stat. If a video URL exists it also seeks;
+                                // without one the timeline still filters.
+                                onClick={() => openPlayerReview(p, col)}
                               />
                             );
                           })}
