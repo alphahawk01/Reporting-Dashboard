@@ -26,6 +26,7 @@ import { ListVideo, Loader2, AlertTriangle, Film, CalendarDays } from "lucide-re
 import { THEME } from "@/lib/theme";
 import {
   getReviewFixturesFromComps,
+  fixtureTitle,
   type ReviewFixture,
 } from "@/lib/api/reviewFixtures";
 import { getCompFacets } from "@/lib/api/compFixtures";
@@ -694,10 +695,7 @@ export default function FixtureReviewPage() {
               </option>
               {gamesForWeek.map((f) => (
                 <option key={f.id} value={f.id}>
-                  {f.homeTeam} vs {f.awayTeam}
-                  {f.competition
-                    ? ` — ${f.competition}${f.round ? ` R${f.round}` : ""}`
-                    : ""}
+                  {fixtureTitle(f)}
                 </option>
               ))}
             </select>
