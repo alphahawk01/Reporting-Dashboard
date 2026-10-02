@@ -1003,7 +1003,7 @@ export default function FixtureReviewPage() {
                       className="overflow-hidden rounded-xl border"
                       style={{ borderColor: THEME.border }}
                     >
-                    <div className="max-h-[39vh] overflow-auto">
+                    <div className="max-h-[56vh] overflow-auto">
                       <table className="w-full border-collapse text-sm">
                         <thead className="sticky top-0">
                           <tr className="bg-[#111f35] text-left text-xs uppercase tracking-wide text-slate-400">

@@ -46,6 +46,8 @@ type Props = {
    * shown in sync with video playback, so it reads clearly at a glance.
    */
   emphasize?: boolean;
+  /** CSS max-height for the pitch SVG (keeps aspect ratio, letterboxes). */
+  maxHeight?: number | string;
 };
 
 // Pitch drawing constants (SVG user units). The playing area is PAD inset from
@@ -90,6 +92,7 @@ export default function SoccerPitch({
   homeTeamName,
   awayTeamName,
   emphasize = false,
+  maxHeight = 260,
 }: Props) {
   const plotted = useMemo(() => {
     const out: {
@@ -147,8 +150,12 @@ export default function SoccerPitch({
     <div>
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        className="h-auto w-full rounded-xl"
-        style={{ background: "#0b3d1f" }}
+        preserveAspectRatio="xMidYMid meet"
+        className="w-full rounded-xl"
+        // Cap the pitch height so it doesn't dominate the column — the SVG
+        // keeps its aspect ratio and letterboxes within this height, leaving
+        // room for the timeline below to line up with the video.
+        style={{ background: "#0b3d1f", maxHeight: maxHeight, height: "auto" }}
       >
         {/* Pitch markings (white lines). */}
         <g
