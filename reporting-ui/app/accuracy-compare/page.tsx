@@ -527,6 +527,8 @@ const FOOTBALL_CONFIG: SportConfig = {
       c.throughUnsucc += 1;
     else if (s.includes("through ball") && s.includes("successful"))
       c.throughSucc += 1;
+    // Bare "Through Balls" (no outcome) — count toward the Through Balls total.
+    else if (s.includes("through ball")) c.throughSucc += 1;
     // Crosses — source misspells "Unsuccesful" (one 's'), so match both.
     else if (
       s.includes("cross") &&
@@ -535,6 +537,8 @@ const FOOTBALL_CONFIG: SportConfig = {
       c.crossUnsucc += 1;
     else if (s.includes("cross") && s.includes("successful"))
       c.crossSucc += 1;
+    // Bare "Crosses" (no outcome) — count toward the Crosses total.
+    else if (s.includes("cross")) c.crossSucc += 1;
     // On-ball
     else if (s.includes("touch")) c.touches += 1;
     else if (s.includes("carr")) c.carries += 1; // Carries

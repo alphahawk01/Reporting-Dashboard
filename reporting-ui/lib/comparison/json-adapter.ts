@@ -341,6 +341,10 @@ const STAT_CODE_MAP: Record<string, { stat: string; category: string }> = {
   // Crosses live in the Passing group; the XML misspells "Unsuccesful" (one 's').
   crosseffective: { stat: "Crosses Successful", category: "Passing" },
   crossineffective: { stat: "Crosses Unsuccesful", category: "Passing" },
+  // Bare "Cross"/"ThroughBall" (no effective/ineffective) still belong to
+  // Passing so they group correctly even without an outcome.
+  cross: { stat: "Crosses", category: "Passing" },
+  throughball: { stat: "Through Balls", category: "Passing" },
   freekickpass: { stat: "Free Kick Passes", category: "Passing" },
   carry: { stat: "Carries", category: "Passing" },
   touch: { stat: "Touch", category: "Passing" },
@@ -364,18 +368,32 @@ const STAT_CODE_MAP: Record<string, { stat: string; category: string }> = {
   // exports round-trip back to the same canonical label.
   intercept: { stat: "Intercepts", category: "General Play" },
   aerialwin: { stat: "Aerial Wins", category: "General Play" },
+  aerialloss: { stat: "Aerial Losses", category: "General Play" },
+  groundduelwin: { stat: "Ground Duel Wins", category: "General Play" },
+  groundduelloss: { stat: "Ground Duel Losses", category: "General Play" },
   foul: { stat: "Fouls", category: "General Play" },
   fouldrawn: { stat: "Fouls Drawn", category: "General Play" },
+  offside: { stat: "Offsides", category: "General Play" },
 
   // --- Goal Keeper group ---
   save: { stat: "Saves", category: "Goal Keeper" },
   block: { stat: "Blocks", category: "Goal Keeper" },
+  punch: { stat: "Punches", category: "Goal Keeper" },
+  claimed: { stat: "Claimed", category: "Goal Keeper" },
+  rebound: { stat: "Rebounds", category: "Goal Keeper" },
+  keeperthrowsuccessful: { stat: "Keeper Throws Successful", category: "Goal Keeper" },
+  keeperthrowunsuccessful: { stat: "Keeper Throws Unsuccessful", category: "Goal Keeper" },
+  goalkicksuccessful: { stat: "Goal Kicks Successful", category: "Goal Keeper" },
+  goalkickunsuccessful: { stat: "Goal Kicks Unsuccessful", category: "Goal Keeper" },
 
   // --- Shots group ---
   // NOTE: the feed's generic "shot" (lowercase) and "Goal" both carry
   // statTypeName "Shot in Play"; the XML has no generic in-play shot label,
   // only outcome-specific ones, so a plain "shot" will not pair (expected).
   shotofftarget: { stat: "Shots Off Target", category: "Shots" },
+  shotsaved: { stat: "Shots Saved", category: "Shots" },
+  shotblocked: { stat: "Shots Blocked", category: "Shots" },
+  freekickshot: { stat: "Free Kick Shots", category: "Shots" },
   goal: { stat: "Goals", category: "Shots" },
 };
 
@@ -405,8 +423,35 @@ export function defaultMapStatName(
 }
 
 /**
- * Default category mapper. Uses the STAT_CODE_MAP category for known codes,
- * else falls back to the mapped stat label so breakdowns still group.
+ * Classify a stat label into one of the real XML category groups by keyword,
+ * so the by-category breakdown groups like the XML (a handful of categories)
+ * instead of making every unmapped stat its own category. Mirrors the XML's
+ * groups: Passing, General Play, Event, Goal Keeper, Shots.
+ */
+function classifyCategory(label: string): string {
+  const s = label.toLowerCase();
+  // Goal Keeper
+  if (
+    /\b(save|block|punch|claim|rebound|keeper|goal kick)\b/.test(s)
+  )
+    return "Goal Keeper";
+  // Shots
+  if (/\b(shot|goal|free kick shot)\b/.test(s)) return "Shots";
+  // Event / set pieces
+  if (/\b(corner|throw in|throw-in|kick off|kick-off)\b/.test(s))
+    return "Event";
+  // Passing
+  if (/\b(pass|cross|through ball|carry|carries|touch|free kick pass)\b/.test(s))
+    return "Passing";
+  // Everything else (duels, tackles, recoveries, fouls, offsides, headers…)
+  return "General Play";
+}
+
+/**
+ * Default category mapper. Uses the STAT_CODE_MAP category for known codes.
+ * For anything unmapped it classifies the stat label into a real group (NOT
+ * the stat label itself) so the by-category breakdown stays grouped like the
+ * XML comparison rather than listing one row per stat.
  */
 export function defaultMapCategory(
   statTypeCode: string | undefined,
@@ -416,7 +461,7 @@ export function defaultMapCategory(
     const entry = STAT_CODE_MAP[statTypeCode.toLowerCase()];
     if (entry) return entry.category;
   }
-  return mappedStat;
+  return classifyCategory(mappedStat);
 }
 
 /**

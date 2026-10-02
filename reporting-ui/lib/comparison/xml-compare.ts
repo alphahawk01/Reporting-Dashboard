@@ -563,9 +563,22 @@ const STAT_PREFERENCES: Record<string, string[]> = {
     "through balls unsuccessful",
     "clearances",
   ],
+  // Bare "Through Balls" (no outcome) is the same action as the
+  // successful/unsuccessful variants — pair them all.
+  "through balls": [
+    "through balls",
+    "through balls successful",
+    "through balls unsuccessful",
+    "long passes successful",
+    "long passes unsuccessful",
+    "short passes successful",
+    "short passes unsuccessful",
+    "clearances",
+  ],
   "through balls successful": [
     "through balls successful",
     "through balls unsuccessful",
+    "through balls",
     "long passes successful",
     "long passes unsuccessful",
     "short passes successful",
@@ -575,6 +588,7 @@ const STAT_PREFERENCES: Record<string, string[]> = {
   "through balls unsuccessful": [
     "through balls unsuccessful",
     "through balls successful",
+    "through balls",
     "long passes unsuccessful",
     "long passes successful",
     "short passes unsuccessful",
@@ -630,8 +644,13 @@ const STAT_PREFERENCES: Record<string, string[]> = {
     "through balls unsuccessful",
   ],
   // --- Crosses (source misspells "unsuccesful" with one 's') ---
-  "crosses successful": ["crosses successful", "crosses unsuccesful"],
-  "crosses unsuccesful": ["crosses unsuccesful", "crosses successful"],
+  // Some coders log a bare "Crosses" (no outcome); others split into
+  // successful/unsuccesful. Treat all three as the same action so a bare
+  // master cross pairs with an effective/ineffective analyst cross (and vice
+  // versa) instead of counting as missed/extra.
+  crosses: ["crosses", "crosses successful", "crosses unsuccesful"],
+  "crosses successful": ["crosses successful", "crosses unsuccesful", "crosses"],
+  "crosses unsuccesful": ["crosses unsuccesful", "crosses successful", "crosses"],
   // --- Goalkeeper handling ---
   catches: ["catches", "claims", "saves"],
   claims: ["claims", "catches", "saves"],
