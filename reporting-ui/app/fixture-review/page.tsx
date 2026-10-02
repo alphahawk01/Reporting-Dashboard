@@ -598,26 +598,19 @@ export default function FixtureReviewPage() {
 
   return (
     <div
-      className="min-h-screen p-6 text-slate-200"
+      className="min-h-screen p-4 text-slate-200"
       style={{ background: THEME.bg }}
     >
       <div className="w-full">
-        {/* HEADER */}
-        <div className="mb-5">
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-white">
-            <ListVideo size={22} className="text-sky-400" />
-            Fixture Review
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm text-slate-400">
-            Choose a date and game, watch the match video, and step through its
-            stat timeline. Click any event to jump the video to that moment; the
-            current event highlights as the video plays.
-          </p>
+        {/* HEADER — compact so the video/pitch/timeline sit higher. */}
+        <div className="mb-2 flex items-center gap-2">
+          <ListVideo size={20} className="text-sky-400" />
+          <h1 className="text-xl font-bold text-white">Fixture Review</h1>
         </div>
 
         {/* FILTER BAR: date dropdown + game dropdown */}
         <div
-          className="mb-6 flex flex-wrap items-end gap-4 rounded-xl border p-4"
+          className="mb-3 flex flex-wrap items-end gap-3 rounded-xl border p-3"
           style={{ background: THEME.panel, borderColor: THEME.border }}
         >
           <div>
@@ -759,41 +752,34 @@ export default function FixtureReviewPage() {
 
         {selected && (
           <>
-            {/* Fixture header */}
-            <div
-              className="mb-4 rounded-xl border p-4"
-              style={{ background: THEME.panel, borderColor: THEME.border }}
-            >
-              <h2 className="text-lg font-semibold text-white">
+            {/* Compact fixture header — one line, no separate card, so the
+                video/pitch/timeline come up the page. */}
+            <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+              <h2 className="font-semibold text-white">
                 {selected.homeTeam}
-                <span className="mx-2 text-slate-500">vs</span>
+                <span className="mx-1.5 text-slate-500">vs</span>
                 {selected.awayTeam}
               </h2>
-              <div className="mt-1 flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-400">
-                <span>
-                  {[selected.competition, selected.round ? `R${selected.round}` : ""]
-                    .filter(Boolean)
-                    .join(" ") || "—"}
+              <span className="text-slate-400">
+                {[
+                  selected.competition,
+                  selected.round ? `R${selected.round}` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ") || "—"}
+              </span>
+              <span className="text-slate-500">
+                {matchDateLabel(dateKey(selected.date))}
+              </span>
+              {timeline && (
+                <span className="text-slate-500">
+                  {timeline.eventCount.toLocaleString()} events
                 </span>
-                <span>{matchDateLabel(dateKey(selected.date))}</span>
-                {timeline && (
-                  <>
-                    <span className="flex items-center gap-1">
-                      <span className="inline-block h-3 w-3 rounded-sm bg-emerald-500/60" />
-                      {selected.homeTeam}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span className="inline-block h-3 w-3 rounded-sm bg-orange-500/60" />
-                      {selected.awayTeam}
-                    </span>
-                    <span>{timeline.eventCount.toLocaleString()} events</span>
-                  </>
-                )}
-              </div>
+              )}
             </div>
 
             {/* IN-PAGE TABS */}
-            <div className="mb-4 flex gap-1 border-b border-slate-700">
+            <div className="mb-3 flex gap-1 border-b border-slate-700">
               {[
                 { id: "review" as const, label: "Timeline & Video" },
                 { id: "stats" as const, label: "Player Stats" },
