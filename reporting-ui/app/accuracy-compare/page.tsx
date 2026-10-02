@@ -1508,7 +1508,8 @@ function AccuracyCompareInner() {
             };
             // Auto-fill the game video from the report so the review timeline
             // and player-table drill-down have a video to play. Prefer the
-            // analyst's video (the side being reviewed); fall back to master.
+            // MASTER's video (the reference coding); the analyst's video is
+            // only used as a fallback when there is no master side.
             const vid = (
               (report as { myMatchVideo?: { videoFileName?: string } })
                 .myMatchVideo?.videoFileName ?? ""
@@ -1519,11 +1520,13 @@ function AccuracyCompareInner() {
               setLoadedCheckId(null);
               setCheckAnalystName(null);
               setDisputes([]);
-              // Only set master's video if we won't also load an analyst.
-              if (vid && !analystFixtureId) setVideoUrl(vid);
+              // Master video wins — set it whenever present.
+              if (vid) setVideoUrl(vid);
             } else {
               setAnalyst(loaded);
-              if (vid) setVideoUrl(vid);
+              // Only use the analyst's video when there's no master to take it
+              // from (analyst-only load); otherwise the master's video wins.
+              if (vid && !fixtureId) setVideoUrl(vid);
             }
             loadedRef.current = id;
           } catch (err) {
