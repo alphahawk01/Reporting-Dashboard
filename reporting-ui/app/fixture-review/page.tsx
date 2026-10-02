@@ -1042,10 +1042,10 @@ export default function FixtureReviewPage() {
               {/* Timeline column — pitch map on top (aligned with the video
                   player's top), then the event timeline below. */}
               <div className="min-w-0">
-                {/* Pitch map — shows ONLY the stat active at the current video
-                    position, so you see where on the pitch it was clicked as
-                    the video plays. */}
-                {timeline && timeline.eventCount > 0 && (
+                {/* Pitch map — SOCCER ONLY (the pitch markings and coordinate
+                    frame are soccer-specific; AFL fixtures don't get it).
+                    Shows ONLY the stat active at the current video position. */}
+                {timeline && timeline.eventCount > 0 && isSoccerStats && (
                   <div className="mb-4">
                     <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
                       <span className="font-semibold uppercase tracking-wide">
