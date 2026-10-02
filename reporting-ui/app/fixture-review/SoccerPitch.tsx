@@ -67,12 +67,16 @@ function norm(cell: number, size: number): number | null {
   return Math.max(0, Math.min(1, v));
 }
 
-// Map a normalised (fx, fy) in 0..1 to SVG pitch coordinates. `flip` mirrors
-// the point (used so the away team attacks the opposite direction).
-function toXY(fx: number, fy: number, flip: boolean): { x: number; y: number } {
-  const ux = flip ? 1 - fx : fx;
-  const uy = flip ? 1 - fy : fy;
-  return { x: PAD + ux * PW, y: PAD + uy * PH };
+// Map a normalised (fx, fy) in 0..1 to SVG pitch coordinates.
+//
+// NOTE: the feed records each team's coordinates in its OWN attacking frame
+// (confirmed against real data — both teams average the same startX ≈ 0.55 of
+// the width, rather than mirror-image averages). So "higher X = closer to the
+// opponent goal" holds for BOTH teams, and we must NOT flip the away team —
+// doing so put the two teams on opposite ends. Both are drawn attacking the
+// same direction (left → right).
+function toXY(fx: number, fy: number): { x: number; y: number } {
+  return { x: PAD + fx * PW, y: PAD + fy * PH };
 }
 
 const HOME_COLOR = "#34d399"; // emerald — matches timeline home tint
@@ -102,8 +106,6 @@ export default function SoccerPitch({
       const fsy = norm(e.startY, e.startHeight);
       if (fsx == null || fsy == null) continue; // no coordinates for this event
 
-      // Home attacks left→right; away is flipped so both attack "up the pitch".
-      const flip = awayTeamUid != null && e.teamUid === awayTeamUid;
       const color =
         e.teamUid === homeTeamUid
           ? HOME_COLOR
@@ -111,7 +113,7 @@ export default function SoccerPitch({
             ? AWAY_COLOR
             : NEUTRAL_COLOR;
 
-      const start = toXY(fsx, fsy, flip);
+      const start = toXY(fsx, fsy);
 
       // End point (only when it differs from start — a travelling event).
       const fex = norm(e.endX, e.startWidth);
@@ -119,7 +121,7 @@ export default function SoccerPitch({
       let ex: number | null = null;
       let ey: number | null = null;
       if (fex != null && fey != null && (e.endX !== e.startX || e.endY !== e.startY)) {
-        const end = toXY(fex, fey, flip);
+        const end = toXY(fex, fey);
         ex = end.x;
         ey = end.y;
       }
@@ -229,12 +231,13 @@ export default function SoccerPitch({
       <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-slate-400">
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-3 w-3 rounded-full" style={{ background: HOME_COLOR }} />
-          {homeTeamName || "Home"} (attacks →)
+          {homeTeamName || "Home"}
         </span>
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-3 w-3 rounded-full" style={{ background: AWAY_COLOR }} />
-          {awayTeamName || "Away"} (attacks →, mirrored)
+          {awayTeamName || "Away"}
         </span>
+        <span className="text-slate-500">attacking →</span>
         {!emphasize && (
           <span>{plotted.length.toLocaleString()} located events</span>
         )}
