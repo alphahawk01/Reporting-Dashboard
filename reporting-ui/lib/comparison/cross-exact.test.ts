@@ -46,4 +46,23 @@ describe("bare vs outcome crosses/through balls", () => {
     const res = compareInstances(master, analyst, 3, "Home vs Away");
     expect(res.rows[0].status).not.toBe("exact");
   });
+
+  it("pairs SAME player+time across unrelated stats (players-first)", () => {
+    // Master "Tackles Successful" vs analyst "Ground Duel Loss" — different
+    // actions, but same player (#5) at the same time: must pair as wrong_stat,
+    // not drop to missed/extra.
+    const master = [inst("m1", 400, "Tackles Successful", "Home", 5)];
+    const analyst = [inst("a1", 400, "Ground Duel Losses", "Home", 5)];
+    const res = compareInstances(master, analyst, 3, "Home vs Away");
+    expect(res.rows[0].status).toBe("wrong_stat");
+    expect(res.rows[0].analyst).not.toBeNull();
+  });
+
+  it("does NOT pair unrelated stats on DIFFERENT players", () => {
+    const master = [inst("m1", 500, "Tackles Successful", "Home", 5)];
+    const analyst = [inst("a1", 500, "Ground Duel Losses", "Home", 9)];
+    const res = compareInstances(master, analyst, 3, "Home vs Away");
+    // Different players + unrelated stats => master is missed (no pairing).
+    expect(res.rows[0].status).toBe("missed");
+  });
 });

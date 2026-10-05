@@ -1046,11 +1046,12 @@ export function compareInstances(
     // rather than being downgraded to "wrong player".
     const noPlayerEitherSide =
       m.playerNumber == null && a.playerNumber == null;
-    const playerOk = noPlayerEitherSide
-      ? true
-      : m.playerNumber != null &&
-        a.playerNumber != null &&
-        m.playerNumber === a.playerNumber;
+    // A real same-player match (both sides carry the SAME jersey number).
+    const samePlayerNum =
+      m.playerNumber != null &&
+      a.playerNumber != null &&
+      m.playerNumber === a.playerNumber;
+    const playerOk = noPlayerEitherSide ? true : samePlayerNum;
 
     // Two DIFFERENT stats are only comparable (can pair as wrong-stat /
     // wrong-player) if they share a defined preference group (see
@@ -1059,34 +1060,47 @@ export function compareInstances(
     // Ball) don't wrongly pair.
     const categoryOk = sameStatGroup(m.stat, a.stat);
 
-    return { teamOk, playerOk, statOk, categoryOk, event: false };
+    return { teamOk, playerOk, statOk, categoryOk, samePlayerNum, event: false };
   };
 
-  // Match-quality tier (higher = better). SAME PLAYER is prioritised over
-  // same stat: a coded action belongs to a specific player, so keeping the
-  // same player (even with a wrong stat, when in the same stat family) is a
-  // truer pairing than matching the same stat on a different player.
-  //   6 = exact (team + player + stat)
-  //   5 = stat + player, wrong team   (same action & player, opposing team)
-  //   4 = player + team + SAME GROUP, wrong stat
-  //         (same player, comparable stat — e.g. Short Pass vs Long Pass).
-  //         Beats same-stat-wrong-player below (same player is truer).
-  //   3 = stat + team,   wrong player (same action, right team, wrong #)
-  //   2 = stat only,     wrong team & player (same action, opposing team)
+  // Match-quality tier (higher = better). SAME PLAYER is the top priority: a
+  // coded action belongs to a specific player, so if the SAME player did
+  // something at the SAME time (within tolerance), that is the same event even
+  // when the two coders labelled the action differently (e.g. master "Tackles
+  // Successful" vs analyst "Ground Duel Loss"). Such pairs match as wrong-stat
+  // rather than being dropped as missed/extra.
+  //   8 = exact (team + player + stat)
+  //   7 = stat + player, wrong team   (same action & player, opposing team)
+  //   6 = player + team + SAME GROUP, wrong stat
+  //         (same player, comparable stat — e.g. Short Pass vs Long Pass)
+  //   5 = player + team, wrong stat, ANY stat (same player & team, different
+  //         action — players-first pairing even across stat groups)
+  //   4 = stat + team, wrong player  (same action, right team, wrong #)
+  //   3 = player only (wrong team), wrong stat, ANY stat
+  //         (same jersey #, opposing team label — still the same player)
+  //   2 = stat only, wrong team & player (same action, opposing team)
   //   1 = team + SAME GROUP, wrong stat AND wrong player
-  //         (comparable action, different player — e.g. Ball Recovery #24 vs
-  //          Intercept #34). Weakest match; still better than missed/extra.
-  //   0 = not a plausible match (unrelated stats / different group)
+  //         (comparable action, different player)
+  //   0 = not a plausible match
   //
-  // A pair is eligible only if the stat matches, OR both stats share a
-  // preference group. Unrelated stats (different group, different stat) are
-  // not paired — the master is "missed" and the analyst is "extra".
+  // Eligibility: a pair matches if the STAT matches, OR the stats share a
+  // preference group, OR it is the SAME PLAYER (jersey number) within the
+  // time window. Only genuinely-unrelated events on different players stay
+  // unmatched (master "missed", analyst "extra").
   const quality = (m: Instance, a: Instance): number => {
-    const { teamOk, playerOk, statOk, categoryOk } = fieldsOk(m, a);
-    if (statOk && playerOk && teamOk) return 6;
-    if (statOk && playerOk) return 5;
-    if (playerOk && teamOk && categoryOk) return 4;
-    if (statOk && teamOk) return 3;
+    const { teamOk, playerOk, statOk, categoryOk, samePlayerNum } = fieldsOk(
+      m,
+      a
+    );
+    if (statOk && playerOk && teamOk) return 8;
+    if (statOk && playerOk) return 7;
+    if (playerOk && teamOk && categoryOk) return 6;
+    // Players-first: same real player + team, ANY different stat. Only when
+    // both sides carry the same jersey number (not the team-level no-number
+    // case, which must not pair unrelated team stats together).
+    if (samePlayerNum && teamOk) return 5;
+    if (statOk && teamOk) return 4;
+    if (samePlayerNum) return 3; // same player, wrong team label, any stat
     if (statOk) return 2;
     if (teamOk && categoryOk) return 1; // same group, wrong stat + wrong player
     return 0; // ineligible
