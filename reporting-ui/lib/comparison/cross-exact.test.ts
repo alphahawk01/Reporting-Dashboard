@@ -2,7 +2,11 @@
 // outcome-tagged "Crosses Successful/Unsuccesful" (analyst) at the same
 // time + player. Uses the real comparison engine on synthetic instances.
 import { describe, it, expect } from "vitest";
-import { compareInstances, type Instance } from "./xml-compare";
+import {
+  compareInstances,
+  parseHomeAwayFromFileName,
+  type Instance,
+} from "./xml-compare";
 
 function inst(
   id: string,
@@ -64,5 +68,16 @@ describe("bare vs outcome crosses/through balls", () => {
     const res = compareInstances(master, analyst, 3, "Home vs Away");
     // Different players + unrelated stats => master is missed (no pairing).
     expect(res.rows[0].status).toBe("missed");
+  });
+
+  it('parses "<Home> vs <Away>" filenames with HOME first', () => {
+    // JSON fixtures are named "<Home> vs <Away>.json" from the report's
+    // authoritative homeTeamName — home must be the first team.
+    const parsed = parseHomeAwayFromFileName(
+      "Hume City FC vs Malvern FC U13.json"
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed![0]).toContain("hume city");
+    expect(parsed![1]).toContain("malvern");
   });
 });

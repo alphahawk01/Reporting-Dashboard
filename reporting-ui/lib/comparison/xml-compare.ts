@@ -791,7 +791,17 @@ export function parseHomeAwayFromFileName(
 ): [string, string] | null {
   if (!fileName) return null;
   // Strip extension and any trailing " (1)", ". 1", ".." noise.
-  const base = fileName.replace(/\.xml$/i, "");
+  const base = fileName.replace(/\.(xml|json)$/i, "");
+
+  // JSON fixtures (and any "<Home> vs <Away>" named file) carry the home/away
+  // order explicitly: the part before " vs " is HOME. This is authoritative
+  // (from the report's homeTeamName/awayTeamName), so honour it directly.
+  const vsMatch = base.match(/^(.*?)\s+vs\s+(.*)$/i);
+  if (vsMatch) {
+    const home = normTeam(vsMatch[1]);
+    const away = normTeam(vsMatch[2].replace(/\.+\s*\d*$/, ""));
+    if (home && away) return [home, away];
+  }
   // The home/away teams follow a round/period marker: full game ("_full_"),
   // a quarter ("_Q1_".."_Q4_"), a half ("_H1_"/"_H2_"), or a finals stage
   // ("_GF_"/"_SF_"/"_QF_"). Match the LAST such marker (some names combine
