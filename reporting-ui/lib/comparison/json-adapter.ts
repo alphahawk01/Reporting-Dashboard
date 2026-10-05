@@ -369,8 +369,10 @@ const STAT_CODE_MAP: Record<string, { stat: string; category: string }> = {
   intercept: { stat: "Intercepts", category: "General Play" },
   aerialwin: { stat: "Aerial Wins", category: "General Play" },
   aerialloss: { stat: "Aerial Losses", category: "General Play" },
-  groundduelwin: { stat: "Ground Duel Wins", category: "General Play" },
-  groundduelloss: { stat: "Ground Duel Losses", category: "General Play" },
+  // Match the XML master's exact labels ("Ground Duels Won/Lost") so JSON and
+  // XML masters pair.
+  groundduelwin: { stat: "Ground Duels Won", category: "General Play" },
+  groundduelloss: { stat: "Ground Duels Lost", category: "General Play" },
   foul: { stat: "Fouls", category: "General Play" },
   fouldrawn: { stat: "Fouls Drawn", category: "General Play" },
   offside: { stat: "Offsides", category: "General Play" },
@@ -379,8 +381,10 @@ const STAT_CODE_MAP: Record<string, { stat: string; category: string }> = {
   save: { stat: "Saves", category: "Goal Keeper" },
   block: { stat: "Blocks", category: "Goal Keeper" },
   punch: { stat: "Punches", category: "Goal Keeper" },
-  claimed: { stat: "Claimed", category: "Goal Keeper" },
-  rebound: { stat: "Rebounds", category: "Goal Keeper" },
+  // Match the XML master's exact labels: "Claims" (not "Claimed") and the
+  // singular "Rebound".
+  claimed: { stat: "Claims", category: "Goal Keeper" },
+  rebound: { stat: "Rebound", category: "Goal Keeper" },
   keeperthrowsuccessful: { stat: "Keeper Throws Successful", category: "Goal Keeper" },
   keeperthrowunsuccessful: { stat: "Keeper Throws Unsuccessful", category: "Goal Keeper" },
   goalkicksuccessful: { stat: "Goal Kicks Successful", category: "Goal Keeper" },
