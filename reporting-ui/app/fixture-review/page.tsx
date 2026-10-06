@@ -1274,6 +1274,11 @@ export default function FixtureReviewPage() {
                       playerUid={tlPlayer}
                       event={tlEvent}
                       teamUid={shotTeam}
+                      onShotClick={(uid) => {
+                        // Jump the video + timeline to the clicked shot.
+                        const ev = timeline.events.find((e) => e.uid === uid);
+                        if (ev) seekToEvent(ev);
+                      }}
                     />
                   </div>
                 )}

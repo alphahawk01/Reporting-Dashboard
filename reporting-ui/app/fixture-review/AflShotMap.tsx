@@ -48,6 +48,8 @@ type Props = {
   /** statTypeName; matches the shot's SetShot name OR its outcome name. */
   event?: string;
   teamUid?: number | "all";
+  /** Clicking a shot dot seeks the video + timeline to that shot's event. */
+  onShotClick?: (uid: number) => void;
 };
 
 const GOAL_COLOR = "#22c55e"; // green — goal
@@ -105,6 +107,7 @@ export default function AflShotMap({
   playerUid = "all",
   event = "all",
   teamUid = "all",
+  onShotClick,
 }: Props) {
   // Pair each located shot (SetShot / ShotInPlay) with the next outcome event
   // (Goal / Behind / RushedBehind) by the same player within a short window.
@@ -206,10 +209,14 @@ export default function AflShotMap({
               .join(" ");
           const size = active ? 18 : 13;
           return (
-            <span
+            <button
               key={s.uid}
-              title={`${s.outcome.toUpperCase()} — ${who} (${s.teamName})`}
-              className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full"
+              type="button"
+              onClick={() => onShotClick?.(s.uid)}
+              title={`${s.outcome.toUpperCase()} — ${who} (${s.teamName}) — click to jump the video here`}
+              className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full p-0 ${
+                onShotClick ? "cursor-pointer hover:brightness-110" : ""
+              }`}
               style={{
                 top: `${topPct}%`,
                 left: `${leftPct}%`,
