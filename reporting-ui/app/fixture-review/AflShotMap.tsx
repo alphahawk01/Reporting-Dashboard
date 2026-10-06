@@ -27,8 +27,8 @@ export type AflShot = {
   quarter: number;
   shotName: string; // the SetShot / ShotInPlay statTypeName
   outcomeName: string; // the Goal / Behind / … statTypeName (if paired)
-  fx: number; // 0..1 toward goal (1 = at the goal line)
-  fy: number; // 0..1 across the ground (0 = left, 1 = right)
+  acrossFrac: number; // startX / startWidth  (0 left .. 1 right)
+  depthFrac: number; // startY / startHeight (0 at goal .. 1 out field)
   outcome: Outcome;
 };
 
@@ -70,29 +70,29 @@ function outcomeOf(code: string): Outcome {
 
 // Map a shot onto the ground IMAGE as top/left percentages.
 //
-// The image (afl_ground.jpg) is the forward 50: goals at the TOP-CENTRE, the
-// 50m arc across the middle, the ground domed/curved down the sides. Shots sit
-// between the goal line and the 50m arc, so we place them in the upper portion
-// of the image and narrow the usable width toward the top (the dome) so dots
-// stay on the grass.
+// Coordinate system (confirmed against real AFL reports): within the shot's
+// startWidth × startHeight grid (~485 × 262),
+//   startX = ACROSS the ground (left↔right), centred ~240/485 in line with goal
+//   startY = DEPTH from goal (small = close to goal, large = out toward 50m)
+// The goal is at the TOP-CENTRE of the image, play coming out of it downward.
+// So we map:
+//   acrossFrac = startX / startWidth  -> LEFT %  (0 left .. 1 right)
+//   depthFrac  = startY / startHeight -> TOP  %  (0 at goal .. 1 out field)
 //
-//   fx = toward goal (1 at the goal line) -> near the TOP of the image.
-//   fy = across (0 left .. 1 right)       -> horizontal, scaled by dome width.
-//
-// Vertical band the shots occupy on the image, in % of image height. The goal
-// line sits ~16% down (below the posts); shots extend to ~86% (past the arc).
-const TOP_PCT = 16;
-const BOTTOM_PCT = 86;
+// The image's playing area (where shots legitimately fall, between the goal
+// line and ~50m) occupies a band; these % anchors align the normalised
+// coordinates to the goal line and the forward arc on afl_ground.jpg.
+const TOP_PCT = 20; // goal line / top of play on the image
+const BOTTOM_PCT = 92; // out past the 50m arc
+const LEFT_PCT = 14; // left playing edge at the widest
+const RIGHT_PCT = 86; // right playing edge
 
-function shotPosition(fx: number, fy: number): { topPct: number; leftPct: number } {
-  const depth = 1 - fx; // 0 at goal line, 1 at the back
-  const topPct = TOP_PCT + depth * (BOTTOM_PCT - TOP_PCT);
-  // Dome half-width (fraction of half the image) at this depth: narrow at the
-  // very top (near goals), widening as we come down toward the arc/boundary.
-  // Model with a gentle curve so dots hug the oval, not the corners.
-  const t = (topPct - TOP_PCT) / (BOTTOM_PCT - TOP_PCT); // 0 top .. 1 bottom
-  const halfFrac = 0.28 + 0.6 * Math.sqrt(Math.max(0, t)); // 0.28 -> ~0.88
-  const leftPct = 50 + (fy - 0.5) * 2 * halfFrac * 50;
+function shotPosition(
+  acrossFrac: number,
+  depthFrac: number
+): { topPct: number; leftPct: number } {
+  const topPct = TOP_PCT + depthFrac * (BOTTOM_PCT - TOP_PCT);
+  const leftPct = LEFT_PCT + acrossFrac * (RIGHT_PCT - LEFT_PCT);
   return { topPct, leftPct };
 }
 
@@ -144,8 +144,8 @@ export default function AflShotMap({
         quarter: e.quarter ?? 0,
         shotName: e.statTypeName ?? "",
         outcomeName,
-        fx: Math.max(0, Math.min(1, e.startX / e.startWidth)),
-        fy: Math.max(0, Math.min(1, e.startY / e.startHeight)),
+        acrossFrac: Math.max(0, Math.min(1, e.startX / e.startWidth)),
+        depthFrac: Math.max(0, Math.min(1, e.startY / e.startHeight)),
         outcome,
       });
     }
@@ -189,7 +189,7 @@ export default function AflShotMap({
           className="absolute inset-0 h-full w-full object-cover"
         />
         {shots.map((s) => {
-          const { topPct, leftPct } = shotPosition(s.fx, s.fy);
+          const { topPct, leftPct } = shotPosition(s.acrossFrac, s.depthFrac);
           const fill =
             s.outcome === "goal"
               ? GOAL_COLOR
