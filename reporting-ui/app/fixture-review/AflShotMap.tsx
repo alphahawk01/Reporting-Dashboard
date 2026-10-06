@@ -79,20 +79,28 @@ function outcomeOf(code: string): Outcome {
 //   acrossFrac = startX / startWidth  -> LEFT %  (0 left .. 1 right)
 //   depthFrac  = startY / startHeight -> TOP  %  (0 at goal .. 1 out field)
 //
-// The image's playing area (where shots legitimately fall, between the goal
-// line and ~50m) occupies a band; these % anchors align the normalised
-// coordinates to the goal line and the forward arc on afl_ground.jpg.
-const TOP_PCT = 20; // goal line / top of play on the image
-const BOTTOM_PCT = 92; // out past the 50m arc
-const LEFT_PCT = 14; // left playing edge at the widest
-const RIGHT_PCT = 86; // right playing edge
+// IMPORTANT: the coordinate grid (485 × 262) covers a WIDER area than the
+// visible forward-50 image — the image is a zoomed-in centre of the full AFL
+// coordinate space. So the grid maps to a region that extends BEYOND the image
+// edges; this is what spreads the (naturally central) shot cluster out across
+// the forward 50 to match the TeamTracker platform's shot map.
+//
+//   leftPct = AX + acrossFrac * BX   (acrossFrac = startX / startWidth)
+//   topPct  = AY + depthFrac  * BY   (depthFrac  = startY / startHeight)
+//
+// Calibrated against fixture 32659 (Southern Districts v Waratah) so the shot
+// spread matches the platform's shot map for the same game.
+const AX = -20;
+const BX = 150;
+const AY = 2;
+const BY = 112;
 
 function shotPosition(
   acrossFrac: number,
   depthFrac: number
 ): { topPct: number; leftPct: number } {
-  const topPct = TOP_PCT + depthFrac * (BOTTOM_PCT - TOP_PCT);
-  const leftPct = LEFT_PCT + acrossFrac * (RIGHT_PCT - LEFT_PCT);
+  const leftPct = AX + acrossFrac * BX;
+  const topPct = AY + depthFrac * BY;
   return { topPct, leftPct };
 }
 
