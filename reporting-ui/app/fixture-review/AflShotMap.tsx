@@ -88,16 +88,18 @@ function outcomeOf(code: string): Outcome {
 //   leftPct = AX + acrossFrac * BX   (acrossFrac = startX / startWidth)
 //   topPct  = AY + depthFrac  * BY   (depthFrac  = startY / startHeight)
 //
-// Calibrated against fixture 32659 (Southern Districts v Waratah):
+// Calibrated to the ground-image LANDMARKS on afl_ground.jpg (so shots line up
+// with the goal square and 50m arc), cross-checked against the platform's shot
+// map for fixture 32659:
 //   - ACROSS: grid centre (acrossFrac 0.5) maps to image centre (50%), by
-//     symmetry — so AX = 50 - 0.5*BX. BX sets the width spread.
-//   - DEPTH: anchored on a known reference — Mackenzie Cowley's goal in front
-//     of goal (depthFrac 0.305) sits at 25% down on the platform's map, and the
-//     deepest shots (~0.767) sit near the 50m arc (~78% down).
+//     symmetry — AX = 50 - 0.5*BX. BX = 150 fans the full width to the wings.
+//   - DEPTH: near-goal shots (depthFrac ~0.305) sit just below the goal square
+//     (~38% down); the deepest shots (~0.767) reach the 50m arc (~68% down).
+//     Solved -> topPct = 18.2 + depthFrac * 64.9.
 const BX = 150;
 const AX = 50 - 0.5 * BX; // -25 : keeps grid centre at image centre
-const BY = 114.7;
-const AY = -10;
+const AY = 18.2;
+const BY = 64.9;
 
 function shotPosition(
   acrossFrac: number,
