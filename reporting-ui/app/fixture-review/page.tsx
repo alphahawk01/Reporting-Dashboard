@@ -25,6 +25,7 @@ import { ListVideo, Loader2, AlertTriangle, Film, CalendarDays } from "lucide-re
 
 import { THEME } from "@/lib/theme";
 import SoccerPitch from "./SoccerPitch";
+import AflShotMap from "./AflShotMap";
 import {
   getReviewFixturesFromComps,
   fixtureTitle,
@@ -1207,6 +1208,43 @@ export default function FixtureReviewPage() {
                       onSetCoord={(fx, fy) =>
                         pitchEdit && setActiveCoord(pitchEdit, fx, fy)
                       }
+                    />
+                  </div>
+                )}
+
+                {/* Shot map — AFL ONLY (a half-oval forward-50 showing where
+                    each shot was taken, coloured by goal/behind/miss). The
+                    shot active at the current video position is emphasised. */}
+                {timeline && timeline.eventCount > 0 && !isSoccerStats && (
+                  <div className="mb-4">
+                    <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
+                      <span className="font-semibold uppercase tracking-wide">
+                        Shot map
+                      </span>
+                      {activeEvent ? (
+                        <span className="truncate">
+                          {activeEvent.statTypeName}
+                          {activeEvent.playerName
+                            ? ` — ${
+                                activeEvent.playerNumber != null
+                                  ? `#${activeEvent.playerNumber} `
+                                  : ""
+                              }${activeEvent.playerName}`
+                            : ""}
+                        </span>
+                      ) : (
+                        <span className="text-slate-500">
+                          Shots taken this game
+                        </span>
+                      )}
+                    </div>
+                    <AflShotMap
+                      events={timeline.events}
+                      homeTeamUid={homeTeamUid}
+                      awayTeamUid={awayTeamUid}
+                      homeTeamName={selected?.homeTeam}
+                      awayTeamName={selected?.awayTeam}
+                      activeUid={activeEventUid}
                     />
                   </div>
                 )}
