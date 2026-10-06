@@ -75,11 +75,16 @@ function shortDate(fixtureDate: string): string {
   });
 }
 
-// Option label for a game dropdown: the fixture title with its date appended
-// (so you can tell apart two games of the same teams in different weeks).
+// Option label for a game dropdown: the fixture title, its date, and the JADE
+// fixture id (the {FixtureID} used in the S3 report path). The date tells apart
+// two games of the same teams in different weeks; the id lets you cross-check
+// against S3 / the comparison URL.
 function gameOptionLabel(f: ReviewFixture): string {
+  const parts = [fixtureTitle(f)];
   const d = shortDate(f.date);
-  return d ? `${fixtureTitle(f)} · ${d}` : fixtureTitle(f);
+  if (d) parts.push(d);
+  if (f.jadeFixtureUid != null) parts.push(`ID ${f.jadeFixtureUid}`);
+  return parts.join(" · ");
 }
 
 // Map the comp_fixtures sport name to the accuracy-compare sport flag. The
