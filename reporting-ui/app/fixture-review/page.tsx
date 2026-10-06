@@ -461,6 +461,14 @@ export default function FixtureReviewPage() {
   // First two distinct team uids = the two sides, for row colour-coding.
   const { homeTeamUid, awayTeamUid } = useMemo(() => {
     if (!timeline) return { homeTeamUid: null, awayTeamUid: null };
+    // AUTHORITATIVE: the report's own home/away uids (from meta). Use these so
+    // the team labels/filters match the real home/away, not an inference.
+    const metaHome = timeline.meta?.homeTeamUid ?? 0;
+    const metaAway = timeline.meta?.awayTeamUid ?? 0;
+    if (metaHome && metaAway) {
+      return { homeTeamUid: metaHome, awayTeamUid: metaAway };
+    }
+    // Fallback (older reports with no meta uids): first two distinct teamUids.
     const seen: number[] = [];
     for (const e of timeline.events) {
       if (e.teamUid && !seen.includes(e.teamUid)) {
@@ -1241,12 +1249,16 @@ export default function FixtureReviewPage() {
                         <option value="all">Both teams</option>
                         {homeTeamUid != null && (
                           <option value={homeTeamUid}>
-                            {selected?.homeTeam ?? "Home"}
+                            {timeline.meta?.homeTeamName ||
+                              selected?.homeTeam ||
+                              "Home"}
                           </option>
                         )}
                         {awayTeamUid != null && (
                           <option value={awayTeamUid}>
-                            {selected?.awayTeam ?? "Away"}
+                            {timeline.meta?.awayTeamName ||
+                              selected?.awayTeam ||
+                              "Away"}
                           </option>
                         )}
                       </select>
