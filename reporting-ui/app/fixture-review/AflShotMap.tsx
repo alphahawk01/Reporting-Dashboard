@@ -21,14 +21,19 @@ export type AflShot = {
   uid: number;
   playerName: string;
   playerNumber: number | null;
+  playerUid: number;
   teamName: string;
   teamUid: number;
+  quarter: number;
+  shotName: string; // the SetShot / ShotInPlay statTypeName
+  outcomeName: string; // the Goal / Behind / … statTypeName (if paired)
   fx: number; // 0..1 toward goal (1 = at the goal line)
   fy: number; // 0..1 across the ground (0 = left, 1 = right)
   outcome: Outcome;
 };
 
 type Props = {
+  /** FULL event list (needed for shot→outcome pairing). */
   events: FixtureStatEvent[];
   homeTeamUid: number | null;
   awayTeamUid: number | null;
@@ -36,6 +41,13 @@ type Props = {
   awayTeamName?: string;
   /** uid of the shot active at the current video position (emphasised). */
   activeUid?: number | null;
+  /** Filters (mirror the timeline + the shot map's own team filter). A shot is
+      shown only when it passes every active filter. */
+  quarter?: number | "all";
+  playerUid?: number | "all";
+  /** statTypeName; matches the shot's SetShot name OR its outcome name. */
+  event?: string;
+  teamUid?: number | "all";
 };
 
 const GOAL_COLOR = "#22c55e"; // green — goal
@@ -89,10 +101,15 @@ export default function AflShotMap({
   homeTeamName,
   awayTeamName,
   activeUid,
+  quarter = "all",
+  playerUid = "all",
+  event = "all",
+  teamUid = "all",
 }: Props) {
   // Pair each located shot (SetShot / ShotInPlay) with the next outcome event
   // (Goal / Behind / RushedBehind) by the same player within a short window.
-  const shots = useMemo(() => {
+  // Built from the FULL event list so pairing isn't broken by filters.
+  const allShots = useMemo(() => {
     const sorted = [...events].sort((a, b) => a.relativeTime - b.relativeTime);
     const out: AflShot[] = [];
     for (let i = 0; i < sorted.length; i++) {
@@ -101,6 +118,7 @@ export default function AflShotMap({
       if (!LOCATED.has(code)) continue;
       if (!e.startWidth || !e.startHeight) continue; // no location
       let outcome: Outcome = "miss";
+      let outcomeName = "";
       for (let j = i + 1; j < sorted.length; j++) {
         const n = sorted[j];
         if (n.relativeTime - e.relativeTime > 15) break;
@@ -109,6 +127,7 @@ export default function AflShotMap({
           OUTCOME.has((n.statTypeCode ?? "").toLowerCase())
         ) {
           outcome = outcomeOf(n.statTypeCode ?? "");
+          outcomeName = n.statTypeName ?? "";
           break;
         }
       }
@@ -116,8 +135,12 @@ export default function AflShotMap({
         uid: e.uid,
         playerName: e.playerName ?? "",
         playerNumber: e.playerNumber ?? null,
+        playerUid: e.playerUid ?? 0,
         teamName: e.teamName ?? "",
         teamUid: e.teamUid ?? 0,
+        quarter: e.quarter ?? 0,
+        shotName: e.statTypeName ?? "",
+        outcomeName,
         fx: Math.max(0, Math.min(1, e.startX / e.startWidth)),
         fy: Math.max(0, Math.min(1, e.startY / e.startHeight)),
         outcome,
@@ -126,13 +149,32 @@ export default function AflShotMap({
     return out;
   }, [events]);
 
+  // Apply the active filters: quarter / player / event (matches the SetShot
+  // name OR the outcome name) / team.
+  const shots = useMemo(() => {
+    return allShots.filter((s) => {
+      if (quarter !== "all" && s.quarter !== quarter) return false;
+      if (playerUid !== "all" && s.playerUid !== playerUid) return false;
+      if (teamUid !== "all" && s.teamUid !== teamUid) return false;
+      if (
+        event !== "all" &&
+        s.shotName !== event &&
+        s.outcomeName !== event
+      )
+        return false;
+      return true;
+    });
+  }, [allShots, quarter, playerUid, event, teamUid]);
+
   const goals = shots.filter((s) => s.outcome === "goal").length;
   const behinds = shots.filter((s) => s.outcome === "behind").length;
 
   return (
     <div>
       {/* The ground image (same graphic as the TeamTracker platform) with the
-          shot dots overlaid as an absolutely-positioned layer. */}
+          shot dots overlaid as an absolutely-positioned layer. The team filter
+          lives on the page (passed in via teamUid); quarter/player/event come
+          from the timeline filters. */}
       <div
         className="relative w-full overflow-hidden rounded-xl"
         style={{ aspectRatio: "752 / 421" }}

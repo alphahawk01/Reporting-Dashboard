@@ -178,6 +178,9 @@ export default function FixtureReviewPage() {
   const [tlQuarter, setTlQuarter] = useState<number | "all">("all");
   const [tlEvent, setTlEvent] = useState<string>("all"); // statTypeName
   const [tlPlayer, setTlPlayer] = useState<number | "all">("all"); // playerUid
+  // Shot-map team filter: "all" | a teamUid. Independent of the timeline
+  // filters (which also scope the shot map: quarter / event / player).
+  const [shotTeam, setShotTeam] = useState<number | "all">("all");
 
   // --- In-page tab + Player Stats filters --------------------------------
   const [tab, setTab] = useState<"review" | "stats">("review");
@@ -451,6 +454,7 @@ export default function FixtureReviewPage() {
     setTlQuarter("all");
     setTlEvent("all");
     setTlPlayer("all");
+    setShotTeam("all");
     if (f) void loadTimelineFor(f);
   }
 
@@ -1212,31 +1216,40 @@ export default function FixtureReviewPage() {
                   </div>
                 )}
 
-                {/* Shot map — AFL ONLY (a half-oval forward-50 showing where
-                    each shot was taken, coloured by goal/behind/miss). The
+                {/* Shot map — AFL ONLY. Shows where each shot was taken,
+                    coloured by goal/behind/miss. Scoped by the timeline filters
+                    (quarter / event / player) plus its own team filter. The
                     shot active at the current video position is emphasised. */}
                 {timeline && timeline.eventCount > 0 && !isSoccerStats && (
                   <div className="mb-4">
-                    <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
+                    <div className="mb-1 flex items-center justify-between gap-2 text-xs text-slate-400">
                       <span className="font-semibold uppercase tracking-wide">
                         Shot map
                       </span>
-                      {activeEvent ? (
-                        <span className="truncate">
-                          {activeEvent.statTypeName}
-                          {activeEvent.playerName
-                            ? ` — ${
-                                activeEvent.playerNumber != null
-                                  ? `#${activeEvent.playerNumber} `
-                                  : ""
-                              }${activeEvent.playerName}`
-                            : ""}
-                        </span>
-                      ) : (
-                        <span className="text-slate-500">
-                          Shots taken this game
-                        </span>
-                      )}
+                      <select
+                        value={shotTeam === "all" ? "all" : String(shotTeam)}
+                        onChange={(e) =>
+                          setShotTeam(
+                            e.target.value === "all"
+                              ? "all"
+                              : Number(e.target.value)
+                          )
+                        }
+                        className="rounded-md border border-slate-600 bg-[#0b1220] px-2 py-1 text-xs text-slate-200 outline-none focus:border-sky-500"
+                        aria-label="Filter shot map by team"
+                      >
+                        <option value="all">Both teams</option>
+                        {homeTeamUid != null && (
+                          <option value={homeTeamUid}>
+                            {selected?.homeTeam ?? "Home"}
+                          </option>
+                        )}
+                        {awayTeamUid != null && (
+                          <option value={awayTeamUid}>
+                            {selected?.awayTeam ?? "Away"}
+                          </option>
+                        )}
+                      </select>
                     </div>
                     <AflShotMap
                       events={timeline.events}
@@ -1245,6 +1258,10 @@ export default function FixtureReviewPage() {
                       homeTeamName={selected?.homeTeam}
                       awayTeamName={selected?.awayTeam}
                       activeUid={activeEventUid}
+                      quarter={tlQuarter}
+                      playerUid={tlPlayer}
+                      event={tlEvent}
+                      teamUid={shotTeam}
                     />
                   </div>
                 )}
