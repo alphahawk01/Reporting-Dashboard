@@ -61,6 +61,27 @@ function dateKey(fixtureDate: string): string {
   return toDateInput(d);
 }
 
+// A short, readable date for a game option, e.g. "Sat 4 Oct". Returns "" when
+// the fixture has no parseable date (those still show their title alone).
+function shortDate(fixtureDate: string): string {
+  const k = dateKey(fixtureDate);
+  if (!k) return "";
+  const d = new Date(`${k}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-AU", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+}
+
+// Option label for a game dropdown: the fixture title with its date appended
+// (so you can tell apart two games of the same teams in different weeks).
+function gameOptionLabel(f: ReviewFixture): string {
+  const d = shortDate(f.date);
+  return d ? `${fixtureTitle(f)} · ${d}` : fixtureTitle(f);
+}
+
 // Map the comp_fixtures sport name to the accuracy-compare sport flag. The
 // comparison page only distinguishes "afl" vs "football" (its player-stats
 // table + stat vocabulary); Soccer → football, everything else → afl.
@@ -351,7 +372,9 @@ export default function AccuracyFixturePage() {
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {/* Shared filters: Sport + Year apply to BOTH the master and analyst
+            sides (a comparison is almost always within one sport/season). */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
               Sport
@@ -395,7 +418,26 @@ export default function AccuracyFixturePage() {
               ))}
             </select>
           </div>
+        </div>
 
+        {/* Master | Analyst — two aligned columns. Week sits above Game on each
+            side so the two Week pickers line up, and the two Game pickers line
+            up directly beneath them. */}
+        <div className="mt-5 grid grid-cols-1 gap-x-6 gap-y-4 md:grid-cols-2">
+          {/* Column headers */}
+          <div className="hidden md:block">
+            <span className="text-sm font-semibold text-slate-700">
+              Master (reference)
+            </span>
+          </div>
+          <div className="hidden md:block">
+            <span className="text-sm font-semibold text-slate-700">
+              Analyst (being graded){" "}
+              <span className="font-normal text-slate-400">— optional</span>
+            </span>
+          </div>
+
+          {/* Row 1: Weeks */}
           <div>
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
               Master week
@@ -417,45 +459,6 @@ export default function AccuracyFixturePage() {
               ))}
             </select>
           </div>
-        </div>
-
-        {/* MASTER game — from the real comps, using the shared Week above. */}
-        <div className="mt-4">
-          <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
-            Master game (reference)
-          </label>
-          {loadingFixtures ? (
-            <div className="flex items-center gap-2 py-2 text-sm text-slate-500">
-              <Loader2 size={15} className="animate-spin" /> Loading games…
-            </div>
-          ) : fixturesError ? (
-            <div className="flex items-center gap-2 py-2 text-sm text-red-600">
-              <AlertTriangle size={15} /> {fixturesError}
-            </div>
-          ) : (
-            <select
-              value={selectedId}
-              onChange={(e) => setSelectedId(e.target.value)}
-              className={selectClass}
-              disabled={gamesForWeek.length === 0}
-            >
-              <option value="">
-                {gamesForWeek.length === 0
-                  ? "No games this week"
-                  : `Select a game (${gamesForWeek.length})`}
-              </option>
-              {gamesForWeek.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {fixtureTitle(f)}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-
-        {/* ANALYST game — ONLY from "Accuracy" comps, with its own Week filter
-            so it can be in a different week than the master. */}
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[200px_minmax(0,1fr)]">
           <div>
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
               Analyst week
@@ -479,9 +482,44 @@ export default function AccuracyFixturePage() {
               ))}
             </select>
           </div>
+
+          {/* Row 2: Games */}
+          <div>
+            {/* Mobile-only sub-heading (headers above are hidden < md). */}
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
+              Master game <span className="md:hidden">(reference)</span>
+            </label>
+            {loadingFixtures ? (
+              <div className="flex items-center gap-2 py-2 text-sm text-slate-500">
+                <Loader2 size={15} className="animate-spin" /> Loading games…
+              </div>
+            ) : fixturesError ? (
+              <div className="flex items-center gap-2 py-2 text-sm text-red-600">
+                <AlertTriangle size={15} /> {fixturesError}
+              </div>
+            ) : (
+              <select
+                value={selectedId}
+                onChange={(e) => setSelectedId(e.target.value)}
+                className={selectClass}
+                disabled={gamesForWeek.length === 0}
+              >
+                <option value="">
+                  {gamesForWeek.length === 0
+                    ? "No games this week"
+                    : `Select a game (${gamesForWeek.length})`}
+                </option>
+                {gamesForWeek.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {gameOptionLabel(f)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
           <div>
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
-              Analyst game (being graded) — optional
+              Analyst game <span className="md:hidden">— optional</span>
             </label>
             {loadingAnalystFixtures ? (
               <div className="flex items-center gap-2 py-2 text-sm text-slate-500">
@@ -492,6 +530,18 @@ export default function AccuracyFixturePage() {
               <div className="flex items-center gap-2 py-2 text-sm text-red-600">
                 <AlertTriangle size={15} /> {analystFixturesError}
               </div>
+            ) : analystFixtures.length === 0 ? (
+              // No accuracy comp for this sport/year at all — explain why the
+              // picker is empty instead of showing a dead dropdown.
+              <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                <span>
+                  No Accuracy competition for{" "}
+                  {sport === "all" ? "this selection" : sport}
+                  {year !== "all" ? ` ${year}` : ""}. Pick a sport/year that has
+                  an Accuracy comp, or add the analyst file on the next screen.
+                </span>
+              </div>
             ) : (
               <select
                 value={analystId}
@@ -500,15 +550,13 @@ export default function AccuracyFixturePage() {
                 disabled={analystGamesForWeek.length === 0}
               >
                 <option value="">
-                  {analystFixtures.length === 0
-                    ? "No accuracy games found"
-                    : analystGamesForWeek.length === 0
-                      ? "No games this week"
-                      : "Select a game, or add it on the next screen"}
+                  {analystGamesForWeek.length === 0
+                    ? "No games this week"
+                    : "Select a game, or add it on the next screen"}
                 </option>
                 {analystGamesForWeek.map((f) => (
                   <option key={f.id} value={f.id}>
-                    {fixtureTitle(f)}
+                    {gameOptionLabel(f)}
                   </option>
                 ))}
               </select>
