@@ -88,18 +88,24 @@ function outcomeOf(code: string): Outcome {
 //   leftPct = AX + acrossFrac * BX   (acrossFrac = startX / startWidth)
 //   topPct  = AY + depthFrac  * BY   (depthFrac  = startY / startHeight)
 //
-// Calibrated to the ground-image LANDMARKS on afl_ground.jpg (so shots line up
-// with the goal square and 50m arc), cross-checked against the platform's shot
-// map for fixture 32659:
-//   - ACROSS: grid centre (acrossFrac 0.5) maps to image centre (50%), by
-//     symmetry — AX = 50 - 0.5*BX. BX = 150 fans the full width to the wings.
-//   - DEPTH: near-goal shots (depthFrac ~0.305) sit just below the goal square
-//     (~38% down); the deepest shots (~0.767) reach the 50m arc (~68% down).
-//     Solved -> topPct = 18.2 + depthFrac * 64.9.
-const BX = 150;
-const AX = 50 - 0.5 * BX; // -25 : keeps grid centre at image centre
-const AY = 18.2;
-const BY = 64.9;
+// Calibrated to the LANDMARKS on afl_ground.jpg (752 × 421) — the same ground
+// graphic the TeamTracker platform renders — using fixture 32659's 43 located
+// shots (grid 485 × 262):
+//   - ACROSS: grid centre (acrossFrac ~0.49) maps to image centre (50%), by
+//     symmetry — AX = 50 - 0.5*BX. Calibrated against the platform's Q2 shot
+//     map: the horizontal spread is tighter than the raw grid implies, so the
+//     wings pull in toward centre — BX ≈ 94 places Schwarze (ax 0.305) at ~33%
+//     and the right-pocket Farrer (ax 0.658) at ~66%, matching the screenshot.
+//   - DEPTH: depthFrac spans 0.305 (shallowest — a close goal from directly in
+//     front) to 0.767 (deepest — shots off the top of the 50m arc). On the
+//     image the goal square sits ~32% down and the 50m arc dips to ~82% down,
+//     so the shallowest shot anchors at ~32% and the deepest at ~82%. A linear
+//     fit through those gives topPct = -0.5 + depthFrac * 108.2 (nudged down
+//     ~2.5% from the first fit to match the platform exactly).
+const BX = 94;
+const AX = 50 - 0.5 * BX; // 3 : keeps grid centre at image centre
+const AY = -0.5;
+const BY = 108.2;
 
 function shotPosition(
   acrossFrac: number,
