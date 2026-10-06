@@ -13,7 +13,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileCheck2, Loader2, AlertTriangle, ArrowRight } from "lucide-react";
+import {
+  FileCheck2,
+  Loader2,
+  AlertTriangle,
+  ArrowRight,
+  ListChecks,
+} from "lucide-react";
 
 import {
   getReviewFixturesFromComps,
@@ -21,6 +27,7 @@ import {
   type ReviewFixture,
 } from "@/lib/api/reviewFixtures";
 import { getCompFacets } from "@/lib/api/compFixtures";
+import { getFixtureTimeline } from "@/lib/api/fixtureReports";
 
 // ── Week helpers (Thursday → Wednesday, mirroring Fixture Review / Comp
 // Fixtures). The filter value is the week's Thursday as yyyy-mm-dd. ───────────
@@ -92,6 +99,39 @@ function gameOptionLabel(f: ReviewFixture): string {
 // table + stat vocabulary); Soccer → football, everything else → afl.
 function sportFlag(sportName: string): "afl" | "football" {
   return sportName.trim().toLowerCase() === "soccer" ? "football" : "afl";
+}
+
+// The derived timeline-event count for a selected fixture: a number once
+// fetched, "loading"/"error" transient states, or null when nothing's picked.
+type CountState = number | "loading" | "error" | null;
+
+// Small line under a game dropdown showing how many stat events are on that
+// fixture's timeline (the value isn't in the report JSON — it's counted from
+// the parsed timeline, matching what the comparison screen displays).
+function TimelineCount({ state }: { state: CountState }) {
+  if (state == null) return null;
+  return (
+    <div className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-500">
+      <ListChecks size={13} className="shrink-0" />
+      {state === "loading" ? (
+        <span className="flex items-center gap-1">
+          <Loader2 size={11} className="animate-spin" /> Counting timeline
+          stats…
+        </span>
+      ) : state === "error" ? (
+        <span className="text-slate-400">
+          Timeline count unavailable (report may not exist yet)
+        </span>
+      ) : (
+        <span>
+          <span className="font-semibold text-slate-700">
+            {state.toLocaleString()}
+          </span>{" "}
+          stats on timeline
+        </span>
+      )}
+    </div>
+  );
 }
 
 export default function AccuracyFixturePage() {
@@ -345,6 +385,59 @@ export default function AccuracyFixturePage() {
     [analystGamesForWeek, analystId]
   );
 
+  // Timeline stat counts for the selected games. The report JSON has NO total
+  // field, so the count is derived: fetch the fixture report from S3 and count
+  // its timeline events (getFixtureTimeline applies the same exclusions —
+  // subs / half markers / pitch zones — and mirror de-dup the comparison uses,
+  // so this matches what the comparison screen shows). "loading" while the
+  // fetch is in flight, number on success, null when unavailable (e.g. no
+  // report yet). Keyed by jade uid so re-selecting a game reuses the result.
+  const [masterCount, setMasterCount] = useState<CountState>(null);
+  const [analystCount, setAnalystCount] = useState<CountState>(null);
+
+  useEffect(() => {
+    const uid = selected?.jadeFixtureUid;
+    if (uid == null) {
+      setMasterCount(null);
+      return;
+    }
+    let cancelled = false;
+    setMasterCount("loading");
+    getFixtureTimeline(uid, { sport: selected?.sport, preferOverride: false })
+      .then((t) => {
+        if (!cancelled) setMasterCount(t.eventCount);
+      })
+      .catch(() => {
+        if (!cancelled) setMasterCount("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.jadeFixtureUid, selected?.sport]);
+
+  useEffect(() => {
+    const uid = analystSelected?.jadeFixtureUid;
+    if (uid == null) {
+      setAnalystCount(null);
+      return;
+    }
+    let cancelled = false;
+    setAnalystCount("loading");
+    getFixtureTimeline(uid, {
+      sport: analystSelected?.sport,
+      preferOverride: false,
+    })
+      .then((t) => {
+        if (!cancelled) setAnalystCount(t.eventCount);
+      })
+      .catch(() => {
+        if (!cancelled) setAnalystCount("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [analystSelected?.jadeFixtureUid, analystSelected?.sport]);
+
   function startComparison() {
     if (!selected?.jadeFixtureUid) return;
     const params = new URLSearchParams({
@@ -521,6 +614,7 @@ export default function AccuracyFixturePage() {
                 ))}
               </select>
             )}
+            {selected && <TimelineCount state={masterCount} />}
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
@@ -566,6 +660,7 @@ export default function AccuracyFixturePage() {
                 ))}
               </select>
             )}
+            {analystSelected && <TimelineCount state={analystCount} />}
           </div>
         </div>
 
