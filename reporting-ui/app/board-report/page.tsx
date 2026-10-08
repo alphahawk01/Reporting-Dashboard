@@ -142,6 +142,7 @@ function reportToCsv(r: BoardReport): string {
   row("Coding cost", Math.round(r.pureCodingCost));
   row("Coding hours", Math.round(r.pureCodingHours));
   row("AUS games", r.ausGames);
+  row("AUS % of games", pct(r.ausGamesShare));
   row("AUS cost / game", r.ausCostPerGame.toFixed(2));
   row("AUS hours / game", r.ausHoursPerGame.toFixed(2));
   row("");
@@ -150,6 +151,7 @@ function reportToCsv(r: BoardReport): string {
   row("Weekly rate", 3800);
   row("PHL fixed cost", Math.round(r.phlFixedCost));
   row("PHL games", r.phlGames);
+  row("PHL % of games", pct(r.phlGamesShare));
   row("PHL cost / game", r.phlCostPerGame.toFixed(2));
   row("");
   row("Cost by area", "Cost", "Hours", "Shifts", "Share");
@@ -462,9 +464,14 @@ export default function BoardReportPage() {
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {/* AUS */}
               <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4">
-                <span className="text-sm font-semibold text-blue-900">
-                  🇦🇺 Australia
-                </span>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-sm font-semibold text-blue-900">
+                    🇦🇺 Australia
+                  </span>
+                  <span className="text-xs font-semibold text-blue-700">
+                    {pct(report.ausGamesShare)} of games
+                  </span>
+                </div>
                 <div className="mt-3 grid grid-cols-3 gap-2 text-center">
                   <div>
                     <div className="text-2xl font-bold text-blue-900">
@@ -495,9 +502,14 @@ export default function BoardReportPage() {
 
               {/* PHL */}
               <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
-                <span className="text-sm font-semibold text-amber-900">
-                  🇵🇭 Philippines
-                </span>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-sm font-semibold text-amber-900">
+                    🇵🇭 Philippines
+                  </span>
+                  <span className="text-xs font-semibold text-amber-700">
+                    {pct(report.phlGamesShare)} of games
+                  </span>
+                </div>
                 <div className="mt-3 grid grid-cols-3 gap-2 text-center">
                   <div>
                     <div className="text-2xl font-bold text-amber-900">

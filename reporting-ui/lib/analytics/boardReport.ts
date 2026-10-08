@@ -94,12 +94,14 @@ export type BoardReport = {
   pureCodingCost: number; // Home + Office analyst labour cost
   pureCodingHours: number; // Home + Office analyst hours
   ausGames: number; // games coded in AUS over the range
+  ausGamesShare: number; // ausGames / total games (0–1)
   ausCostPerGame: number; // pureCodingCost / ausGames
   ausHoursPerGame: number; // pureCodingHours / ausGames
   // ── Philippines team (fixed cost, not in deputy_shifts) ──
   weeksInRange: number; // (range length in days) / 7
   phlFixedCost: number; // PHL_WEEKLY_FIXED_COST × weeksInRange
   phlGames: number; // games coded in PHL over the range
+  phlGamesShare: number; // phlGames / total games (0–1)
   phlCostPerGame: number; // phlFixedCost / phlGames
   // Breakdowns.
   byArea: AreaSummary[]; // biggest cost first
@@ -300,6 +302,7 @@ export function buildBoardReport(
     pureCodingCost,
     pureCodingHours,
     ausGames: aus,
+    ausGamesShare: totalGames > 0 ? aus / totalGames : 0,
     // Per-game figures use AUS games ONLY — the Home/Office analysts code the
     // AUS games, so dividing by total (AUS+PHL) games would understate cost.
     ausCostPerGame: aus > 0 ? pureCodingCost / aus : 0,
@@ -307,6 +310,7 @@ export function buildBoardReport(
     weeksInRange,
     phlFixedCost,
     phlGames,
+    phlGamesShare: totalGames > 0 ? phl / totalGames : 0,
     phlCostPerGame: phlGames > 0 ? phlFixedCost / phlGames : 0,
     byArea,
     byMonth,
