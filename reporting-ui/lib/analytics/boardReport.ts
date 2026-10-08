@@ -71,6 +71,11 @@ export type AnalystSummary = {
   games: number;
 };
 
+// The weekly fixed cost of the Philippines coding team. Their cost is NOT in
+// deputy_shifts (they're a fixed retainer, not Deputy-rostered), so their
+// per-game cost is derived from this rate × the number of weeks in the range.
+export const PHL_WEEKLY_FIXED_COST = 3800;
+
 export type BoardReport = {
   from: string; // yyyy-mm-dd (inclusive)
   to: string; // yyyy-mm-dd (inclusive)
@@ -83,6 +88,16 @@ export type BoardReport = {
   avgCostPerHour: number;
   avgCostPerGame: number;
   avgHoursPerGame: number;
+  // Coding-only efficiency: Home + Office analyst cost/hours over games coded.
+  pureCodingCost: number; // Home + Office analyst labour cost
+  pureCodingHours: number; // Home + Office analyst hours
+  pureCodingCostPerGame: number; // pureCodingCost / total games
+  pureCodingHoursPerGame: number; // pureCodingHours / total games
+  // Philippines fixed-cost model (not in deputy_shifts).
+  weeksInRange: number; // (range length in days) / 7
+  phlFixedCost: number; // PHL_WEEKLY_FIXED_COST × weeksInRange
+  phlGames: number; // games coded in PHL over the range
+  phlCostPerGame: number; // phlFixedCost / phlGames
   // Breakdowns.
   byArea: AreaSummary[]; // biggest cost first
   byMonth: MonthSummary[]; // chronological
@@ -149,16 +164,30 @@ export function buildBoardReport(
     a.costShare = kpis.totalCost > 0 ? a.cost / kpis.totalCost : 0;
   }
 
-  // Home vs Office analyst (by area name).
+  // Home vs Office analyst (by area name). Track hours too so "pure coding"
+  // efficiency can use Home+Office hours as well as cost.
   let home = 0;
   let office = 0;
   let other = 0;
+  let homeHours = 0;
+  let officeHours = 0;
   for (const a of byArea) {
     const key = a.area.toLowerCase();
-    if (key === "home analyst") home += a.cost;
-    else if (key === "office analyst") office += a.cost;
-    else other += a.cost;
+    if (key === "home analyst") {
+      home += a.cost;
+      homeHours += a.hours;
+    } else if (key === "office analyst") {
+      office += a.cost;
+      officeHours += a.hours;
+    } else {
+      other += a.cost;
+    }
   }
+  // "Pure coding" = the two analyst areas that actually code games (Home +
+  // Office). Excludes support areas (Ops, Social, Sales, QA, …) so the per-game
+  // figure reflects coding labour only.
+  const pureCodingCost = home + office;
+  const pureCodingHours = homeHours + officeHours;
 
   // By month: cost/hours from shifts, games from TT_Games, merged on month key.
   const monthMap = new Map<string, MonthSummary>();
@@ -239,6 +268,21 @@ export function buildBoardReport(
     .slice(0, 10);
 
   const totalGames = games.length;
+
+  // Weeks in the (inclusive) range, used to scale the PHL fixed weekly cost.
+  // Inclusive day span / 7 — a full calendar month ≈ 4.4 weeks, a 7-day week
+  // = 1.0. Guard against an inverted/zero range.
+  const dayMs = 24 * 60 * 60 * 1000;
+  const fromMs = new Date(`${from}T00:00:00Z`).getTime();
+  const toMs = new Date(`${to}T00:00:00Z`).getTime();
+  const inclusiveDays =
+    Number.isFinite(fromMs) && Number.isFinite(toMs) && toMs >= fromMs
+      ? Math.round((toMs - fromMs) / dayMs) + 1
+      : 0;
+  const weeksInRange = inclusiveDays / 7;
+  const phlFixedCost = PHL_WEEKLY_FIXED_COST * weeksInRange;
+  const phlGames = phl;
+
   return {
     from,
     to,
@@ -250,6 +294,14 @@ export function buildBoardReport(
     avgCostPerHour: kpis.totalHours > 0 ? kpis.totalCost / kpis.totalHours : 0,
     avgCostPerGame: totalGames > 0 ? kpis.totalCost / totalGames : 0,
     avgHoursPerGame: totalGames > 0 ? kpis.totalHours / totalGames : 0,
+    pureCodingCost,
+    pureCodingHours,
+    pureCodingCostPerGame: totalGames > 0 ? pureCodingCost / totalGames : 0,
+    pureCodingHoursPerGame: totalGames > 0 ? pureCodingHours / totalGames : 0,
+    weeksInRange,
+    phlFixedCost,
+    phlGames,
+    phlCostPerGame: phlGames > 0 ? phlFixedCost / phlGames : 0,
     byArea,
     byMonth,
     homeVsOffice: { home, office, other },

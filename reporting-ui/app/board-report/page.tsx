@@ -138,6 +138,18 @@ function reportToCsv(r: BoardReport): string {
   row("Avg cost / game", r.avgCostPerGame.toFixed(2));
   row("Avg hours / game", r.avgHoursPerGame.toFixed(2));
   row("");
+  row("Coding efficiency (Home + Office analyst)");
+  row("Pure coding cost", Math.round(r.pureCodingCost));
+  row("Pure coding hours", Math.round(r.pureCodingHours));
+  row("Pure coding cost / game", r.pureCodingCostPerGame.toFixed(2));
+  row("Coding hours / game", r.pureCodingHoursPerGame.toFixed(2));
+  row("");
+  row("Philippines (fixed cost)");
+  row("Weeks in range", r.weeksInRange.toFixed(2));
+  row("PHL fixed cost", Math.round(r.phlFixedCost));
+  row("PHL games", r.phlGames);
+  row("PHL cost / game", r.phlCostPerGame.toFixed(2));
+  row("");
   row("Cost by area", "Cost", "Hours", "Shifts", "Share");
   for (const a of r.byArea) {
     row(a.area, Math.round(a.cost), Math.round(a.hours), a.shifts, pct(a.costShare));
@@ -450,6 +462,31 @@ export default function BoardReportPage() {
             <Kpi label="Shifts" value={report.shiftCount.toLocaleString("en-AU")} />
           </div>
 
+          {/* Coding efficiency — Home + Office analyst only, over games coded,
+              plus the Philippines fixed-cost model. */}
+          <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Kpi
+              label="Pure coding cost / game"
+              value={money2(report.pureCodingCostPerGame)}
+              sub="Home + Office analyst cost ÷ games"
+            />
+            <Kpi
+              label="Coding hours / game"
+              value={report.pureCodingHoursPerGame.toFixed(2)}
+              sub="Home + Office analyst hours ÷ games"
+            />
+            <Kpi
+              label="PHL cost / game"
+              value={report.phlGames > 0 ? money2(report.phlCostPerGame) : "—"}
+              sub={`${money(report.phlFixedCost)} ÷ ${report.phlGames.toLocaleString("en-AU")} PHL games`}
+            />
+            <Kpi
+              label="Pure coding cost"
+              value={money(report.pureCodingCost)}
+              sub={`${hours(report.pureCodingHours)} hrs (Home + Office)`}
+            />
+          </div>
+
           {/* Cost by area */}
           <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
             <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
@@ -616,7 +653,11 @@ export default function BoardReportPage() {
             Generated {new Date().toLocaleString("en-AU")}. Labour figures from
             Deputy shift records; games from coded match allocations. Shared,
             jointly-coded work (&ldquo;Premier Data&rdquo;) is excluded from
-            per-analyst totals.
+            per-analyst totals. Pure coding cost/hours cover the Home and Office
+            analyst areas only. Philippines is a fixed cost of{" "}
+            {money(3800)}/week ({report.weeksInRange.toFixed(1)} weeks ={" "}
+            {money(report.phlFixedCost)} this period), charged per PHL game
+            coded — it is not part of the Deputy labour totals above.
           </p>
         </div>
       )}
