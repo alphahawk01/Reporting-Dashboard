@@ -204,11 +204,6 @@ function reportToCsv(r: BoardReport, entitlementsPct: number): string {
     row(m.label, Math.round(m.cost), Math.round(m.hours), m.games);
   }
   row("");
-  row("Labour cost split", "Cost");
-  row("Home analyst", Math.round(r.homeVsOffice.home));
-  row("Office analyst", Math.round(r.homeVsOffice.office));
-  row("Other areas", Math.round(r.homeVsOffice.other));
-  row("");
   row("Games by location", "Games");
   row("Australia", r.gamesByLocation.aus);
   row("Philippines", r.gamesByLocation.phl);
@@ -1107,92 +1102,42 @@ export default function BoardReportPage() {
             </table>
           </section>
 
-          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            {/* Monthly trend (only meaningful when the range spans >1 month) */}
-            {report.byMonth.length > 1 && (
-              <section className="rounded-2xl border border-slate-200 bg-white p-5">
-                <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-                  Monthly breakdown
-                </h3>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-xs uppercase tracking-wide text-slate-400">
-                      <th className="pb-2">Month</th>
-                      <th className="pb-2 text-right">Cost</th>
-                      <th className="pb-2 text-right">Hours</th>
-                      <th className="pb-2 text-right">Games</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {report.byMonth.map((m) => (
-                      <tr key={m.key} className="border-t border-slate-100">
-                        <td className="py-1.5 font-medium text-slate-800">
-                          {m.label}
-                        </td>
-                        <td className="py-1.5 text-right tabular-nums text-slate-800">
-                          {money(m.cost)}
-                        </td>
-                        <td className="py-1.5 text-right tabular-nums text-slate-600">
-                          {hours(m.hours)}
-                        </td>
-                        <td className="py-1.5 text-right tabular-nums text-slate-600">
-                          {m.games}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </section>
-            )}
-
-            {/* Splits */}
-            <section className="rounded-2xl border border-slate-200 bg-white p-5">
+          {/* Monthly trend (only meaningful when the range spans >1 month) */}
+          {report.byMonth.length > 1 && (
+            <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
               <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-                Labour cost split &amp; games
+                Monthly breakdown
               </h3>
-              <div className="space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Home analysts</span>
-                  <span className="font-medium tabular-nums text-slate-800">
-                    {money(report.homeVsOffice.home)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Office analysts</span>
-                  <span className="font-medium tabular-nums text-slate-800">
-                    {money(report.homeVsOffice.office)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Other areas</span>
-                  <span className="font-medium tabular-nums text-slate-800">
-                    {money(report.homeVsOffice.other)}
-                  </span>
-                </div>
-                <hr className="border-slate-100" />
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Games — Australia</span>
-                  <span className="font-medium tabular-nums text-slate-800">
-                    {report.gamesByLocation.aus.toLocaleString("en-AU")}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">Games — Philippines</span>
-                  <span className="font-medium tabular-nums text-slate-800">
-                    {report.gamesByLocation.phl.toLocaleString("en-AU")}
-                  </span>
-                </div>
-                {report.gamesByLocation.other > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">Games — Other</span>
-                    <span className="font-medium tabular-nums text-slate-800">
-                      {report.gamesByLocation.other.toLocaleString("en-AU")}
-                    </span>
-                  </div>
-                )}
-              </div>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-wide text-slate-400">
+                    <th className="pb-2">Month</th>
+                    <th className="pb-2 text-right">Cost</th>
+                    <th className="pb-2 text-right">Hours</th>
+                    <th className="pb-2 text-right">Games</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.byMonth.map((m) => (
+                    <tr key={m.key} className="border-t border-slate-100">
+                      <td className="py-1.5 font-medium text-slate-800">
+                        {m.label}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums text-slate-800">
+                        {money(m.cost)}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums text-slate-600">
+                        {hours(m.hours)}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums text-slate-600">
+                        {m.games}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </section>
-          </div>
+          )}
 
           {/* Top analysts */}
           <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
