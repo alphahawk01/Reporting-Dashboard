@@ -127,7 +127,7 @@ function csvEscape(v: string | number): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-function reportToCsv(r: BoardReport): string {
+function reportToCsv(r: BoardReport, entitlementsPct: number): string {
   const lines: string[] = [];
   const row = (...cells: (string | number)[]) =>
     lines.push(cells.map(csvEscape).join(","));
@@ -160,6 +160,19 @@ function reportToCsv(r: BoardReport): string {
   row("Incorporated hours", Math.round(r.incCodingHours));
   row("Incorporated cost / game", r.incCostPerGame.toFixed(2));
   row("Incorporated hours / game", r.incHoursPerGame.toFixed(2));
+  row("");
+  row("Incorporated cost + entitlements");
+  row("Entitlements %", `${entitlementsPct}%`);
+  row(
+    "Total incl. entitlements",
+    Math.round(r.incCodingCost * (1 + entitlementsPct / 100))
+  );
+  row(
+    "Cost / game incl. entitlements",
+    r.ausGames > 0
+      ? ((r.incCodingCost * (1 + entitlementsPct / 100)) / r.ausGames).toFixed(2)
+      : "0.00"
+  );
   row("");
   row("Philippines (fixed cost)");
   row("Weeks in range", r.weeksInRange.toFixed(2));
@@ -196,8 +209,10 @@ function reportToCsv(r: BoardReport): string {
   return lines.join("\n");
 }
 
-function downloadCsv(r: BoardReport) {
-  const blob = new Blob([reportToCsv(r)], { type: "text/csv;charset=utf-8;" });
+function downloadCsv(r: BoardReport, entitlementsPct: number) {
+  const blob = new Blob([reportToCsv(r, entitlementsPct)], {
+    type: "text/csv;charset=utf-8;",
+  });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -294,6 +309,11 @@ export default function BoardReportPage() {
   const [customTo, setCustomTo] = useState<string>("");
   // Compare against the previous period (previous month / previous week).
   const [compare, setCompare] = useState<boolean>(true);
+  // Entitlements uplift applied to the incorporated coding cost. `draft` is
+  // what the user is typing; `applied` is what the totals use (updated on
+  // Calculate), so the figures don't jump around as they type. Default 15%.
+  const [entitlementsDraft, setEntitlementsDraft] = useState<string>("15");
+  const [entitlementsPct, setEntitlementsPct] = useState<number>(15);
 
   // The raw data, loaded ONCE on mount so the week dropdown can be populated
   // and generation (incl. the comparison period) is instant with no refetch.
@@ -632,7 +652,7 @@ export default function BoardReportPage() {
             </div>
             <div className="flex gap-2 print:hidden">
               <button
-                onClick={() => downloadCsv(report)}
+                onClick={() => downloadCsv(report, entitlementsPct)}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
               >
                 <Download size={15} /> Export CSV
@@ -872,6 +892,102 @@ export default function BoardReportPage() {
               </div>
             </div>
           </section>
+
+          {/* Incorporated cost + entitlements uplift. Pure presentation layer:
+              incorporated cost × (1 + entitlements%). The % is editable; the
+              totals update when the user hits Calculate. */}
+          {(() => {
+            const factor = 1 + entitlementsPct / 100;
+            const entCost = report.incCodingCost * factor;
+            const entCostPerGame =
+              report.ausGames > 0 ? entCost / report.ausGames : 0;
+            return (
+              <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                    Incorporated cost + entitlements
+                  </h3>
+                  {/* Editable entitlements % + Calculate (hidden when printing;
+                      the applied % still shows in the heading note below). */}
+                  <div className="flex items-end gap-2 print:hidden">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
+                        Entitlements %
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.5"
+                          value={entitlementsDraft}
+                          onChange={(e) => setEntitlementsDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              const v = Number(entitlementsDraft);
+                              if (Number.isFinite(v) && v >= 0)
+                                setEntitlementsPct(v);
+                            }
+                          }}
+                          className="w-24 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500"
+                        />
+                        <span className="text-sm text-slate-500">%</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const v = Number(entitlementsDraft);
+                        if (Number.isFinite(v) && v >= 0) setEntitlementsPct(v);
+                      }}
+                      className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                    >
+                      Calculate
+                    </button>
+                  </div>
+                </div>
+                <p className="mb-4 text-xs text-slate-500">
+                  Incorporated coding cost plus a{" "}
+                  <span className="font-medium text-slate-700">
+                    {entitlementsPct}%
+                  </span>{" "}
+                  entitlements uplift, over{" "}
+                  {report.ausGames.toLocaleString("en-AU")} AUS games.
+                </p>
+                <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+                  <div>
+                    <div className="text-2xl font-bold text-slate-900">
+                      {money(entCost)}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      total incl. entitlements
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold text-slate-900">
+                      {money(entCost - report.incCodingCost)}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      entitlements ({entitlementsPct}%)
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold text-slate-900">
+                      {report.ausGames > 0 ? money2(entCostPerGame) : "—"}
+                    </div>
+                    <div className="text-xs text-slate-500">cost / game</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold text-slate-500">
+                      {money(report.incCodingCost)}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      base (before uplift)
+                    </div>
+                  </div>
+                </div>
+              </section>
+            );
+          })()}
 
           {/* Cost by area */}
           <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
