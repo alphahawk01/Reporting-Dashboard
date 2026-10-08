@@ -76,6 +76,19 @@ export type AnalystSummary = {
 // per-game cost is derived from this rate × the number of weeks in the range.
 export const PHL_WEEKLY_FIXED_COST = 3800;
 
+// "Incorporated coding" areas — pure coding PLUS the support functions that
+// wrap around coding (ops coordination, customer service, QA, quality control).
+// Used for a broader cost-per-game that reflects the full cost of delivering a
+// coded game, not just the analyst at the keyboard.
+const INCORPORATED_CODING_AREAS = new Set([
+  "home analyst",
+  "office analyst",
+  "operations coordinator",
+  "customer service",
+  "accuracy - qa",
+  "quality control",
+]);
+
 export type BoardReport = {
   from: string; // yyyy-mm-dd (inclusive)
   to: string; // yyyy-mm-dd (inclusive)
@@ -99,6 +112,12 @@ export type BoardReport = {
   ausGamesShare: number; // ausGames / total games (0–1)
   ausCostPerGame: number; // pureCodingCost / ausGames
   ausHoursPerGame: number; // pureCodingHours / ausGames
+  // "Incorporated coding" — pure coding + support areas (Ops Coordinator,
+  // Customer Service, Accuracy-QA, Quality Control). Per-game over AUS games.
+  incCodingCost: number;
+  incCodingHours: number;
+  incCostPerGame: number; // incCodingCost / ausGames
+  incHoursPerGame: number; // incCodingHours / ausGames
   // ── Philippines team (fixed cost, not in deputy_shifts) ──
   weeksInRange: number; // (range length in days) / 7
   phlFixedCost: number; // PHL_WEEKLY_FIXED_COST × weeksInRange
@@ -228,6 +247,9 @@ function summarise(
   let other = 0;
   let homeHours = 0;
   let officeHours = 0;
+  // "Incorporated coding" = pure coding + the support areas that wrap around it.
+  let incCodingCost = 0;
+  let incCodingHours = 0;
   for (const a of byArea) {
     const key = a.area.toLowerCase();
     if (key === "home analyst") {
@@ -238,6 +260,10 @@ function summarise(
       officeHours += a.hours;
     } else {
       other += a.cost;
+    }
+    if (INCORPORATED_CODING_AREAS.has(key)) {
+      incCodingCost += a.cost;
+      incCodingHours += a.hours;
     }
   }
   // "Pure coding" = the two analyst areas that actually code games (Home +
@@ -351,6 +377,10 @@ function summarise(
     // AUS games, so dividing by total (AUS+PHL) games would understate cost.
     ausCostPerGame: aus > 0 ? pureCodingCost / aus : 0,
     ausHoursPerGame: aus > 0 ? pureCodingHours / aus : 0,
+    incCodingCost,
+    incCodingHours,
+    incCostPerGame: aus > 0 ? incCodingCost / aus : 0,
+    incHoursPerGame: aus > 0 ? incCodingHours / aus : 0,
     weeksInRange,
     phlFixedCost,
     phlGames,
@@ -387,6 +417,8 @@ export type BoardComparison = {
   ausGames: MetricDelta;
   ausCostPerGame: MetricDelta;
   ausHoursPerGame: MetricDelta;
+  incCostPerGame: MetricDelta;
+  incHoursPerGame: MetricDelta;
   phlGames: MetricDelta;
   phlCostPerGame: MetricDelta;
 };
@@ -418,6 +450,8 @@ export function compareReports(
     ausGames: delta(current.ausGames, previous.ausGames),
     ausCostPerGame: delta(current.ausCostPerGame, previous.ausCostPerGame),
     ausHoursPerGame: delta(current.ausHoursPerGame, previous.ausHoursPerGame),
+    incCostPerGame: delta(current.incCostPerGame, previous.incCostPerGame),
+    incHoursPerGame: delta(current.incHoursPerGame, previous.incHoursPerGame),
     phlGames: delta(current.phlGames, previous.phlGames),
     phlCostPerGame: delta(current.phlCostPerGame, previous.phlCostPerGame),
   };

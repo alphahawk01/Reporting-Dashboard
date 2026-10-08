@@ -155,6 +155,12 @@ function reportToCsv(r: BoardReport): string {
   row("AUS cost / game", r.ausCostPerGame.toFixed(2));
   row("AUS hours / game", r.ausHoursPerGame.toFixed(2));
   row("");
+  row("Incorporated coding (Home+Office+Ops+CustSvc+QA+QC)");
+  row("Incorporated cost", Math.round(r.incCodingCost));
+  row("Incorporated hours", Math.round(r.incCodingHours));
+  row("Incorporated cost / game", r.incCostPerGame.toFixed(2));
+  row("Incorporated hours / game", r.incHoursPerGame.toFixed(2));
+  row("");
   row("Philippines (fixed cost)");
   row("Weeks in range", r.weeksInRange.toFixed(2));
   row("Weekly rate", 3800);
@@ -806,6 +812,63 @@ export default function BoardReportPage() {
                   Fixed {money(3800)}/wk × {report.weeksInRange.toFixed(1)} wks ={" "}
                   {money(report.phlFixedCost)} · hours not tracked
                 </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Incorporated coding cost — the broader AUS cost base (coding +
+              the support functions that wrap around it), over AUS games. */}
+          <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
+            <h3 className="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
+              Incorporated coding cost (Australia)
+            </h3>
+            <p className="mb-4 text-xs text-slate-500">
+              Home + Office analyst plus Operations Coordinator, Customer
+              Service, Accuracy&nbsp;-&nbsp;QA and Quality Control, over{" "}
+              {report.ausGames.toLocaleString("en-AU")} AUS games.
+            </p>
+            <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+              <div>
+                <div className="text-2xl font-bold text-slate-900">
+                  {money(report.incCodingCost)}
+                </div>
+                <div className="text-xs text-slate-500">total cost</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-slate-900">
+                  {hours(report.incCodingHours)}
+                </div>
+                <div className="text-xs text-slate-500">total hours</div>
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-slate-900">
+                  {report.ausGames > 0 ? money2(report.incCostPerGame) : "—"}
+                </div>
+                <div className="text-xs text-slate-500">cost / game</div>
+                {comparison && (
+                  <div className="mt-0.5 flex justify-center">
+                    <Delta
+                      d={comparison.incCostPerGame}
+                      format={money2}
+                      kind="cost"
+                    />
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="text-2xl font-bold text-slate-900">
+                  {report.ausGames > 0 ? report.incHoursPerGame.toFixed(2) : "—"}
+                </div>
+                <div className="text-xs text-slate-500">hours / game</div>
+                {comparison && (
+                  <div className="mt-0.5 flex justify-center">
+                    <Delta
+                      d={comparison.incHoursPerGame}
+                      format={(v) => v.toFixed(2)}
+                      kind="cost"
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </section>
