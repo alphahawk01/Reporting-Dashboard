@@ -151,7 +151,9 @@ function csvDelta(
 ): { change: string; pctText: string; dir: string } {
   if (!d || d.direction === "flat")
     return { change: "no change", pctText: "0.0%", dir: "flat" };
-  const sign = d.delta > 0 ? "+" : "−";
+  // Plain ASCII hyphen (not a Unicode minus) so Excel renders it correctly
+  // regardless of its import encoding.
+  const sign = d.delta > 0 ? "+" : "-";
   const change = `${sign}${fmt(Math.abs(d.delta))}`;
   const pctText =
     d.pct == null
@@ -182,7 +184,7 @@ function reportToCsv(
     row(name, value, unit);
 
   // ── Title ──
-  row("PREMIER DATA — BOARD REPORT");
+  row("PREMIER DATA - BOARD REPORT");
   row("Period", rangeLabel(r.from, r.to));
   if (comparison && prevLabel) row("Compared to", prevLabel);
   row("Generated", new Date().toLocaleString("en-AU"));
@@ -190,8 +192,8 @@ function reportToCsv(
   // ── Headline ──
   section("Headline");
   metric("Total labour cost (Deputy + PHL)", csvMoney(r.totalCostWithPhl), "AUD");
-  metric("— Deputy labour cost", csvMoney(r.totalCost), "AUD");
-  metric("— Philippines fixed cost", csvMoney(r.phlFixedCost), "AUD");
+  metric("- Deputy labour cost", csvMoney(r.totalCost), "AUD");
+  metric("- Philippines fixed cost", csvMoney(r.phlFixedCost), "AUD");
   metric("Total hours", csvInt(r.totalHours), "hrs");
   metric("Games coded", csvInt(r.totalGames), "games");
   metric("Avg cost / hour", csvMoney2(r.avgCostPerHour), "AUD");
@@ -201,7 +203,7 @@ function reportToCsv(
   // ── Comparison vs previous period (only when one was generated) ──
   if (comparison) {
     blank();
-    row(`COMPARISON — vs ${prevLabel || "previous period"}`.toUpperCase());
+    row(`COMPARISON - vs ${prevLabel || "previous period"}`.toUpperCase());
     row("Metric", "Current", "Previous", "Change", "% change");
     const cmp = (
       name: string,
@@ -224,7 +226,7 @@ function reportToCsv(
   }
 
   // ── Australia (pure coding) ──
-  section("Australia — pure coding (Home + Office analyst)");
+  section("Australia - pure coding (Home + Office analyst)");
   metric("Coding cost", csvMoney(r.pureCodingCost), "AUD");
   metric("Coding hours", csvInt(r.pureCodingHours), "hrs");
   metric("Games coded", csvInt(r.ausGames), "games");
@@ -233,7 +235,7 @@ function reportToCsv(
   metric("Hours / game", csvNum2(r.ausHoursPerGame), "hrs");
 
   // ── Incorporated coding ──
-  section("Australia — incorporated coding (+ Ops, CustSvc, QA, QC)");
+  section("Australia - incorporated coding (+ Ops, CustSvc, QA, QC)");
   metric("Incorporated cost", csvMoney(r.incCodingCost), "AUD");
   metric("Incorporated hours", csvInt(r.incCodingHours), "hrs");
   metric("Cost / game", csvMoney2(r.incCostPerGame), "AUD");
@@ -247,7 +249,7 @@ function reportToCsv(
   metric("Total incl. entitlements", csvMoney(ausWithEnt), "AUD");
   metric(
     "Cost / game incl. entitlements",
-    r.ausGames > 0 ? csvMoney2(ausWithEnt / r.ausGames) : "—",
+    r.ausGames > 0 ? csvMoney2(ausWithEnt / r.ausGames) : "-",
     "AUD"
   );
 
@@ -260,12 +262,12 @@ function reportToCsv(
   metric("Total games", csvInt(r.totalGames), "games");
   metric(
     "Blended cost / game",
-    r.totalGames > 0 ? csvMoney2(blendedCost / r.totalGames) : "—",
+    r.totalGames > 0 ? csvMoney2(blendedCost / r.totalGames) : "-",
     "AUD"
   );
 
   // ── Philippines ──
-  section("Philippines — fixed cost");
+  section("Philippines - fixed cost");
   metric("Weeks in period", csvNum2(r.weeksInRange), "wks");
   metric("Weekly rate", csvMoney(PHL_WEEKLY_FIXED_COST), "AUD");
   metric("Fixed cost", csvMoney(r.phlFixedCost), "AUD");
@@ -308,12 +310,12 @@ function downloadCsv(
   comparison: BoardComparison | null,
   prevLabel: string
 ) {
-  const blob = new Blob(
-    [reportToCsv(r, entitlementsPct, comparison, prevLabel)],
-    {
-      type: "text/csv;charset=utf-8;",
-    }
-  );
+  // Prefix a UTF-8 BOM so Excel detects the encoding and renders any non-ASCII
+  // (e.g. the en dash in the period range) correctly instead of as mojibake.
+  const csv = reportToCsv(r, entitlementsPct, comparison, prevLabel);
+  const blob = new Blob(["\uFEFF" + csv], {
+    type: "text/csv;charset=utf-8;",
+  });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
