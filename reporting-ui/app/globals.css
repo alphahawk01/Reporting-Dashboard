@@ -24,3 +24,76 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Print styles — produce a clean, document-like PDF when the user hits
+   "Print / Save PDF" on a report page.
+
+   The app shell (sidebar, top bar, chat) and the dark full-screen layout are
+   designed for on-screen use: when printing they must get out of the way so
+   the report fills the page in a readable, paginated, light-on-white format.
+
+   A report page marks its printable root with `.print-document`. Anything
+   marked `.no-print` (or Tailwind's `print:hidden`) is removed from print.
+   ────────────────────────────────────────────────────────────────────────── */
+@media print {
+  /* Light background, no app dark theme, and let content flow across pages
+     instead of being clipped by the on-screen h-screen/overflow-hidden shell. */
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  /* Hide the app chrome and anything explicitly marked no-print. The chat
+     widget renders as fixed-position overlays, so hide fixed elements too
+     (the printable document is absolutely positioned, not fixed). */
+  .no-print,
+  aside,
+  nav,
+  header,
+  .fixed {
+    display: none !important;
+  }
+
+  /* Unclip every ancestor between <body> and the report so the document can
+     span multiple pages (the shell uses nested flex + overflow-hidden). */
+  body * {
+    overflow: visible !important;
+  }
+
+  /* The printable document takes the full page width, with sensible margins. */
+  .print-document {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  /* Keep each report section intact on one page where possible, and give a
+     little breathing room between them. */
+  .print-document section,
+  .print-document .print-keep {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Preserve the coloured KPI/area backgrounds and bars in the PDF. */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Page setup: A4-ish with comfortable margins. */
+  @page {
+    size: A4 portrait;
+    margin: 14mm 12mm;
+  }
+}

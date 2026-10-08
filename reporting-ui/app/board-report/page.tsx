@@ -464,9 +464,9 @@ export default function BoardReportPage() {
     "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500";
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
+    <div className="print-document mx-auto max-w-5xl px-6 py-8">
       {/* Controls — hidden when printing so the PDF is just the report. */}
-      <div className="print:hidden">
+      <div className="print:hidden no-print">
         <div className="mb-6">
           <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight text-slate-900">
             <FileText size={26} /> Board Report
@@ -657,7 +657,7 @@ export default function BoardReportPage() {
                 {rangeLabel(report.from, report.to)}
               </p>
             </div>
-            <div className="flex gap-2 print:hidden">
+            <div className="flex gap-2 print:hidden no-print">
               <button
                 onClick={() => downloadCsv(report, entitlementsPct)}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
