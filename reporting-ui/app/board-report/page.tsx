@@ -161,6 +161,16 @@ function reportToCsv(r: BoardReport, entitlementsPct: number): string {
   row("Incorporated cost / game", r.incCostPerGame.toFixed(2));
   row("Incorporated hours / game", r.incHoursPerGame.toFixed(2));
   row("");
+  row("Blended cost (AUS incorporated + PHL fixed)");
+  row("Blended total cost", Math.round(r.incCodingCost + r.phlFixedCost));
+  row("Blended total games", r.totalGames);
+  row(
+    "Blended cost / game",
+    r.totalGames > 0
+      ? ((r.incCodingCost + r.phlFixedCost) / r.totalGames).toFixed(2)
+      : "0.00"
+  );
+  row("");
   row("Incorporated cost + entitlements");
   row("Entitlements %", `${entitlementsPct}%`);
   row(
@@ -892,6 +902,61 @@ export default function BoardReportPage() {
               </div>
             </div>
           </section>
+
+          {/* Blended cost — AUS incorporated cost + PHL fixed cost, over ALL
+              games (AUS + PHL). Entitlements are NOT applied here: we pay no
+              extra entitlements, and none apply to the PHL fixed cost. */}
+          {(() => {
+            const blendedCost = report.incCodingCost + report.phlFixedCost;
+            const blendedGames = report.totalGames;
+            const blendedCostPerGame =
+              blendedGames > 0 ? blendedCost / blendedGames : 0;
+            return (
+              <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
+                <h3 className="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                  Blended cost (Australia + Philippines)
+                </h3>
+                <p className="mb-4 text-xs text-slate-500">
+                  Incorporated coding cost plus the Philippines fixed cost, over
+                  all {blendedGames.toLocaleString("en-AU")} games coded
+                  (AUS&nbsp;+&nbsp;PHL). Entitlements are not applied.
+                </p>
+                <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+                  <div>
+                    <div className="text-2xl font-bold text-slate-900">
+                      {money(blendedCost)}
+                    </div>
+                    <div className="text-xs text-slate-500">total cost</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold text-slate-900">
+                      {blendedGames.toLocaleString("en-AU")}
+                    </div>
+                    <div className="text-xs text-slate-500">total games</div>
+                  </div>
+                  <div>
+                    <div className="text-2xl font-bold text-slate-900">
+                      {blendedGames > 0 ? money2(blendedCostPerGame) : "—"}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      blended cost / game
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-slate-600">
+                      {money(report.incCodingCost)} AUS
+                    </div>
+                    <div className="text-sm font-medium text-slate-600">
+                      + {money(report.phlFixedCost)} PHL
+                    </div>
+                    <div className="mt-0.5 text-xs text-slate-500">
+                      cost split
+                    </div>
+                  </div>
+                </div>
+              </section>
+            );
+          })()}
 
           {/* Incorporated cost + entitlements uplift. Pure presentation layer:
               incorporated cost × (1 + entitlements%). The % is editable; the
