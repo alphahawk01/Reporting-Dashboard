@@ -125,7 +125,16 @@ function rangeLabel(from: string, to: string): string {
 // ── CSV export ────────────────────────────────────────────────────────────────
 
 function csvEscape(v: string | number): string {
-  const s = String(v);
+  let s = String(v);
+  // Guard against Excel treating a cell as a FORMULA: any text cell starting
+  // with = + - @ (e.g. "- Philippines fixed cost" or "-$9,859") would show as
+  // #NAME?. A genuine negative NUMBER (e.g. "-370") is left alone so it stays
+  // numeric; anything else that leads with a trigger char gets a leading
+  // apostrophe, which Excel strips on display, forcing text.
+  const isPlainNumber = /^-?\d+(\.\d+)?$/.test(s);
+  if (!isPlainNumber && /^[=+\-@]/.test(s)) {
+    s = `'${s}`;
+  }
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
@@ -192,8 +201,8 @@ function reportToCsv(
   // ── Headline ──
   section("Headline");
   metric("Total labour cost (Deputy + PHL)", csvMoney(r.totalCostWithPhl), "AUD");
-  metric("- Deputy labour cost", csvMoney(r.totalCost), "AUD");
-  metric("- Philippines fixed cost", csvMoney(r.phlFixedCost), "AUD");
+  metric("  Deputy labour cost", csvMoney(r.totalCost), "AUD");
+  metric("  Philippines fixed cost", csvMoney(r.phlFixedCost), "AUD");
   metric("Total hours", csvInt(r.totalHours), "hrs");
   metric("Games coded", csvInt(r.totalGames), "games");
   metric("Avg cost / hour", csvMoney2(r.avgCostPerHour), "AUD");
