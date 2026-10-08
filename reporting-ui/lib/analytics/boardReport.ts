@@ -80,7 +80,9 @@ export type BoardReport = {
   from: string; // yyyy-mm-dd (inclusive)
   to: string; // yyyy-mm-dd (inclusive)
   // Headline KPIs.
-  totalCost: number;
+  totalCost: number; // Deputy labour cost only (AUS shifts)
+  /** Deputy labour cost + the Philippines fixed cost for the period. */
+  totalCostWithPhl: number;
   totalHours: number;
   totalGames: number;
   headcount: number; // distinct analysts with a shift in range (excl. placeholders)
@@ -333,6 +335,7 @@ function summarise(
     from,
     to,
     totalCost: kpis.totalCost,
+    totalCostWithPhl: kpis.totalCost + phlFixedCost,
     totalHours: kpis.totalHours,
     totalGames,
     headcount: realNames.size,
@@ -378,6 +381,7 @@ export type MetricDelta = {
 
 export type BoardComparison = {
   totalCost: MetricDelta;
+  totalCostWithPhl: MetricDelta;
   totalHours: MetricDelta;
   totalGames: MetricDelta;
   ausGames: MetricDelta;
@@ -405,6 +409,10 @@ export function compareReports(
 ): BoardComparison {
   return {
     totalCost: delta(current.totalCost, previous.totalCost),
+    totalCostWithPhl: delta(
+      current.totalCostWithPhl,
+      previous.totalCostWithPhl
+    ),
     totalHours: delta(current.totalHours, previous.totalHours),
     totalGames: delta(current.totalGames, previous.totalGames),
     ausGames: delta(current.ausGames, previous.ausGames),

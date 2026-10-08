@@ -136,7 +136,9 @@ function reportToCsv(r: BoardReport): string {
   row("Period", rangeLabel(r.from, r.to));
   row("");
   row("Headline");
-  row("Total labour cost", Math.round(r.totalCost));
+  row("Total labour cost (Deputy + PHL)", Math.round(r.totalCostWithPhl));
+  row("  Deputy labour cost", Math.round(r.totalCost));
+  row("  Philippines fixed cost", Math.round(r.phlFixedCost));
   row("Total hours", Math.round(r.totalHours));
   row("Games coded", r.totalGames);
   row("Active analysts", r.headcount);
@@ -649,10 +651,15 @@ export default function BoardReportPage() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Kpi
               label="Total labour cost"
-              value={money(report.totalCost)}
+              value={money(report.totalCostWithPhl)}
+              sub={`${money(report.totalCost)} Deputy + ${money(report.phlFixedCost)} PHL`}
               delta={
                 comparison && (
-                  <Delta d={comparison.totalCost} format={money} kind="cost" />
+                  <Delta
+                    d={comparison.totalCostWithPhl}
+                    format={money}
+                    kind="cost"
+                  />
                 )
               }
             />
