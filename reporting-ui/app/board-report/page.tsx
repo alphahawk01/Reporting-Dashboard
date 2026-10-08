@@ -141,7 +141,30 @@ const csvInt = (v: number) => Math.round(v || 0).toLocaleString("en-AU");
 const csvNum2 = (v: number) => (v || 0).toFixed(2);
 const csvPct = (frac: number) => `${(frac * 100).toFixed(1)}%`;
 
-function reportToCsv(r: BoardReport, entitlementsPct: number): string {
+// Format a MetricDelta for CSV: the signed change, the % change, and a
+// readable direction. `fmt` formats the absolute delta amount (money / int /
+// decimal) to match the metric.
+function csvDelta(
+  d: MetricDelta | undefined,
+  fmt: (v: number) => string
+): { change: string; pctText: string; dir: string } {
+  if (!d || d.direction === "flat")
+    return { change: "no change", pctText: "0.0%", dir: "flat" };
+  const sign = d.delta > 0 ? "+" : "−";
+  const change = `${sign}${fmt(Math.abs(d.delta))}`;
+  const pctText =
+    d.pct == null
+      ? "n/a"
+      : `${d.pct > 0 ? "+" : ""}${(d.pct * 100).toFixed(1)}%`;
+  return { change, pctText, dir: d.direction === "up" ? "up" : "down" };
+}
+
+function reportToCsv(
+  r: BoardReport,
+  entitlementsPct: number,
+  comparison: BoardComparison | null,
+  prevLabel: string
+): string {
   const lines: string[] = [];
   const row = (...cells: (string | number)[]) =>
     lines.push(cells.map(csvEscape).join(","));
@@ -160,6 +183,7 @@ function reportToCsv(r: BoardReport, entitlementsPct: number): string {
   // ── Title ──
   row("PREMIER DATA — BOARD REPORT");
   row("Period", rangeLabel(r.from, r.to));
+  if (comparison && prevLabel) row("Compared to", prevLabel);
   row("Generated", new Date().toLocaleString("en-AU"));
 
   // ── Headline ──
@@ -172,6 +196,31 @@ function reportToCsv(r: BoardReport, entitlementsPct: number): string {
   metric("Avg cost / hour", csvMoney2(r.avgCostPerHour), "AUD");
   metric("Avg cost / game", csvMoney2(r.avgCostPerGame), "AUD");
   metric("Avg hours / game", csvNum2(r.avgHoursPerGame), "hrs");
+
+  // ── Comparison vs previous period (only when one was generated) ──
+  if (comparison) {
+    blank();
+    row(`COMPARISON — vs ${prevLabel || "previous period"}`.toUpperCase());
+    row("Metric", "Current", "Previous", "Change", "% change");
+    const cmp = (
+      name: string,
+      d: MetricDelta,
+      fmt: (v: number) => string
+    ) => {
+      const { change, pctText } = csvDelta(d, fmt);
+      row(name, fmt(d.current), fmt(d.previous), change, pctText);
+    };
+    cmp("Total labour cost (Deputy + PHL)", comparison.totalCostWithPhl, csvMoney);
+    cmp("Total hours", comparison.totalHours, csvInt);
+    cmp("Games coded", comparison.totalGames, csvInt);
+    cmp("AUS games", comparison.ausGames, csvInt);
+    cmp("AUS cost / game", comparison.ausCostPerGame, csvMoney2);
+    cmp("AUS hours / game", comparison.ausHoursPerGame, csvNum2);
+    cmp("Incorporated cost / game", comparison.incCostPerGame, csvMoney2);
+    cmp("Incorporated hours / game", comparison.incHoursPerGame, csvNum2);
+    cmp("PHL games", comparison.phlGames, csvInt);
+    cmp("PHL cost / game", comparison.phlCostPerGame, csvMoney2);
+  }
 
   // ── Australia (pure coding) ──
   section("Australia — pure coding (Home + Office analyst)");
@@ -252,10 +301,18 @@ function reportToCsv(r: BoardReport, entitlementsPct: number): string {
   return lines.join("\r\n");
 }
 
-function downloadCsv(r: BoardReport, entitlementsPct: number) {
-  const blob = new Blob([reportToCsv(r, entitlementsPct)], {
-    type: "text/csv;charset=utf-8;",
-  });
+function downloadCsv(
+  r: BoardReport,
+  entitlementsPct: number,
+  comparison: BoardComparison | null,
+  prevLabel: string
+) {
+  const blob = new Blob(
+    [reportToCsv(r, entitlementsPct, comparison, prevLabel)],
+    {
+      type: "text/csv;charset=utf-8;",
+    }
+  );
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -695,7 +752,9 @@ export default function BoardReportPage() {
             </div>
             <div className="flex gap-2 print:hidden no-print">
               <button
-                onClick={() => downloadCsv(report, entitlementsPct)}
+                onClick={() =>
+                  downloadCsv(report, entitlementsPct, comparison, prevLabel)
+                }
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
               >
                 <Download size={15} /> Export CSV
