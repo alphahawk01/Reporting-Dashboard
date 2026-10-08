@@ -31,6 +31,7 @@ import {
   buildWeekReport,
   compareReports,
   monthLabel,
+  PHL_WEEKLY_FIXED_COST,
   type BoardReport,
   type BoardComparison,
   type MetricDelta,
@@ -127,93 +128,128 @@ function csvEscape(v: string | number): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+// CSV number formatting (for READING in Excel, not re-import): thousands
+// separators, currency prefix, fixed decimals. Kept local to the CSV builder.
+const csvMoney = (v: number) =>
+  `$${Math.round(v || 0).toLocaleString("en-AU")}`;
+const csvMoney2 = (v: number) =>
+  `$${(v || 0).toLocaleString("en-AU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+const csvInt = (v: number) => Math.round(v || 0).toLocaleString("en-AU");
+const csvNum2 = (v: number) => (v || 0).toFixed(2);
+const csvPct = (frac: number) => `${(frac * 100).toFixed(1)}%`;
+
 function reportToCsv(r: BoardReport, entitlementsPct: number): string {
   const lines: string[] = [];
   const row = (...cells: (string | number)[]) =>
     lines.push(cells.map(csvEscape).join(","));
+  const blank = () => lines.push("");
+  // A labelled section header: a bold-ish title row above a Metric/Value/Unit
+  // sub-header, so each block reads as its own small table in Excel.
+  const section = (title: string) => {
+    blank();
+    row(title.toUpperCase());
+    row("Metric", "Value", "Unit");
+  };
+  // A metric line: name, formatted value, and the unit in its own column.
+  const metric = (name: string, value: string | number, unit = "") =>
+    row(name, value, unit);
 
-  row("Premier Data — Board Report");
+  // ── Title ──
+  row("PREMIER DATA — BOARD REPORT");
   row("Period", rangeLabel(r.from, r.to));
-  row("");
-  row("Headline");
-  row("Total labour cost (Deputy + PHL)", Math.round(r.totalCostWithPhl));
-  row("  Deputy labour cost", Math.round(r.totalCost));
-  row("  Philippines fixed cost", Math.round(r.phlFixedCost));
-  row("Total hours", Math.round(r.totalHours));
-  row("Games coded", r.totalGames);
-  row("Active analysts", r.headcount);
-  row("Shifts", r.shiftCount);
-  row("Avg cost / hour", r.avgCostPerHour.toFixed(2));
-  row("Avg cost / game", r.avgCostPerGame.toFixed(2));
-  row("Avg hours / game", r.avgHoursPerGame.toFixed(2));
-  row("");
-  row("Australia (Home + Office analyst coding)");
-  row("Coding cost", Math.round(r.pureCodingCost));
-  row("Coding hours", Math.round(r.pureCodingHours));
-  row("AUS games", r.ausGames);
-  row("AUS % of games", pct(r.ausGamesShare));
-  row("AUS cost / game", r.ausCostPerGame.toFixed(2));
-  row("AUS hours / game", r.ausHoursPerGame.toFixed(2));
-  row("");
-  row("Incorporated coding (Home+Office+Ops+CustSvc+QA+QC)");
-  row("Incorporated cost", Math.round(r.incCodingCost));
-  row("Incorporated hours", Math.round(r.incCodingHours));
-  row("Incorporated cost / game", r.incCostPerGame.toFixed(2));
-  row("Incorporated hours / game", r.incHoursPerGame.toFixed(2));
-  row("");
-  row("Incorporated cost + entitlements");
-  row("Entitlements %", `${entitlementsPct}%`);
-  row(
-    "Total incl. entitlements",
-    Math.round(r.incCodingCost * (1 + entitlementsPct / 100))
-  );
-  row(
+  row("Generated", new Date().toLocaleString("en-AU"));
+
+  // ── Headline ──
+  section("Headline");
+  metric("Total labour cost (Deputy + PHL)", csvMoney(r.totalCostWithPhl), "AUD");
+  metric("— Deputy labour cost", csvMoney(r.totalCost), "AUD");
+  metric("— Philippines fixed cost", csvMoney(r.phlFixedCost), "AUD");
+  metric("Total hours", csvInt(r.totalHours), "hrs");
+  metric("Games coded", csvInt(r.totalGames), "games");
+  metric("Avg cost / hour", csvMoney2(r.avgCostPerHour), "AUD");
+  metric("Avg cost / game", csvMoney2(r.avgCostPerGame), "AUD");
+  metric("Avg hours / game", csvNum2(r.avgHoursPerGame), "hrs");
+
+  // ── Australia (pure coding) ──
+  section("Australia — pure coding (Home + Office analyst)");
+  metric("Coding cost", csvMoney(r.pureCodingCost), "AUD");
+  metric("Coding hours", csvInt(r.pureCodingHours), "hrs");
+  metric("Games coded", csvInt(r.ausGames), "games");
+  metric("Share of games", csvPct(r.ausGamesShare), "%");
+  metric("Cost / game", csvMoney2(r.ausCostPerGame), "AUD");
+  metric("Hours / game", csvNum2(r.ausHoursPerGame), "hrs");
+
+  // ── Incorporated coding ──
+  section("Australia — incorporated coding (+ Ops, CustSvc, QA, QC)");
+  metric("Incorporated cost", csvMoney(r.incCodingCost), "AUD");
+  metric("Incorporated hours", csvInt(r.incCodingHours), "hrs");
+  metric("Cost / game", csvMoney2(r.incCostPerGame), "AUD");
+  metric("Hours / game", csvNum2(r.incHoursPerGame), "hrs");
+
+  // ── Incorporated + entitlements ──
+  const ausWithEnt = r.incCodingCost * (1 + entitlementsPct / 100);
+  section("Incorporated cost + entitlements");
+  metric("Entitlements rate", `${entitlementsPct}%`, "%");
+  metric("Entitlements amount", csvMoney(ausWithEnt - r.incCodingCost), "AUD");
+  metric("Total incl. entitlements", csvMoney(ausWithEnt), "AUD");
+  metric(
     "Cost / game incl. entitlements",
-    r.ausGames > 0
-      ? ((r.incCodingCost * (1 + entitlementsPct / 100)) / r.ausGames).toFixed(2)
-      : "0.00"
+    r.ausGames > 0 ? csvMoney2(ausWithEnt / r.ausGames) : "—",
+    "AUD"
   );
-  row("");
-  {
-    const ausWithEnt = r.incCodingCost * (1 + entitlementsPct / 100);
-    const blendedCost = ausWithEnt + r.phlFixedCost;
-    row("Blended cost (AUS incl. entitlements + PHL fixed)");
-    row("Blended total cost", Math.round(blendedCost));
-    row("Blended total games", r.totalGames);
-    row(
-      "Blended cost / game",
-      r.totalGames > 0 ? (blendedCost / r.totalGames).toFixed(2) : "0.00"
-    );
-    row("");
-  }
-  row("Philippines (fixed cost)");
-  row("Weeks in range", r.weeksInRange.toFixed(2));
-  row("Weekly rate", 3800);
-  row("PHL fixed cost", Math.round(r.phlFixedCost));
-  row("PHL games", r.phlGames);
-  row("PHL % of games", pct(r.phlGamesShare));
-  row("PHL cost / game", r.phlCostPerGame.toFixed(2));
-  row("");
-  row("Cost by area", "Cost", "Hours", "Shifts", "Share");
+
+  // ── Blended ──
+  const blendedCost = ausWithEnt + r.phlFixedCost;
+  section("Blended cost (AUS incl. entitlements + PHL fixed)");
+  metric("AUS incl. entitlements", csvMoney(ausWithEnt), "AUD");
+  metric("PHL fixed cost", csvMoney(r.phlFixedCost), "AUD");
+  metric("Blended total cost", csvMoney(blendedCost), "AUD");
+  metric("Total games", csvInt(r.totalGames), "games");
+  metric(
+    "Blended cost / game",
+    r.totalGames > 0 ? csvMoney2(blendedCost / r.totalGames) : "—",
+    "AUD"
+  );
+
+  // ── Philippines ──
+  section("Philippines — fixed cost");
+  metric("Weeks in period", csvNum2(r.weeksInRange), "wks");
+  metric("Weekly rate", csvMoney(PHL_WEEKLY_FIXED_COST), "AUD");
+  metric("Fixed cost", csvMoney(r.phlFixedCost), "AUD");
+  metric("Games coded", csvInt(r.phlGames), "games");
+  metric("Share of games", csvPct(r.phlGamesShare), "%");
+  metric("Cost / game", csvMoney2(r.phlCostPerGame), "AUD");
+
+  // ── Cost by area (table) ──
+  blank();
+  row("COST BY AREA");
+  row("Area", "Cost (AUD)", "Hours", "Shifts", "Share");
   for (const a of r.byArea) {
-    row(a.area, Math.round(a.cost), Math.round(a.hours), a.shifts, pct(a.costShare));
+    row(a.area, csvMoney(a.cost), csvInt(a.hours), a.shifts, csvPct(a.costShare));
   }
-  row("");
-  row("By month", "Cost", "Hours", "Games");
-  for (const m of r.byMonth) {
-    row(m.label, Math.round(m.cost), Math.round(m.hours), m.games);
+
+  // ── By month (table) ──
+  if (r.byMonth.length > 1) {
+    blank();
+    row("MONTHLY BREAKDOWN");
+    row("Month", "Cost (AUD)", "Hours", "Games");
+    for (const m of r.byMonth) {
+      row(m.label, csvMoney(m.cost), csvInt(m.hours), csvInt(m.games));
+    }
   }
-  row("");
-  row("Games by location", "Games");
-  row("Australia", r.gamesByLocation.aus);
-  row("Philippines", r.gamesByLocation.phl);
-  row("Other", r.gamesByLocation.other);
-  row("");
-  row("Top analysts by games", "Games", "Hours", "Cost");
+
+  // ── Top analysts (table) ──
+  blank();
+  row("TOP ANALYSTS BY GAMES CODED");
+  row("Analyst", "Games", "Hours", "Cost (AUD)");
   for (const a of r.topAnalystsByGames) {
-    row(a.name, a.games, Math.round(a.hours), Math.round(a.cost));
+    row(a.name, a.games, csvInt(a.hours), csvMoney(a.cost));
   }
-  return lines.join("\n");
+
+  return lines.join("\r\n");
 }
 
 function downloadCsv(r: BoardReport, entitlementsPct: number) {
