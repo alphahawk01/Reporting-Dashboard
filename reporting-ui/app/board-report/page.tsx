@@ -12,7 +12,7 @@
 // browser print dialog (board-ready, no extra deps); "Export CSV" downloads the
 // summary tables.
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FileText,
   Loader2,
@@ -20,13 +20,20 @@ import {
   Printer,
   Download,
   CalendarRange,
+  TrendingUp,
+  TrendingDown,
+  Minus,
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import {
   buildBoardReport,
+  buildWeekReport,
+  compareReports,
   monthLabel,
   type BoardReport,
+  type BoardComparison,
+  type MetricDelta,
   type ShiftRow,
   type GameRow,
 } from "@/lib/analytics/boardReport";
@@ -195,13 +202,24 @@ function downloadCsv(r: BoardReport) {
 
 // ── Small presentational pieces ───────────────────────────────────────────────
 
-function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function Kpi({
+  label,
+  value,
+  sub,
+  delta,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  delta?: React.ReactNode;
+}) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4">
       <div className="text-xs font-medium uppercase tracking-wide text-slate-400">
         {label}
       </div>
       <div className="mt-1 text-2xl font-bold text-slate-900">{value}</div>
+      {delta && <div className="mt-1">{delta}</div>}
       {sub && <div className="mt-0.5 text-xs text-slate-500">{sub}</div>}
     </div>
   );
@@ -218,62 +236,194 @@ function Bar({ frac, color = "#2563eb" }: { frac: number; color?: string }) {
   );
 }
 
+// A compact change badge for period-over-period comparison. `kind` controls
+// the colour meaning: for "cost" a rise is red (bad) and a fall green (good);
+// for "neutral" (games, hours) a rise is green and a fall red; "none" greys it.
+function Delta({
+  d,
+  format,
+  kind = "neutral",
+}: {
+  d: MetricDelta | undefined;
+  format: (v: number) => string;
+  kind?: "cost" | "neutral";
+}) {
+  if (!d) return null;
+  if (d.direction === "flat") {
+    return (
+      <span className="inline-flex items-center gap-0.5 text-xs text-slate-400">
+        <Minus size={11} /> no change
+      </span>
+    );
+  }
+  const up = d.direction === "up";
+  // Is this movement "good"? For cost, down is good; for the rest, up is good.
+  const good = kind === "cost" ? !up : up;
+  const color = good ? "text-emerald-600" : "text-red-600";
+  const Icon = up ? TrendingUp : TrendingDown;
+  const pctText =
+    d.pct == null ? "" : ` (${d.pct > 0 ? "+" : ""}${(d.pct * 100).toFixed(1)}%)`;
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-xs font-medium ${color}`}>
+      <Icon size={11} />
+      {d.delta > 0 ? "+" : "−"}
+      {format(Math.abs(d.delta))}
+      {pctText}
+    </span>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-type Mode = "month" | "range";
+type Mode = "month" | "week" | "range";
 
 export default function BoardReportPage() {
   const months = useMemo(() => recentMonths(18), []);
   const [mode, setMode] = useState<Mode>("month");
   const [month, setMonth] = useState<string>(lastMonthKey());
+  const [week, setWeek] = useState<number | null>(null);
   const [customFrom, setCustomFrom] = useState<string>("");
   const [customTo, setCustomTo] = useState<string>("");
+  // Compare against the previous period (previous month / previous week).
+  const [compare, setCompare] = useState<boolean>(true);
+
+  // The raw data, loaded ONCE on mount so the week dropdown can be populated
+  // and generation (incl. the comparison period) is instant with no refetch.
+  const [shiftRows, setShiftRows] = useState<ShiftRow[]>([]);
+  const [gameRows, setGameRows] = useState<GameRow[]>([]);
+  const [dataReady, setDataReady] = useState(false);
+  const [dataError, setDataError] = useState<string | null>(null);
 
   const [report, setReport] = useState<BoardReport | null>(null);
+  const [prevReport, setPrevReport] = useState<BoardReport | null>(null);
+  const [comparison, setComparison] = useState<BoardComparison | null>(null);
+  const [prevLabel, setPrevLabel] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Resolve the active from/to from the current mode.
-  const resolveRange = useCallback((): { from: string; to: string } | null => {
-    if (mode === "month") {
-      if (!month) return null;
-      return monthBounds(month);
-    }
-    if (!customFrom || !customTo) return null;
-    if (customFrom > customTo) return { from: customTo, to: customFrom };
-    return { from: customFrom, to: customTo };
-  }, [mode, month, customFrom, customTo]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [shifts, games] = await Promise.all([
+          loadAll("deputy_shifts"),
+          loadAll("TT_Games"),
+        ]);
+        if (cancelled) return;
+        setShiftRows(shifts as ShiftRow[]);
+        setGameRows(games as GameRow[]);
+        setDataReady(true);
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Board report: failed loading data", err);
+        setDataError(
+          err instanceof Error ? err.message : "Failed to load report data."
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const generate = useCallback(async () => {
-    const range = resolveRange();
-    if (!range) {
-      setError("Pick a month, or a valid from/to date range.");
+  // The data weeks present (Wed→Tue week numbers), descending. Week 0 is the
+  // pre-season catch-all; keep it but label it clearly.
+  const weekOptions = useMemo(() => {
+    const set = new Set<number>();
+    for (const r of shiftRows) {
+      const w = Number(r.week);
+      if (Number.isFinite(w)) set.add(w);
+    }
+    return Array.from(set).sort((a, b) => b - a);
+  }, [shiftRows]);
+
+  // Default the week selector to the most recent week once data loads.
+  useEffect(() => {
+    if (week == null && weekOptions.length > 0) setWeek(weekOptions[0]);
+  }, [weekOptions, week]);
+
+  // The previous month key ("yyyy-mm" minus one month).
+  const prevMonthOf = (ym: string): string => {
+    const [y, m] = ym.split("-").map(Number);
+    const d = new Date(y, m - 2, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  };
+
+  const generate = useCallback(() => {
+    if (!dataReady) {
+      setError("Still loading data — try again in a moment.");
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const [shifts, games] = await Promise.all([
-        loadAll("deputy_shifts"),
-        loadAll("TT_Games"),
-      ]);
-      const r = buildBoardReport(
-        shifts as ShiftRow[],
-        games as GameRow[],
-        range.from,
-        range.to
-      );
-      setReport(r);
+      let current: BoardReport;
+      let previous: BoardReport | null = null;
+      let prevLbl = "";
+
+      if (mode === "month") {
+        if (!month) {
+          setError("Pick a month.");
+          setLoading(false);
+          return;
+        }
+        const b = monthBounds(month);
+        current = buildBoardReport(shiftRows, gameRows, b.from, b.to);
+        if (compare) {
+          const pm = prevMonthOf(month);
+          const pb = monthBounds(pm);
+          previous = buildBoardReport(shiftRows, gameRows, pb.from, pb.to);
+          prevLbl = monthLabel(pm);
+        }
+      } else if (mode === "week") {
+        if (week == null) {
+          setError("Pick a week.");
+          setLoading(false);
+          return;
+        }
+        current = buildWeekReport(shiftRows, gameRows, week);
+        if (compare && week - 1 >= 0 && weekOptions.includes(week - 1)) {
+          previous = buildWeekReport(shiftRows, gameRows, week - 1);
+          prevLbl = `Week ${week - 1}`;
+        }
+      } else {
+        if (!customFrom || !customTo) {
+          setError("Pick a valid from/to date range.");
+          setLoading(false);
+          return;
+        }
+        const from = customFrom <= customTo ? customFrom : customTo;
+        const to = customFrom <= customTo ? customTo : customFrom;
+        current = buildBoardReport(shiftRows, gameRows, from, to);
+        // No automatic "previous" for an arbitrary custom range.
+      }
+
+      setReport(current);
+      setPrevReport(previous);
+      setComparison(previous ? compareReports(current, previous) : null);
+      setPrevLabel(prevLbl);
     } catch (err) {
       console.error("Board report failed:", err);
       setError(
         err instanceof Error ? err.message : "Failed to build the board report."
       );
       setReport(null);
+      setComparison(null);
     } finally {
       setLoading(false);
     }
-  }, [resolveRange]);
+  }, [
+    dataReady,
+    mode,
+    month,
+    week,
+    weekOptions,
+    customFrom,
+    customTo,
+    compare,
+    shiftRows,
+    gameRows,
+  ]);
 
   const selectClass =
     "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500";
@@ -287,13 +437,24 @@ export default function BoardReportPage() {
             <FileText size={26} /> Board Report
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-600">
-            A summarised view of workforce cost, hours and games for a month or
-            custom date range. Built live from the platform&rsquo;s own data
-            (Deputy shifts + games coded) — pick a period and generate.
+            A summarised view of workforce cost, hours and games — by month,
+            week, or a custom date range. Compare against the previous period to
+            see the increase or decrease. Built live from the platform&rsquo;s
+            own data (Deputy shifts + games coded).
           </p>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          {!dataReady && !dataError && (
+            <div className="mb-3 flex items-center gap-2 text-sm text-slate-500">
+              <Loader2 size={15} className="animate-spin" /> Loading data…
+            </div>
+          )}
+          {dataError && (
+            <div className="mb-3 flex items-center gap-2 text-sm text-red-600">
+              <AlertTriangle size={15} /> {dataError}
+            </div>
+          )}
           <div className="flex flex-wrap items-end gap-4">
             {/* Mode toggle */}
             <div>
@@ -301,32 +462,24 @@ export default function BoardReportPage() {
                 Period type
               </label>
               <div className="inline-flex rounded-lg border border-slate-300 p-0.5">
-                <button
-                  type="button"
-                  onClick={() => setMode("month")}
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${
-                    mode === "month"
-                      ? "bg-blue-600 text-white"
-                      : "text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  Month
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMode("range")}
-                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${
-                    mode === "range"
-                      ? "bg-blue-600 text-white"
-                      : "text-slate-600 hover:bg-slate-100"
-                  }`}
-                >
-                  Date range
-                </button>
+                {(["month", "week", "range"] as Mode[]).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMode(m)}
+                    className={`rounded-md px-3 py-1.5 text-sm font-medium capitalize ${
+                      mode === m
+                        ? "bg-blue-600 text-white"
+                        : "text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    {m === "range" ? "Date range" : m}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {mode === "month" ? (
+            {mode === "month" && (
               <div className="min-w-[220px]">
                 <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
                   Month
@@ -343,7 +496,30 @@ export default function BoardReportPage() {
                   ))}
                 </select>
               </div>
-            ) : (
+            )}
+
+            {mode === "week" && (
+              <div className="min-w-[220px]">
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Week
+                </label>
+                <select
+                  value={week ?? ""}
+                  onChange={(e) => setWeek(Number(e.target.value))}
+                  className={selectClass}
+                  disabled={weekOptions.length === 0}
+                >
+                  {weekOptions.length === 0 && <option value="">—</option>}
+                  {weekOptions.map((w) => (
+                    <option key={w} value={w}>
+                      {w === 0 ? "Week 0 (pre-season)" : `Week ${w}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {mode === "range" && (
               <>
                 <div>
                   <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
@@ -370,9 +546,23 @@ export default function BoardReportPage() {
               </>
             )}
 
+            {/* Compare toggle — only meaningful for month/week (a custom range
+                has no well-defined "previous period"). */}
+            {mode !== "range" && (
+              <label className="flex cursor-pointer items-center gap-2 pb-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={compare}
+                  onChange={(e) => setCompare(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300"
+                />
+                Compare to previous {mode}
+              </label>
+            )}
+
             <button
               onClick={generate}
-              disabled={loading}
+              disabled={loading || !dataReady}
               className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
             >
               {loading ? (
@@ -448,11 +638,45 @@ export default function BoardReportPage() {
             </div>
           </div>
 
+          {comparison && prevLabel && (
+            <p className="-mt-2 mb-3 text-xs text-slate-500">
+              Compared to{" "}
+              <span className="font-medium text-slate-700">{prevLabel}</span>.
+            </p>
+          )}
+
           {/* Headline KPIs */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Kpi label="Total labour cost" value={money(report.totalCost)} />
-            <Kpi label="Total hours" value={hours(report.totalHours)} />
-            <Kpi label="Games coded" value={report.totalGames.toLocaleString("en-AU")} />
+            <Kpi
+              label="Total labour cost"
+              value={money(report.totalCost)}
+              delta={
+                comparison && (
+                  <Delta d={comparison.totalCost} format={money} kind="cost" />
+                )
+              }
+            />
+            <Kpi
+              label="Total hours"
+              value={hours(report.totalHours)}
+              delta={
+                comparison && (
+                  <Delta d={comparison.totalHours} format={hours} />
+                )
+              }
+            />
+            <Kpi
+              label="Games coded"
+              value={report.totalGames.toLocaleString("en-AU")}
+              delta={
+                comparison && (
+                  <Delta
+                    d={comparison.totalGames}
+                    format={(v) => Math.round(v).toLocaleString("en-AU")}
+                  />
+                )
+              }
+            />
           </div>
 
           {/* AUS vs PHL — games, cost per game and hours per game for each
@@ -478,12 +702,29 @@ export default function BoardReportPage() {
                       {report.ausGames.toLocaleString("en-AU")}
                     </div>
                     <div className="text-xs text-blue-700">games</div>
+                    {comparison && (
+                      <div className="mt-0.5">
+                        <Delta
+                          d={comparison.ausGames}
+                          format={(v) => Math.round(v).toLocaleString("en-AU")}
+                        />
+                      </div>
+                    )}
                   </div>
                   <div>
                     <div className="text-2xl font-bold text-blue-900">
                       {report.ausGames > 0 ? money2(report.ausCostPerGame) : "—"}
                     </div>
                     <div className="text-xs text-blue-700">cost / game</div>
+                    {comparison && (
+                      <div className="mt-0.5">
+                        <Delta
+                          d={comparison.ausCostPerGame}
+                          format={money2}
+                          kind="cost"
+                        />
+                      </div>
+                    )}
                   </div>
                   <div>
                     <div className="text-2xl font-bold text-blue-900">
@@ -492,6 +733,15 @@ export default function BoardReportPage() {
                         : "—"}
                     </div>
                     <div className="text-xs text-blue-700">hours / game</div>
+                    {comparison && (
+                      <div className="mt-0.5">
+                        <Delta
+                          d={comparison.ausHoursPerGame}
+                          format={(v) => v.toFixed(2)}
+                          kind="cost"
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="mt-3 border-t border-blue-200 pt-2 text-xs text-slate-600">
@@ -516,12 +766,29 @@ export default function BoardReportPage() {
                       {report.phlGames.toLocaleString("en-AU")}
                     </div>
                     <div className="text-xs text-amber-700">games</div>
+                    {comparison && (
+                      <div className="mt-0.5">
+                        <Delta
+                          d={comparison.phlGames}
+                          format={(v) => Math.round(v).toLocaleString("en-AU")}
+                        />
+                      </div>
+                    )}
                   </div>
                   <div>
                     <div className="text-2xl font-bold text-amber-900">
                       {report.phlGames > 0 ? money2(report.phlCostPerGame) : "—"}
                     </div>
                     <div className="text-xs text-amber-700">cost / game</div>
+                    {comparison && (
+                      <div className="mt-0.5">
+                        <Delta
+                          d={comparison.phlCostPerGame}
+                          format={money2}
+                          kind="cost"
+                        />
+                      </div>
+                    )}
                   </div>
                   <div>
                     <div className="text-2xl font-bold text-amber-400">—</div>

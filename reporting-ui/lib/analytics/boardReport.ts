@@ -135,7 +135,57 @@ export function buildBoardReport(
 ): BoardReport {
   const shifts = shiftRows.filter((r) => inRange(r, "shift_date", from, to));
   const games = gameRows.filter((r) => inRange(r, "Date", from, to));
+  // Weeks for the PHL fixed cost: inclusive day span / 7.
+  const dayMs = 24 * 60 * 60 * 1000;
+  const fromMs = new Date(`${from}T00:00:00Z`).getTime();
+  const toMs = new Date(`${to}T00:00:00Z`).getTime();
+  const inclusiveDays =
+    Number.isFinite(fromMs) && Number.isFinite(toMs) && toMs >= fromMs
+      ? Math.round((toMs - fromMs) / dayMs) + 1
+      : 0;
+  return summarise(shifts, games, from, to, inclusiveDays / 7);
+}
 
+/**
+ * Build the board report for a single data WEEK (the Wed→Tue week number
+ * carried on deputy_shifts.week / TT_Games.Week). Both tables use the same
+ * numbering, so we filter by the number directly. The period is exactly one
+ * week for the PHL fixed cost. from/to are derived from the actual min/max
+ * shift dates in that week (for display only).
+ */
+export function buildWeekReport(
+  shiftRows: ShiftRow[],
+  gameRows: GameRow[],
+  weekNum: number
+): BoardReport {
+  const w = String(weekNum);
+  const shifts = shiftRows.filter((r) => String(r.week) === w);
+  const games = gameRows.filter((r) => String(r.Week) === w);
+  // Derive a display from/to from the shift dates present (fallback to games).
+  const dates = [
+    ...shifts.map((r) => isoDate(r.shift_date)),
+    ...games.map((r) => isoDate(r.Date)),
+  ]
+    .filter(Boolean)
+    .sort();
+  const from = dates[0] ?? "";
+  const to = dates[dates.length - 1] ?? "";
+  // A data week is one PHL billing week.
+  return summarise(shifts, games, from, to, 1);
+}
+
+/**
+ * Core summariser over ALREADY-FILTERED shift + game rows. `from`/`to` are for
+ * display; `weeks` scales the PHL fixed cost (1 for a single week; day-span/7
+ * for a date range).
+ */
+function summarise(
+  shifts: ShiftRow[],
+  games: GameRow[],
+  from: string,
+  to: string,
+  weeks: number
+): BoardReport {
   // Headline cost/hours/headcount via the shared KPI helper (same math the
   // Reporting dashboard uses), mapped to the fields it expects.
   const kpiRows = shifts.map((r) => ({
@@ -274,17 +324,8 @@ export function buildBoardReport(
 
   const totalGames = games.length;
 
-  // Weeks in the (inclusive) range, used to scale the PHL fixed weekly cost.
-  // Inclusive day span / 7 — a full calendar month ≈ 4.4 weeks, a 7-day week
-  // = 1.0. Guard against an inverted/zero range.
-  const dayMs = 24 * 60 * 60 * 1000;
-  const fromMs = new Date(`${from}T00:00:00Z`).getTime();
-  const toMs = new Date(`${to}T00:00:00Z`).getTime();
-  const inclusiveDays =
-    Number.isFinite(fromMs) && Number.isFinite(toMs) && toMs >= fromMs
-      ? Math.round((toMs - fromMs) / dayMs) + 1
-      : 0;
-  const weeksInRange = inclusiveDays / 7;
+  // PHL fixed cost scales with the number of billing weeks in the period.
+  const weeksInRange = weeks;
   const phlFixedCost = PHL_WEEKLY_FIXED_COST * weeksInRange;
   const phlGames = phl;
 
@@ -318,5 +359,58 @@ export function buildBoardReport(
     gamesByLocation: { aus, phl, other: gOther },
     topAnalystsByGames,
     topAnalystsByCost,
+  };
+}
+
+// ── Period-over-period comparison ─────────────────────────────────────────────
+
+// The change in one metric between a current and a previous period. `delta` is
+// current − previous; `pct` is the fractional change vs previous (null when the
+// previous value is 0, i.e. no meaningful %). `direction` reflects the raw
+// movement, independent of whether up is "good".
+export type MetricDelta = {
+  current: number;
+  previous: number;
+  delta: number;
+  pct: number | null;
+  direction: "up" | "down" | "flat";
+};
+
+export type BoardComparison = {
+  totalCost: MetricDelta;
+  totalHours: MetricDelta;
+  totalGames: MetricDelta;
+  ausGames: MetricDelta;
+  ausCostPerGame: MetricDelta;
+  ausHoursPerGame: MetricDelta;
+  phlGames: MetricDelta;
+  phlCostPerGame: MetricDelta;
+};
+
+function delta(current: number, previous: number): MetricDelta {
+  const d = current - previous;
+  const pct = previous !== 0 ? d / previous : null;
+  const direction = d > 0.0001 ? "up" : d < -0.0001 ? "down" : "flat";
+  return { current, previous, delta: d, pct, direction };
+}
+
+/**
+ * Compare a current board report against a previous one, metric by metric.
+ * Returns the per-metric movement (delta + % change + direction) for the
+ * figures shown on the board report.
+ */
+export function compareReports(
+  current: BoardReport,
+  previous: BoardReport
+): BoardComparison {
+  return {
+    totalCost: delta(current.totalCost, previous.totalCost),
+    totalHours: delta(current.totalHours, previous.totalHours),
+    totalGames: delta(current.totalGames, previous.totalGames),
+    ausGames: delta(current.ausGames, previous.ausGames),
+    ausCostPerGame: delta(current.ausCostPerGame, previous.ausCostPerGame),
+    ausHoursPerGame: delta(current.ausHoursPerGame, previous.ausHoursPerGame),
+    phlGames: delta(current.phlGames, previous.phlGames),
+    phlCostPerGame: delta(current.phlCostPerGame, previous.phlCostPerGame),
   };
 }
