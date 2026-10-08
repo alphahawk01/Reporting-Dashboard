@@ -138,14 +138,16 @@ function reportToCsv(r: BoardReport): string {
   row("Avg cost / game", r.avgCostPerGame.toFixed(2));
   row("Avg hours / game", r.avgHoursPerGame.toFixed(2));
   row("");
-  row("Coding efficiency (Home + Office analyst)");
-  row("Pure coding cost", Math.round(r.pureCodingCost));
-  row("Pure coding hours", Math.round(r.pureCodingHours));
-  row("Pure coding cost / game", r.pureCodingCostPerGame.toFixed(2));
-  row("Coding hours / game", r.pureCodingHoursPerGame.toFixed(2));
+  row("Australia (Home + Office analyst coding)");
+  row("Coding cost", Math.round(r.pureCodingCost));
+  row("Coding hours", Math.round(r.pureCodingHours));
+  row("AUS games", r.ausGames);
+  row("AUS cost / game", r.ausCostPerGame.toFixed(2));
+  row("AUS hours / game", r.ausHoursPerGame.toFixed(2));
   row("");
   row("Philippines (fixed cost)");
   row("Weeks in range", r.weeksInRange.toFixed(2));
+  row("Weekly rate", 3800);
   row("PHL fixed cost", Math.round(r.phlFixedCost));
   row("PHL games", r.phlGames);
   row("PHL cost / game", r.phlCostPerGame.toFixed(2));
@@ -449,43 +451,130 @@ export default function BoardReportPage() {
             <Kpi label="Total labour cost" value={money(report.totalCost)} />
             <Kpi label="Total hours" value={hours(report.totalHours)} />
             <Kpi label="Games coded" value={report.totalGames.toLocaleString("en-AU")} />
-            <Kpi label="Active analysts" value={String(report.headcount)} />
-            <Kpi
-              label="Avg cost / hour"
-              value={money2(report.avgCostPerHour)}
-            />
-            <Kpi label="Avg cost / game" value={money2(report.avgCostPerGame)} />
             <Kpi
               label="Avg hours / game"
               value={report.avgHoursPerGame.toFixed(2)}
             />
-            <Kpi label="Shifts" value={report.shiftCount.toLocaleString("en-AU")} />
           </div>
 
-          {/* Coding efficiency — Home + Office analyst only, over games coded,
-              plus the Philippines fixed-cost model. */}
-          <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Kpi
-              label="Pure coding cost / game"
-              value={money2(report.pureCodingCostPerGame)}
-              sub="Home + Office analyst cost ÷ games"
-            />
-            <Kpi
-              label="Coding hours / game"
-              value={report.pureCodingHoursPerGame.toFixed(2)}
-              sub="Home + Office analyst hours ÷ games"
-            />
-            <Kpi
-              label="PHL cost / game"
-              value={report.phlGames > 0 ? money2(report.phlCostPerGame) : "—"}
-              sub={`${money(report.phlFixedCost)} ÷ ${report.phlGames.toLocaleString("en-AU")} PHL games`}
-            />
-            <Kpi
-              label="Pure coding cost"
-              value={money(report.pureCodingCost)}
-              sub={`${hours(report.pureCodingHours)} hrs (Home + Office)`}
-            />
-          </div>
+          {/* AUS vs PHL — the headline cost comparison the board cares about.
+              Each team's cost/game uses ITS OWN games only. */}
+          <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
+            <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500">
+              Australia vs Philippines — cost per game
+            </h3>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              {/* AUS */}
+              <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-blue-900">
+                    🇦🇺 Australia
+                  </span>
+                  <span className="text-xs text-blue-700">
+                    {report.ausGames.toLocaleString("en-AU")} games
+                  </span>
+                </div>
+                <div className="mt-2 text-3xl font-bold text-blue-900">
+                  {report.ausGames > 0 ? money2(report.ausCostPerGame) : "—"}
+                </div>
+                <div className="text-xs text-blue-700">cost per game</div>
+                <dl className="mt-3 space-y-1 text-xs text-slate-600">
+                  <div className="flex justify-between">
+                    <dt>Coding cost (Home + Office)</dt>
+                    <dd className="font-medium tabular-nums">
+                      {money(report.pureCodingCost)}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt>Coding hours</dt>
+                    <dd className="font-medium tabular-nums">
+                      {hours(report.pureCodingHours)}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt>Hours per game</dt>
+                    <dd className="font-medium tabular-nums">
+                      {report.ausGames > 0
+                        ? report.ausHoursPerGame.toFixed(2)
+                        : "—"}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              {/* PHL */}
+              <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-amber-900">
+                    🇵🇭 Philippines
+                  </span>
+                  <span className="text-xs text-amber-700">
+                    {report.phlGames.toLocaleString("en-AU")} games
+                  </span>
+                </div>
+                <div className="mt-2 text-3xl font-bold text-amber-900">
+                  {report.phlGames > 0 ? money2(report.phlCostPerGame) : "—"}
+                </div>
+                <div className="text-xs text-amber-700">cost per game</div>
+                <dl className="mt-3 space-y-1 text-xs text-slate-600">
+                  <div className="flex justify-between">
+                    <dt>Fixed cost</dt>
+                    <dd className="font-medium tabular-nums">
+                      {money(report.phlFixedCost)}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt>Weeks in period</dt>
+                    <dd className="font-medium tabular-nums">
+                      {report.weeksInRange.toFixed(1)}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt>Rate</dt>
+                    <dd className="font-medium tabular-nums">{money(3800)}/wk</dd>
+                  </div>
+                </dl>
+              </div>
+
+              {/* Difference */}
+              <div className="flex flex-col justify-center rounded-xl border border-slate-200 bg-slate-50 p-4 text-center">
+                <div className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Difference per game
+                </div>
+                {report.ausGames > 0 && report.phlGames > 0 ? (
+                  (() => {
+                    const diff =
+                      report.ausCostPerGame - report.phlCostPerGame;
+                    const cheaper = diff > 0 ? "PHL" : "AUS";
+                    const abs = Math.abs(diff);
+                    const pctCheaper =
+                      Math.max(report.ausCostPerGame, report.phlCostPerGame) > 0
+                        ? abs /
+                          Math.max(
+                            report.ausCostPerGame,
+                            report.phlCostPerGame
+                          )
+                        : 0;
+                    return (
+                      <>
+                        <div className="mt-1 text-3xl font-bold text-slate-900">
+                          {money2(abs)}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          <span className="font-semibold">{cheaper}</span> is
+                          cheaper per game ({pct(pctCheaper)} lower)
+                        </div>
+                      </>
+                    );
+                  })()
+                ) : (
+                  <div className="mt-1 text-sm text-slate-400">
+                    Needs games on both sides
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
 
           {/* Cost by area */}
           <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
@@ -653,11 +742,11 @@ export default function BoardReportPage() {
             Generated {new Date().toLocaleString("en-AU")}. Labour figures from
             Deputy shift records; games from coded match allocations. Shared,
             jointly-coded work (&ldquo;Premier Data&rdquo;) is excluded from
-            per-analyst totals. Pure coding cost/hours cover the Home and Office
-            analyst areas only. Philippines is a fixed cost of{" "}
+            per-analyst totals. Australia cost per game = Home + Office analyst
+            coding cost ÷ AUS games only. Philippines is a fixed cost of{" "}
             {money(3800)}/week ({report.weeksInRange.toFixed(1)} weeks ={" "}
-            {money(report.phlFixedCost)} this period), charged per PHL game
-            coded — it is not part of the Deputy labour totals above.
+            {money(report.phlFixedCost)} this period) ÷ PHL games only — it is
+            not part of the Deputy labour totals above.
           </p>
         </div>
       )}

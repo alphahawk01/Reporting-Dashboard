@@ -88,12 +88,15 @@ export type BoardReport = {
   avgCostPerHour: number;
   avgCostPerGame: number;
   avgHoursPerGame: number;
-  // Coding-only efficiency: Home + Office analyst cost/hours over games coded.
+  // ── AUS coding team (Home + Office analysts in deputy_shifts) ──
+  // AUS games are coded by the Home + Office analyst areas, so their per-game
+  // figures are measured against AUS games ONLY (not total games).
   pureCodingCost: number; // Home + Office analyst labour cost
   pureCodingHours: number; // Home + Office analyst hours
-  pureCodingCostPerGame: number; // pureCodingCost / total games
-  pureCodingHoursPerGame: number; // pureCodingHours / total games
-  // Philippines fixed-cost model (not in deputy_shifts).
+  ausGames: number; // games coded in AUS over the range
+  ausCostPerGame: number; // pureCodingCost / ausGames
+  ausHoursPerGame: number; // pureCodingHours / ausGames
+  // ── Philippines team (fixed cost, not in deputy_shifts) ──
   weeksInRange: number; // (range length in days) / 7
   phlFixedCost: number; // PHL_WEEKLY_FIXED_COST × weeksInRange
   phlGames: number; // games coded in PHL over the range
@@ -296,8 +299,11 @@ export function buildBoardReport(
     avgHoursPerGame: totalGames > 0 ? kpis.totalHours / totalGames : 0,
     pureCodingCost,
     pureCodingHours,
-    pureCodingCostPerGame: totalGames > 0 ? pureCodingCost / totalGames : 0,
-    pureCodingHoursPerGame: totalGames > 0 ? pureCodingHours / totalGames : 0,
+    ausGames: aus,
+    // Per-game figures use AUS games ONLY — the Home/Office analysts code the
+    // AUS games, so dividing by total (AUS+PHL) games would understate cost.
+    ausCostPerGame: aus > 0 ? pureCodingCost / aus : 0,
+    ausHoursPerGame: aus > 0 ? pureCodingHours / aus : 0,
     weeksInRange,
     phlFixedCost,
     phlGames,
