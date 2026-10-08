@@ -30,6 +30,7 @@ import {
   buildBoardReport,
   buildWeekReport,
   compareReports,
+  isoDate,
   monthLabel,
   PHL_WEEKLY_FIXED_COST,
   type BoardReport,
@@ -454,21 +455,50 @@ export default function BoardReportPage() {
     };
   }, []);
 
-  // The data weeks present (Wed→Tue week numbers), descending. Week 0 is the
-  // pre-season catch-all; keep it but label it clearly.
+  // The data weeks present (Wed→Tue week numbers), descending, each with the
+  // actual date span it covers (min/max shift date). Week 0 is the pre-season
+  // catch-all; keep it but label it clearly.
   const weekOptions = useMemo(() => {
-    const set = new Set<number>();
+    const bounds = new Map<number, { min: string; max: string }>();
     for (const r of shiftRows) {
       const w = Number(r.week);
-      if (Number.isFinite(w)) set.add(w);
+      if (!Number.isFinite(w)) continue;
+      const d = isoDate(r.shift_date);
+      if (!d) continue;
+      const b = bounds.get(w);
+      if (!b) bounds.set(w, { min: d, max: d });
+      else {
+        if (d < b.min) b.min = d;
+        if (d > b.max) b.max = d;
+      }
     }
-    return Array.from(set).sort((a, b) => b - a);
+    // A short "29 Apr to 5 May" range label (omit year — the week number plus
+    // the current data year make it unambiguous).
+    const shortRange = (min: string, max: string): string => {
+      const fmt = (iso: string) => {
+        const dt = new Date(`${iso}T00:00:00`);
+        return dt.toLocaleDateString("en-AU", {
+          day: "numeric",
+          month: "short",
+        });
+      };
+      return min && max ? `${fmt(min)} to ${fmt(max)}` : "";
+    };
+    return Array.from(bounds.entries())
+      .map(([week, b]) => ({ week, range: shortRange(b.min, b.max) }))
+      .sort((a, b) => b.week - a.week);
   }, [shiftRows]);
+
+  // Just the week numbers, for the default-selection effect and compare guard.
+  const weekNumbers = useMemo(
+    () => weekOptions.map((w) => w.week),
+    [weekOptions]
+  );
 
   // Default the week selector to the most recent week once data loads.
   useEffect(() => {
-    if (week == null && weekOptions.length > 0) setWeek(weekOptions[0]);
-  }, [weekOptions, week]);
+    if (week == null && weekNumbers.length > 0) setWeek(weekNumbers[0]);
+  }, [weekNumbers, week]);
 
   // The previous month key ("yyyy-mm" minus one month).
   const prevMonthOf = (ym: string): string => {
@@ -510,7 +540,7 @@ export default function BoardReportPage() {
           return;
         }
         current = buildWeekReport(shiftRows, gameRows, week);
-        if (compare && week - 1 >= 0 && weekOptions.includes(week - 1)) {
+        if (compare && week - 1 >= 0 && weekNumbers.includes(week - 1)) {
           previous = buildWeekReport(shiftRows, gameRows, week - 1);
           prevLbl = `Week ${week - 1}`;
         }
@@ -545,7 +575,7 @@ export default function BoardReportPage() {
     mode,
     month,
     week,
-    weekOptions,
+    weekNumbers,
     customFrom,
     customTo,
     compare,
@@ -639,8 +669,10 @@ export default function BoardReportPage() {
                 >
                   {weekOptions.length === 0 && <option value="">—</option>}
                   {weekOptions.map((w) => (
-                    <option key={w} value={w}>
-                      {w === 0 ? "Week 0 (pre-season)" : `Week ${w}`}
+                    <option key={w.week} value={w.week}>
+                      {w.week === 0
+                        ? `Week 0 (pre-season)${w.range ? ` — ${w.range}` : ""}`
+                        : `Week ${w.week}${w.range ? ` — ${w.range}` : ""}`}
                     </option>
                   ))}
                 </select>
