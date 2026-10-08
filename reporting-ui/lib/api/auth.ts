@@ -64,6 +64,7 @@ export const PAGES: PageDef[] = [
     { key: "analyst-profile", label: "Analyst Profiles", href: "/analyst-profile" },
     { key: "affiliated-teams", label: "Affiliated Teams", href: "/affiliated-teams" },
     { key: "reporting", label: "Reporting", href: "/reporting" },
+    { key: "board-report", label: "Board Report", href: "/board-report" },
     { key: "leaderboard", label: "Leaderboard", href: "/leaderboard" },
     { key: "analyst-compare", label: "Analyst Comparison", href: "/analyst-compare" },
     { key: "accuracy-compare", label: "Accuracy Comparison", href: "/accuracy-compare" },

@@ -30,6 +30,7 @@ import {
   ExternalLink,
   CloudDownload,
   ListVideo,
+  FileText,
 } from "lucide-react";
 
 import { useEffect, useState } from "react";
@@ -157,6 +158,11 @@ const sections = [
         title: "Reporting",
         href: "/reporting",
         icon: BarChart3,
+      },
+      {
+        title: "Board Report",
+        href: "/board-report",
+        icon: FileText,
       },
       {
         title: "Leaderboard",
