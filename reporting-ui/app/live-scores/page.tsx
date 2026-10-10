@@ -184,14 +184,24 @@ function GameRow({
         {row(away?.name, awayScore, awayGB, "away")}
       </div>
 
-      {/* Goal scorers (live feed only). Shows goal kickers per side; players
-          with behinds-only are included with a muted tally. */}
+      {/* Goal scorers (live feed only), one column per team with the team name
+          as a heading so it's clear who each scorer belongs to. */}
       {liveData &&
         (liveData.home.scorers.length > 0 ||
           liveData.away.scorers.length > 0) && (
           <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1 border-t border-slate-100 pt-2">
-            <ScorerList scorers={liveData.home.scorers} />
-            <ScorerList scorers={liveData.away.scorers} />
+            <div>
+              <div className="mb-0.5 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                {home?.name ?? "Home"}
+              </div>
+              <ScorerList scorers={liveData.home.scorers} />
+            </div>
+            <div>
+              <div className="mb-0.5 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                {away?.name ?? "Away"}
+              </div>
+              <ScorerList scorers={liveData.away.scorers} />
+            </div>
           </div>
         )}
 
