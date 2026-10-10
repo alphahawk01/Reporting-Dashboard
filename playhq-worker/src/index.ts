@@ -213,6 +213,45 @@ async function fetchGradeGames(gradeId: string, env: Env): Promise<unknown[]> {
   return all;
 }
 
+// A lean fixture record for the discovery endpoint: just what a consuming app
+// needs to identify a fixture and then poll its score by `id`. Strips the
+// heavy venue/address/sub-score detail from the full game object.
+type FixtureLite = {
+  id: string; // the PlayHQ fixture/game id — poll /api/fixtures/:id/live with it
+  status: string | null;
+  round: string | null;
+  date: string | null; // yyyy-mm-dd
+  time: string | null; // HH:mm:ss
+  timezone: string | null;
+  venue: string | null;
+  home: string | null;
+  away: string | null;
+  url: string | null;
+};
+
+function toFixtureLite(game: Record<string, unknown>): FixtureLite {
+  const round = (game.round ?? {}) as Record<string, unknown>;
+  const schedule = (game.schedule ?? {}) as Record<string, unknown>;
+  const venue = (game.venue ?? null) as Record<string, unknown> | null;
+  const comps = Array.isArray(game.competitors)
+    ? (game.competitors as Array<Record<string, unknown>>)
+    : [];
+  const home = comps.find((c) => c.isHomeTeam === true);
+  const away = comps.find((c) => c.isHomeTeam === false);
+  return {
+    id: String(game.id ?? ""),
+    status: (game.status as string) ?? null,
+    round: (round.name as string) ?? null,
+    date: (schedule.date as string) ?? null,
+    time: (schedule.time as string) ?? null,
+    timezone: (schedule.timezone as string) ?? null,
+    venue: (venue?.name as string) ?? null,
+    home: (home?.name as string) ?? null,
+    away: (away?.name as string) ?? null,
+    url: (game.url as string) ?? null,
+  };
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -233,6 +272,68 @@ export default {
 
     const ttl = Math.max(0, Number(env.CACHE_TTL_SECONDS ?? "90") || 90);
     const cache = caches.default;
+
+    // /api/grades/:id/fixtures — LEAN fixture index for a grade. Returns just
+    // the fixture id + identifying detail (teams, round, date, status) so a
+    // consuming application can discover the PlayHQ fixture id and then poll
+    // its score via /api/fixtures/:id/live. This is the discovery endpoint for
+    // external software.
+    const fixturesMatch = url.pathname.match(
+      /^\/api\/grades\/([^/]+)\/fixtures$/
+    );
+    if (fixturesMatch) {
+      const gradeId = decodeURIComponent(fixturesMatch[1]);
+      if (!UUID_RE.test(gradeId)) {
+        return json({ error: "invalid_grade_id" }, 400, cors);
+      }
+      const key = new Request(`https://playhq-cache/grade-fixtures/${gradeId}`);
+      const hit = await cache.match(key);
+      if (hit) {
+        return new Response(await hit.text(), {
+          status: 200,
+          headers: { "Content-Type": "application/json", "X-Cache": "HIT", ...cors },
+        });
+      }
+      try {
+        const games = await fetchGradeGames(gradeId, env);
+        const fixtures = (games as Array<Record<string, unknown>>).map(
+          toFixtureLite
+        );
+        const bodyText = JSON.stringify({
+          gradeId,
+          count: fixtures.length,
+          fixtures,
+        });
+        const listTtl = Math.min(ttl, 60) || 60;
+        ctx.waitUntil(
+          cache.put(
+            key,
+            new Response(bodyText, {
+              headers: {
+                "Content-Type": "application/json",
+                "Cache-Control": `public, max-age=${listTtl}`,
+              },
+            })
+          )
+        );
+        return new Response(bodyText, {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            "X-Cache": "MISS",
+            "Cache-Control": `public, max-age=${listTtl}`,
+            ...cors,
+          },
+        });
+      } catch (err) {
+        if (err instanceof UpstreamError) {
+          const extra: HeadersInit =
+            err.status === 429 ? { "Retry-After": "120", ...cors } : cors;
+          return json({ error: err.message }, err.status, extra);
+        }
+        return json({ error: "unable_to_retrieve_fixtures" }, 502, cors);
+      }
+    }
 
     // /api/grades/:id/games — the full fixture list for a grade (official REST
     // API). Cached at the edge like the live scores so repeated dashboard opens
