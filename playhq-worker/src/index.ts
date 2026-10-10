@@ -74,6 +74,59 @@ function json(
   });
 }
 
+// A compact, normalised live-score shape derived from the spectator payload,
+// so the dashboard doesn't have to parse the deep GraphQL structure. Scores
+// come from result.{home,away}.statistics (TOTAL_SCORE/GOALS/BEHINDS) and the
+// clock from clock.{period,time,status}.
+type NormalisedLive = {
+  id: string;
+  status: string | null;
+  clock: { period: string | null; time: string | null; status: string | null };
+  home: { total: number | null; goals: number | null; behinds: number | null };
+  away: { total: number | null; goals: number | null; behinds: number | null };
+};
+
+// Pull a stat value out of a spectator statistics[] array by its type value.
+function statVal(
+  stats: Array<{ type?: { value?: string }; count?: number }> | undefined,
+  typeValue: string
+): number | null {
+  if (!Array.isArray(stats)) return null;
+  const hit = stats.find((s) => s?.type?.value === typeValue);
+  return typeof hit?.count === "number" ? hit.count : null;
+}
+
+function normaliseLive(id: string, game: Record<string, unknown>): NormalisedLive {
+  const result = (game.result ?? {}) as Record<string, unknown>;
+  const clock = (game.clock ?? {}) as Record<string, unknown>;
+  const sideStats = (side: string) =>
+    (((result[side] ?? {}) as Record<string, unknown>).statistics ?? []) as Array<{
+      type?: { value?: string };
+      count?: number;
+    }>;
+  const home = sideStats("home");
+  const away = sideStats("away");
+  return {
+    id,
+    status: (game.status as string) ?? null,
+    clock: {
+      period: (clock.period as string) ?? null,
+      time: (clock.time as string) ?? null,
+      status: (clock.status as string) ?? null,
+    },
+    home: {
+      total: statVal(home, "TOTAL_SCORE"),
+      goals: statVal(home, "TOTAL_GOALS"),
+      behinds: statVal(home, "TOTAL_BEHINDS"),
+    },
+    away: {
+      total: statVal(away, "TOTAL_SCORE"),
+      goals: statVal(away, "TOTAL_GOALS"),
+      behinds: statVal(away, "TOTAL_BEHINDS"),
+    },
+  };
+}
+
 // Fetch one game from PlayHQ. Returns the `game` object, or throws a tagged
 // error the handler maps to an HTTP status.
 async function fetchGame(id: string, env: Env): Promise<unknown> {
@@ -231,9 +284,11 @@ export default {
       }
     }
 
-    // /api/fixtures/:id/live-scores  |  /api/fixtures/:id/status
+    // /api/fixtures/:id/live-scores  (raw spectator payload)
+    // /api/fixtures/:id/live         (compact normalised live score)
+    // /api/fixtures/:id/status       (just id/status/updatedAt)
     const m = url.pathname.match(
-      /^\/api\/fixtures\/([^/]+)\/(live-scores|status)$/
+      /^\/api\/fixtures\/([^/]+)\/(live-scores|live|status)$/
     );
     if (!m) return json({ error: "not_found" }, 404, cors);
 
@@ -272,7 +327,9 @@ export default {
               status: game.status,
               updatedAt: game.updatedAt,
             }
-          : game;
+          : kind === "live"
+            ? normaliseLive(id, game)
+            : game;
 
       const bodyText = JSON.stringify(payload);
 

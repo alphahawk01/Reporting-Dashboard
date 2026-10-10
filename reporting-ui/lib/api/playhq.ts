@@ -117,6 +117,38 @@ export async function getLiveStatus(
   return (await res.json()) as LiveScore;
 }
 
+// Compact normalised live score from the Worker's /live endpoint. Scores and
+// clock come from the spectator feed (the REST grade feed is null in-play).
+export type NormalisedLive = {
+  id: string;
+  status: GameStatus | null;
+  clock: { period: string | null; time: string | null; status: string | null };
+  home: { total: number | null; goals: number | null; behinds: number | null };
+  away: { total: number | null; goals: number | null; behinds: number | null };
+};
+
+/** One fixture's live score (normalised) via the Worker's spectator proxy. */
+export async function getLiveScore(
+  gameId: string,
+  signal?: AbortSignal
+): Promise<NormalisedLive> {
+  const res = await fetch(`${WORKER_BASE}/api/fixtures/${gameId}/live`, {
+    cache: "no-store",
+    signal,
+  });
+  if (!res.ok) throw new Error(`Failed loading live score (HTTP ${res.status})`);
+  return (await res.json()) as NormalisedLive;
+}
+
+// A REST game is "not yet finalised" when its status is empty/null — in AFL
+// that means it's either about to start or currently in play. The REST feed
+// carries no live score for these, so they're the ones to enrich from the
+// spectator feed.
+export function restStatusUnknown(status: GameStatus | null | undefined): boolean {
+  const s = String(status ?? "").trim().toUpperCase();
+  return s === "" || s === "NULL";
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Home / away competitor from a game (null-safe). */

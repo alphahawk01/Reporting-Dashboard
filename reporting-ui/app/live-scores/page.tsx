@@ -18,6 +18,8 @@ import {
 
 import {
   getGradeGames,
+  getLiveScore,
+  restStatusUnknown,
   sides,
   goalsBehinds,
   isLive,
@@ -25,11 +27,20 @@ import {
   scheduleLabel,
   type PlayHqGame,
   type GameStatus,
+  type NormalisedLive,
 } from "@/lib/api/playhq";
 
 // Poll interval while any game is live (ms). 2 minutes — modest load, and the
 // Worker's edge cache means concurrent viewers share one upstream call.
 const LIVE_POLL_MS = 120_000;
+
+// "3rd Quarter" -> "Q3"; passes through anything else.
+function shortPeriod(period: string | null): string {
+  if (!period) return "";
+  const m = period.match(/(\d)/);
+  if (m && /quarter/i.test(period)) return `Q${m[1]}`;
+  return period;
+}
 
 function statusBadge(status: GameStatus): { label: string; cls: string } {
   const s = String(status).toUpperCase();
@@ -37,11 +48,11 @@ function statusBadge(status: GameStatus): { label: string; cls: string } {
     return { label: "LIVE", cls: "bg-red-100 text-red-700 ring-1 ring-red-300" };
   if (s === "FINAL")
     return { label: "Final", cls: "bg-slate-100 text-slate-600" };
-  if (s === "UPCOMING")
+  if (s === "UPCOMING" || s === "" || s === "NULL")
     return { label: "Upcoming", cls: "bg-blue-50 text-blue-700" };
   if (s === "ABANDONED" || s === "CANCELLED" || s === "POSTPONED")
     return { label: s.charAt(0) + s.slice(1).toLowerCase(), cls: "bg-amber-50 text-amber-700" };
-  return { label: s, cls: "bg-slate-100 text-slate-600" };
+  return { label: s.charAt(0) + s.slice(1).toLowerCase(), cls: "bg-slate-100 text-slate-600" };
 }
 
 // Winner side for emphasising the score of the team that won.
@@ -52,38 +63,73 @@ function wonSide(game: PlayHqGame): "home" | "away" | null {
   return null;
 }
 
-function GameRow({ game }: { game: PlayHqGame }) {
+function GameRow({
+  game,
+  live: liveData,
+}: {
+  game: PlayHqGame;
+  live?: NormalisedLive;
+}) {
   const { home, away } = sides(game);
-  const badge = statusBadge(game.status);
-  const live = isLive(game.status);
-  const won = wonSide(game);
-  const showScore =
-    game.status !== "UPCOMING" &&
-    (home?.scoreTotal != null || away?.scoreTotal != null);
 
-  const teamRow = (c: typeof home, side: "home" | "away") => (
+  // Effective status/score: the REST feed is null for in-play games, so when a
+  // spectator live payload is present it takes precedence (status + score +
+  // clock). Otherwise fall back to the REST final/upcoming values.
+  const effectiveStatus: GameStatus = liveData?.status ?? game.status;
+  const badge = statusBadge(effectiveStatus);
+  const live = isLive(effectiveStatus);
+  const won = wonSide(game); // outcome only exists once FINAL
+
+  // Per-side score: live payload first, else the REST scoreTotal.
+  const homeScore = liveData ? liveData.home.total : home?.scoreTotal ?? null;
+  const awayScore = liveData ? liveData.away.total : away?.scoreTotal ?? null;
+  const homeGB = liveData
+    ? `${liveData.home.goals ?? 0}.${liveData.home.behinds ?? 0}`
+    : goalsBehinds(home);
+  const awayGB = liveData
+    ? `${liveData.away.goals ?? 0}.${liveData.away.behinds ?? 0}`
+    : goalsBehinds(away);
+
+  const showScore =
+    (homeScore != null || awayScore != null) &&
+    String(effectiveStatus).toUpperCase() !== "UPCOMING";
+
+  const row = (
+    name: string | undefined,
+    score: number | null,
+    gb: string,
+    side: "home" | "away"
+  ) => (
     <div className="flex items-center justify-between gap-3">
       <span
         className={`truncate text-sm ${
           won === side ? "font-bold text-slate-900" : "font-medium text-slate-700"
         }`}
       >
-        {c?.name ?? "TBC"}
+        {name ?? "TBC"}
       </span>
       {showScore && (
         <span className="flex items-baseline gap-1.5 tabular-nums">
-          <span className="text-xs text-slate-400">{goalsBehinds(c)}</span>
+          <span className="text-xs text-slate-400">{gb}</span>
           <span
             className={`text-base ${
               won === side ? "font-bold text-slate-900" : "font-semibold text-slate-600"
             }`}
           >
-            {c?.scoreTotal ?? "-"}
+            {score ?? "-"}
           </span>
         </span>
       )}
     </div>
   );
+
+  // Live clock label, e.g. "Q3 02:11".
+  const clockLabel =
+    live && liveData?.clock
+      ? [shortPeriod(liveData.clock.period), liveData.clock.time]
+          .filter(Boolean)
+          .join(" ")
+      : "";
 
   return (
     <div
@@ -99,12 +145,12 @@ function GameRow({ game }: { game: PlayHqGame }) {
           {live && (
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-600" />
           )}
-          {badge.label}
+          {live && clockLabel ? clockLabel : badge.label}
         </span>
       </div>
       <div className="space-y-1.5">
-        {teamRow(home, "home")}
-        {teamRow(away, "away")}
+        {row(home?.name, homeScore, homeGB, "home")}
+        {row(away?.name, awayScore, awayGB, "away")}
       </div>
       <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs text-slate-400">
         <span className="flex min-w-0 items-center gap-1">
@@ -126,6 +172,9 @@ function GameRow({ game }: { game: PlayHqGame }) {
 
 export default function LiveScoresPage() {
   const [games, setGames] = useState<PlayHqGame[]>([]);
+  // Live score overlays keyed by game id (from the spectator feed), for games
+  // the REST feed reports with no status/score while in play.
+  const [liveById, setLiveById] = useState<Record<string, NormalisedLive>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -139,6 +188,33 @@ export default function LiveScoresPage() {
       setGames(data);
       setError(null);
       setLastUpdated(new Date());
+
+      // Enrich in-play games from the spectator feed. The REST grade feed gives
+      // no live score (status is null until FINAL), so for games whose REST
+      // status is unknown AND which should have started (scheduled within the
+      // last ~4h, not far in the future) we ask the spectator proxy for the
+      // live score. Keep overlays only for games the spectator says are LIVE.
+      const now = Date.now();
+      const WINDOW_BEFORE = 30 * 60 * 1000; // 30 min before kickoff
+      const WINDOW_AFTER = 4 * 60 * 60 * 1000; // 4 h after kickoff
+      const candidates = data.filter((g) => {
+        if (!restStatusUnknown(g.status)) return false;
+        const d = scheduleDate(g);
+        if (!d) return false;
+        const dt = d.getTime();
+        return now >= dt - WINDOW_BEFORE && now <= dt + WINDOW_AFTER;
+      });
+
+      const results = await Promise.allSettled(
+        candidates.map((g) => getLiveScore(g.id))
+      );
+      const overlays: Record<string, NormalisedLive> = {};
+      results.forEach((r, i) => {
+        if (r.status === "fulfilled" && isLive(r.value.status ?? "")) {
+          overlays[candidates[i].id] = r.value;
+        }
+      });
+      setLiveById(overlays);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to load fixtures."
@@ -155,8 +231,8 @@ export default function LiveScoresPage() {
   }, [load]);
 
   const anyLive = useMemo(
-    () => games.some((g) => isLive(g.status)),
-    [games]
+    () => Object.keys(liveById).length > 0,
+    [liveById]
   );
 
   // Auto-poll ONLY while a match is live. Interval is cleared when nothing is
@@ -186,12 +262,18 @@ export default function LiveScoresPage() {
   const didDefaultRound = useRef(false);
   useEffect(() => {
     if (didDefaultRound.current || games.length === 0) return;
-    didDefaultRound.current = true;
-    const liveGame = games.find((g) => isLive(g.status));
+    // Prefer the round with a live game. If overlays haven't arrived yet,
+    // fall back to the most recent round, but don't latch until we've either
+    // found a live game or confirmed there are none (overlays resolved).
+    const liveGame = games.find(
+      (g) => isLive(g.status) || liveById[g.id] != null
+    );
     if (liveGame) {
+      didDefaultRound.current = true;
       setRoundFilter(liveGame.round.name);
       return;
     }
+    didDefaultRound.current = true;
     // Most recent round by latest schedule date.
     let latest: { round: string; ms: number } | null = null;
     for (const g of games) {
@@ -201,7 +283,7 @@ export default function LiveScoresPage() {
         latest = { round: g.round.name, ms: d.getTime() };
     }
     if (latest) setRoundFilter(latest.round);
-  }, [games]);
+  }, [games, liveById]);
 
   const visible = useMemo(() => {
     const list =
@@ -289,7 +371,7 @@ export default function LiveScoresPage() {
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {visible.map((g) => (
-            <GameRow key={g.id} game={g} />
+            <GameRow key={g.id} game={g} live={liveById[g.id]} />
           ))}
         </div>
       )}
