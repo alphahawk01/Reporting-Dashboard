@@ -1,0 +1,23 @@
+name = "playhq-scores"
+main = "src/index.ts"
+compatibility_date = "2025-07-18"
+
+# ── Config (safe to commit; no secrets here) ────────────────────────────────
+[vars]
+# Browser origins allowed to call this worker. List your dashboard origin(s)
+# comma-separated. Use "*" for any origin (read-only score, acceptable) while
+# testing, then lock it down. Examples:
+#   ALLOWED_ORIGINS = "https://alphahawk01.github.io,https://www.yourdomain.com.au"
+ALLOWED_ORIGINS = "*"
+PHQ_TENANT = "afl"
+CACHE_TTL_SECONDS = "90"
+
+# ── Route to your personal domain ───────────────────────────────────────────
+# Uncomment and set once your domain is on Cloudflare. Either a subdomain:
+#   routes = [{ pattern = "scores.yourdomain.com.au/*", zone_name = "yourdomain.com.au" }]
+# or a path under the apex (needs the apex proxied through Cloudflare):
+#   routes = [{ pattern = "yourdomain.com.au/api/playhq/*", zone_name = "yourdomain.com.au" }]
+#
+# Until then, `wrangler deploy` publishes to the free
+# https://playhq-scores.<your-subdomain>.workers.dev URL, which works for
+# testing straight away.
