@@ -25,9 +25,11 @@ import {
   isLive,
   scheduleDate,
   scheduleLabel,
+  LIVE_SCORE_GRADES,
   type PlayHqGame,
   type GameStatus,
   type NormalisedLive,
+  type LiveScoreGradeKey,
 } from "@/lib/api/playhq";
 
 // Poll interval while any game is live (ms). 2 minutes — modest load, and the
@@ -171,6 +173,17 @@ function GameRow({
 }
 
 export default function LiveScoresPage() {
+  // Which competition (grade) is shown — Men's / Women's.
+  const [comp, setComp] = useState<LiveScoreGradeKey>("mens");
+  const grade = useMemo(
+    () => LIVE_SCORE_GRADES.find((g) => g.key === comp) ?? LIVE_SCORE_GRADES[0],
+    [comp]
+  );
+
+  // Latches once the round picker has been auto-defaulted for the current data
+  // load (reset when the competition changes).
+  const didDefaultRound = useRef(false);
+
   const [games, setGames] = useState<PlayHqGame[]>([]);
   // Live score overlays keyed by game id (from the spectator feed), for games
   // the REST feed reports with no status/score while in play.
@@ -184,7 +197,7 @@ export default function LiveScoresPage() {
   const load = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     try {
-      const data = await getGradeGames();
+      const data = await getGradeGames(grade.gradeId);
       setGames(data);
       setError(null);
       setLastUpdated(new Date());
@@ -223,10 +236,16 @@ export default function LiveScoresPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [grade.gradeId]);
 
-  // Initial load.
+  // Load on mount and whenever the competition changes. Reset state so the
+  // round picker re-defaults to the current round of the newly-selected comp.
   useEffect(() => {
+    didDefaultRound.current = false;
+    setLoading(true);
+    setGames([]);
+    setLiveById({});
+    setRoundFilter("all");
     load();
   }, [load]);
 
@@ -257,9 +276,8 @@ export default function LiveScoresPage() {
     return names.sort((a, b) => num(a) - num(b));
   }, [games]);
 
-  // Default the round filter to the round that has live games, else the most
-  // recent round with activity (latest scheduled), else "all".
-  const didDefaultRound = useRef(false);
+  // Default the round filter to the round being played today (then nearest
+  // round to now). Runs once per data load (the latch resets on comp change).
   useEffect(() => {
     if (didDefaultRound.current || games.length === 0) return;
     // Prefer the round with a live game. If overlays haven't arrived yet,
@@ -326,7 +344,7 @@ export default function LiveScoresPage() {
             <Radio size={26} /> Live Scores
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-600">
-            NTFL Premier Men&rsquo;s fixtures and scores, straight from PlayHQ.
+            NTFL {grade.label} fixtures and scores, straight from PlayHQ.
             {anyLive
               ? " A match is live — scores refresh automatically every 2 minutes."
               : " Scores update when matches are in progress."}
@@ -347,6 +365,24 @@ export default function LiveScoresPage() {
             Refresh
           </button>
         </div>
+      </div>
+
+      {/* Competition toggle (Men's / Women's) */}
+      <div className="mb-4 inline-flex rounded-lg border border-slate-300 p-0.5">
+        {LIVE_SCORE_GRADES.map((g) => (
+          <button
+            key={g.key}
+            type="button"
+            onClick={() => setComp(g.key)}
+            className={`rounded-md px-4 py-1.5 text-sm font-medium ${
+              comp === g.key
+                ? "bg-blue-600 text-white"
+                : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            {g.label}
+          </button>
+        ))}
       </div>
 
       {/* Round filter */}

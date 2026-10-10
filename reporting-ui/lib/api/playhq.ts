@@ -11,9 +11,18 @@ const WORKER_BASE =
   process.env.NEXT_PUBLIC_PLAYHQ_WORKER_URL?.replace(/\/$/, "") ||
   "https://playhq-scores.premier-data-enterprise.workers.dev";
 
-// The NTFL Premier Men's grade — fixed for this competition. Other grades can
-// be passed explicitly to getGradeGames().
+// NTFL Premier grades — fixed per competition. Pass a grade id to
+// getGradeGames(); the Worker handles any grade generically.
 export const NTFL_PREMIER_MENS_GRADE = "be950883-7630-4df5-81e4-a5bba0f24cb6";
+export const NTFL_PREMIER_WOMENS_GRADE = "61ca876d-f028-4f60-ad85-33e8fb2e5be7";
+
+// The competitions shown on the Live Scores tab (label + grade id).
+export const LIVE_SCORE_GRADES = [
+  { key: "mens", label: "Men's Premier", gradeId: NTFL_PREMIER_MENS_GRADE },
+  { key: "womens", label: "Women's Premier", gradeId: NTFL_PREMIER_WOMENS_GRADE },
+] as const;
+
+export type LiveScoreGradeKey = (typeof LIVE_SCORE_GRADES)[number]["key"];
 
 // ── Types (mirrors the PlayHQ REST game shape the Worker passes through) ──────
 
