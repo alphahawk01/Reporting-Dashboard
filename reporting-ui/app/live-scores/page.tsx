@@ -259,6 +259,10 @@ export default function LiveScoresPage() {
   // Live score overlays keyed by game id (from the spectator feed), for games
   // the REST feed reports with no status/score while in play.
   const [liveById, setLiveById] = useState<Record<string, NormalisedLive>>({});
+  // Goal-scorer data keyed by game id, for FINALISED games in the visible round
+  // (the REST feed carries no scorers, so they're fetched from the spectator
+  // feed on demand). Live games use liveById above; this fills in the rest.
+  const [scorersById, setScorersById] = useState<Record<string, NormalisedLive>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -316,6 +320,7 @@ export default function LiveScoresPage() {
     setLoading(true);
     setGames([]);
     setLiveById({});
+    setScorersById({});
     setRoundFilter("all");
     load();
   }, [load]);
@@ -403,6 +408,44 @@ export default function LiveScoresPage() {
       return da - db;
     });
   }, [games, roundFilter]);
+
+  // Enrich the VISIBLE finalised games with goal scorers from the spectator
+  // feed (the REST feed has none). Only the games on screen are fetched (not
+  // the whole season), and each id is fetched once. Live games already carry
+  // scorers via liveById, so they're skipped here. Re-runs when the visible
+  // set changes (round switch / data load).
+  useEffect(() => {
+    const needed = visible.filter(
+      (g) =>
+        String(g.status).toUpperCase() === "FINAL" &&
+        !scorersById[g.id] &&
+        !liveById[g.id]
+    );
+    if (needed.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.allSettled(
+        needed.map((g) => getLiveScore(g.id))
+      );
+      if (cancelled) return;
+      const add: Record<string, NormalisedLive> = {};
+      results.forEach((r, i) => {
+        if (
+          r.status === "fulfilled" &&
+          (r.value.home.scorers.length > 0 || r.value.away.scorers.length > 0)
+        ) {
+          add[needed[i].id] = r.value;
+        }
+      });
+      if (Object.keys(add).length > 0) {
+        setScorersById((prev) => ({ ...prev, ...add }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   const selectClass =
     "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-500";
@@ -495,7 +538,11 @@ export default function LiveScoresPage() {
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {visible.map((g) => (
-            <GameRow key={g.id} game={g} live={liveById[g.id]} />
+            <GameRow
+              key={g.id}
+              game={g}
+              live={liveById[g.id] ?? scorersById[g.id]}
+            />
           ))}
         </div>
       )}
