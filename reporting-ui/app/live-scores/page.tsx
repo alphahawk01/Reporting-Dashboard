@@ -30,6 +30,7 @@ import {
   type GameStatus,
   type NormalisedLive,
   type LiveScoreGradeKey,
+  type Scorer,
 } from "@/lib/api/playhq";
 
 // Poll interval while any game is live (ms). 2 minutes — modest load, and the
@@ -63,6 +64,34 @@ function wonSide(game: PlayHqGame): "home" | "away" | null {
   if (home?.outcome === "WON") return "home";
   if (away?.outcome === "WON") return "away";
   return null;
+}
+
+// One side's goal scorers, compact. Goal count is bold; a behinds-only player
+// shows a muted "0.1". Empty list renders a muted dash so columns align.
+function ScorerList({ scorers }: { scorers: Scorer[] }) {
+  if (!scorers.length) {
+    return <div className="text-[11px] text-slate-300">—</div>;
+  }
+  return (
+    <ul className="space-y-0.5 text-[11px] leading-tight text-slate-500">
+      {scorers.map((s, i) => (
+        <li key={`${s.name}-${i}`} className="truncate">
+          <span className="text-slate-600">{s.name}</span>{" "}
+          <span className="tabular-nums">
+            {s.goals > 0 && (
+              <span className="font-semibold text-slate-800">{s.goals}</span>
+            )}
+            {s.goals > 0 && s.behinds > 0 && (
+              <span className="text-slate-400">.{s.behinds}</span>
+            )}
+            {s.goals === 0 && s.behinds > 0 && (
+              <span className="text-slate-400">0.{s.behinds}</span>
+            )}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function GameRow({
@@ -154,6 +183,18 @@ function GameRow({
         {row(home?.name, homeScore, homeGB, "home")}
         {row(away?.name, awayScore, awayGB, "away")}
       </div>
+
+      {/* Goal scorers (live feed only). Shows goal kickers per side; players
+          with behinds-only are included with a muted tally. */}
+      {liveData &&
+        (liveData.home.scorers.length > 0 ||
+          liveData.away.scorers.length > 0) && (
+          <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1 border-t border-slate-100 pt-2">
+            <ScorerList scorers={liveData.home.scorers} />
+            <ScorerList scorers={liveData.away.scorers} />
+          </div>
+        )}
+
       <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs text-slate-400">
         <span className="flex min-w-0 items-center gap-1">
           <MapPin size={12} className="shrink-0" />

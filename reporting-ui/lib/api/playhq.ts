@@ -131,12 +131,28 @@ export async function getLiveStatus(
 
 // Compact normalised live score from the Worker's /live endpoint. Scores and
 // clock come from the spectator feed (the REST grade feed is null in-play).
+export type Scorer = {
+  name: string;
+  number: string | null;
+  goals: number;
+  behinds: number;
+};
+
+export type NormalisedLiveSide = {
+  id: string | null;
+  name: string | null;
+  total: number | null;
+  goals: number | null;
+  behinds: number | null;
+  scorers: Scorer[];
+};
+
 export type NormalisedLive = {
   id: string;
   status: GameStatus | null;
   clock: { period: string | null; time: string | null; status: string | null };
-  home: { total: number | null; goals: number | null; behinds: number | null };
-  away: { total: number | null; goals: number | null; behinds: number | null };
+  home: NormalisedLiveSide;
+  away: NormalisedLiveSide;
 };
 
 /** One fixture's live score (normalised) via the Worker's spectator proxy. */

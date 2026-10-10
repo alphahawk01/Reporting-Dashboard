@@ -50,8 +50,10 @@ const DEFAULT_GRADE_IDS = [
 const PLAYHQ_URL = "https://spectator.playhq.com/graphql";
 const PLAYHQ_REST = "https://api.playhq.com/v1";
 
-// The GraphQL document from your cURL request, verbatim (whitespace trimmed).
-const GAME_QUERY = `query game($id: ID!, $scope: PeriodScore) { game(id: $id) { id status updatedAt lastEventRecordedAt statistics { home { statisticsV2 { type { type value } count } } away { statisticsV2 { type { type value } count } } } result { home { statistics { type { value } count } periods(scope: $scope) { period { label shortName value } statistics { type { type value } count } type role closureStatus overtimeSequenceNo } } away { statistics { type { value } count } periods(scope: $scope) { period { label shortName value } statistics { type { type value } count } type role closureStatus overtimeSequenceNo } } currentPeriod { value primarySide } } clock { overtimeSequenceNo period periodValue status time lastUpdatedAt } } }`;
+// The GraphQL document (from the spectator cURL, whitespace trimmed). Includes
+// per-player statistics under statistics.{home,away}.players[] so we can derive
+// goal scorers (TOTAL_GOALS / TOTAL_BEHINDS per player).
+const GAME_QUERY = `query game($id: ID!, $scope: PeriodScore) { game(id: $id) { id status updatedAt lastEventRecordedAt statistics { home { statisticsV2 { type { type value } count } players { name playerNumber statistics { type { value } count } } } away { statisticsV2 { type { type value } count } players { name playerNumber statistics { type { value } count } } } } result { home { statistics { type { value } count } periods(scope: $scope) { period { label shortName value } statistics { type { type value } count } type role closureStatus overtimeSequenceNo } } away { statistics { type { value } count } periods(scope: $scope) { period { label shortName value } statistics { type { type value } count } type role closureStatus overtimeSequenceNo } } currentPeriod { value primarySide } } clock { overtimeSequenceNo period periodValue status time lastUpdatedAt } } }`;
 
 // A PlayHQ fixture/game id is a short alphanumeric token (e.g. "ab5ae0c9").
 // Only accept that shape so the id can't be used to smuggle anything upstream.
@@ -104,6 +106,7 @@ type NormalisedLive = {
     total: number | null;
     goals: number | null;
     behinds: number | null;
+    scorers: Scorer[];
   };
   away: {
     id: string | null;
@@ -111,7 +114,16 @@ type NormalisedLive = {
     total: number | null;
     goals: number | null;
     behinds: number | null;
+    scorers: Scorer[];
   };
+};
+
+// A player who has scored, with their goal/behind tally this game.
+type Scorer = {
+  name: string;
+  number: string | null;
+  goals: number;
+  behinds: number;
 };
 
 // Team identity (id + name) for a game's two sides, resolved from the REST
@@ -178,6 +190,38 @@ function statVal(
   return typeof hit?.count === "number" ? hit.count : null;
 }
 
+// Extract the goal scorers for one side from the game's player statistics
+// (statistics.{home,away}.players[]). Returns players with at least one goal or
+// behind, sorted by goals desc then behinds desc.
+function scorersFrom(
+  game: Record<string, unknown>,
+  side: "home" | "away"
+): Scorer[] {
+  const stats = (game.statistics ?? {}) as Record<string, unknown>;
+  const sideObj = (stats[side] ?? {}) as Record<string, unknown>;
+  const players = Array.isArray(sideObj.players)
+    ? (sideObj.players as Array<Record<string, unknown>>)
+    : [];
+  const out: Scorer[] = [];
+  for (const p of players) {
+    const ps = Array.isArray(p.statistics)
+      ? (p.statistics as Array<{ type?: { value?: string }; count?: number }>)
+      : [];
+    const goals = statVal(ps, "TOTAL_GOALS") ?? 0;
+    const behinds = statVal(ps, "TOTAL_BEHINDS") ?? 0;
+    if (goals > 0 || behinds > 0) {
+      out.push({
+        name: (p.name as string) ?? "",
+        number: (p.playerNumber as string) ?? null,
+        goals,
+        behinds,
+      });
+    }
+  }
+  out.sort((a, b) => b.goals - a.goals || b.behinds - a.behinds);
+  return out;
+}
+
 function normaliseLive(
   id: string,
   game: Record<string, unknown>,
@@ -206,6 +250,7 @@ function normaliseLive(
       total: statVal(home, "TOTAL_SCORE"),
       goals: statVal(home, "TOTAL_GOALS"),
       behinds: statVal(home, "TOTAL_BEHINDS"),
+      scorers: scorersFrom(game, "home"),
     },
     away: {
       id: teams?.away.id ?? null,
@@ -213,6 +258,7 @@ function normaliseLive(
       total: statVal(away, "TOTAL_SCORE"),
       goals: statVal(away, "TOTAL_GOALS"),
       behinds: statVal(away, "TOTAL_BEHINDS"),
+      scorers: scorersFrom(game, "away"),
     },
   };
 }
