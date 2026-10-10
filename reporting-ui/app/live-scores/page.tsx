@@ -274,15 +274,32 @@ export default function LiveScoresPage() {
       return;
     }
     didDefaultRound.current = true;
-    // Most recent round by latest schedule date.
-    let latest: { round: string; ms: number } | null = null;
+
+    const now = new Date();
+    const todayKey = now.toLocaleDateString("en-CA"); // yyyy-mm-dd, local
+
+    // 1) A round with a game scheduled TODAY wins (the round being played now).
+    const todayGame = games.find((g) => {
+      const d = scheduleDate(g);
+      return d != null && d.toLocaleDateString("en-CA") === todayKey;
+    });
+    if (todayGame) {
+      setRoundFilter(todayGame.round.name);
+      return;
+    }
+
+    // 2) Otherwise the round CLOSEST to now (smallest gap from today to any of
+    //    its games) — i.e. the current/next round mid-week, not a round months
+    //    away. Ties break toward the round that's already started/just gone.
+    const nowMs = now.getTime();
+    let best: { round: string; gap: number } | null = null;
     for (const g of games) {
       const d = scheduleDate(g);
       if (!d) continue;
-      if (!latest || d.getTime() > latest.ms)
-        latest = { round: g.round.name, ms: d.getTime() };
+      const gap = Math.abs(d.getTime() - nowMs);
+      if (!best || gap < best.gap) best = { round: g.round.name, gap };
     }
-    if (latest) setRoundFilter(latest.round);
+    if (best) setRoundFilter(best.round);
   }, [games, liveById]);
 
   const visible = useMemo(() => {
