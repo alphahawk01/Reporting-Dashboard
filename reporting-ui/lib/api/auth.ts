@@ -54,6 +54,7 @@ export const PAGES: PageDef[] = [
     { key: "computers", label: "Computers", href: "/computers" },
     { key: "downloads", label: "Downloads", href: "/downloads" },
     { key: "notifications", label: "Notifications", href: "/notifications" },
+    { key: "live-scores", label: "Live Scores", href: "/live-scores" },
     { key: "fixtures", label: "Fixtures", href: "/fixtures" },
     { key: "comp-fixtures", label: "Comp Fixtures", href: "/comp-fixtures" },
     { key: "fixture-review", label: "Fixture Review", href: "/fixture-review" },

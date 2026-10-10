@@ -29,6 +29,7 @@ import {
   CloudDownload,
   ListVideo,
   FileText,
+  Radio,
 } from "lucide-react";
 
 import { useEffect, useState } from "react";
@@ -73,6 +74,11 @@ const sections = [
         title: "Live Board",
         href: "/operations",
         icon: Monitor,
+      },
+      {
+        title: "Live Scores",
+        href: "/live-scores",
+        icon: Radio,
       },
       {
         title: "Computers",

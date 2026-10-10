@@ -2,3 +2,5 @@ node_modules/
 .wrangler/
 dist/
 *.log
+# Local secrets for `wrangler dev` — NEVER commit (holds the PlayHQ API key).
+.dev.vars
