@@ -13,6 +13,9 @@ PHQ_TENANT = "afl"
 CACHE_TTL_SECONDS = "90"
 # Short edge cache for live score endpoints so in-play scores are near-real-time.
 LIVE_TTL_SECONDS = "15"
+# Grades the /live endpoint searches to attach team id+name to a game (the
+# spectator feed carries no team identity). NTFL Premier Men's + Women's.
+KNOWN_GRADE_IDS = "be950883-7630-4df5-81e4-a5bba0f24cb6,61ca876d-f028-4f60-ad85-33e8fb2e5be7"
 
 # ── Route to your personal domain ───────────────────────────────────────────
 # Uncomment and set once your domain is on Cloudflare. Either a subdomain:

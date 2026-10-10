@@ -32,7 +32,17 @@ export interface Env {
   // `wrangler secret put PHQ_API_KEY`, never committed. Required for the
   // /api/grades/:id/games endpoint.
   PHQ_API_KEY?: string;
+  // Comma-separated grade ids whose fixtures the Worker knows about, so the
+  // /live endpoint can attach team id+name to a game by looking it up in these
+  // grades' REST feeds. Defaults to the NTFL Premier Men's + Women's grades.
+  KNOWN_GRADE_IDS?: string;
 }
+
+// Default grades the /live endpoint searches to resolve a game's teams.
+const DEFAULT_GRADE_IDS = [
+  "be950883-7630-4df5-81e4-a5bba0f24cb6", // NTFL Premier Men's
+  "61ca876d-f028-4f60-ad85-33e8fb2e5be7", // NTFL Premier Women's
+];
 
 const PLAYHQ_URL = "https://spectator.playhq.com/graphql";
 const PLAYHQ_REST = "https://api.playhq.com/v1";
@@ -85,9 +95,75 @@ type NormalisedLive = {
   id: string;
   status: string | null;
   clock: { period: string | null; time: string | null; status: string | null };
-  home: { total: number | null; goals: number | null; behinds: number | null };
-  away: { total: number | null; goals: number | null; behinds: number | null };
+  home: {
+    id: string | null;
+    name: string | null;
+    total: number | null;
+    goals: number | null;
+    behinds: number | null;
+  };
+  away: {
+    id: string | null;
+    name: string | null;
+    total: number | null;
+    goals: number | null;
+    behinds: number | null;
+  };
 };
+
+// Team identity (id + name) for a game's two sides, resolved from the REST
+// grade feeds. Keyed by side.
+type GameTeams = { home: FixtureTeam; away: FixtureTeam } | null;
+
+// Resolve a game's home/away team id+name by finding it in the known grades'
+// REST feeds. The spectator game id is the short leading segment of the REST
+// UUID (e.g. "7faaae3d" ⊂ "7faaae3d-bd91-..."), so match on that. Uses the
+// edge cache for each grade's games to avoid re-hitting PlayHQ.
+async function resolveGameTeams(
+  gameId: string,
+  env: Env,
+  ctx: ExecutionContext
+): Promise<GameTeams> {
+  if (!env.PHQ_API_KEY) return null;
+  const gradeIds = (env.KNOWN_GRADE_IDS ?? DEFAULT_GRADE_IDS.join(","))
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const cache = caches.default;
+
+  for (const gradeId of gradeIds) {
+    if (!UUID_RE.test(gradeId)) continue;
+    // Prefer the cached raw games for this grade; fall back to a fresh fetch.
+    let games: Array<Record<string, unknown>> | null = null;
+    const key = new Request(`https://playhq-cache/grade-games/${gradeId}`);
+    const hit = await cache.match(key);
+    if (hit) {
+      try {
+        const body = (await hit.json()) as { data?: Array<Record<string, unknown>> };
+        games = Array.isArray(body.data) ? body.data : null;
+      } catch {
+        games = null;
+      }
+    }
+    if (!games) {
+      try {
+        games = (await fetchGradeGames(gradeId, env)) as Array<Record<string, unknown>>;
+      } catch {
+        continue;
+      }
+    }
+    const match = games.find((g) => {
+      const full = String(g.id ?? "");
+      return full === gameId || full.split("-")[0] === gameId;
+    });
+    if (match) {
+      const lite = toFixtureLite(match);
+      void ctx; // reserved; no async write needed here
+      return { home: lite.home, away: lite.away };
+    }
+  }
+  return null;
+}
 
 // Pull a stat value out of a spectator statistics[] array by its type value.
 function statVal(
@@ -99,7 +175,11 @@ function statVal(
   return typeof hit?.count === "number" ? hit.count : null;
 }
 
-function normaliseLive(id: string, game: Record<string, unknown>): NormalisedLive {
+function normaliseLive(
+  id: string,
+  game: Record<string, unknown>,
+  teams: GameTeams
+): NormalisedLive {
   const result = (game.result ?? {}) as Record<string, unknown>;
   const clock = (game.clock ?? {}) as Record<string, unknown>;
   const sideStats = (side: string) =>
@@ -118,11 +198,15 @@ function normaliseLive(id: string, game: Record<string, unknown>): NormalisedLiv
       status: (clock.status as string) ?? null,
     },
     home: {
+      id: teams?.home.id ?? null,
+      name: teams?.home.name ?? null,
       total: statVal(home, "TOTAL_SCORE"),
       goals: statVal(home, "TOTAL_GOALS"),
       behinds: statVal(home, "TOTAL_BEHINDS"),
     },
     away: {
+      id: teams?.away.id ?? null,
+      name: teams?.away.name ?? null,
       total: statVal(away, "TOTAL_SCORE"),
       goals: statVal(away, "TOTAL_GOALS"),
       behinds: statVal(away, "TOTAL_BEHINDS"),
@@ -435,6 +519,10 @@ export default {
 
     try {
       const game = (await fetchGame(id, env)) as Record<string, unknown>;
+      // For the normalised /live payload, attach team id+name resolved from the
+      // known grades' REST feeds (the spectator feed carries no team identity).
+      const teams =
+        kind === "live" ? await resolveGameTeams(id, env, ctx) : null;
       const payload =
         kind === "status"
           ? {
@@ -443,7 +531,7 @@ export default {
               updatedAt: game.updatedAt,
             }
           : kind === "live"
-            ? normaliseLive(id, game)
+            ? normaliseLive(id, game, teams)
             : game;
 
       const bodyText = JSON.stringify(payload);
