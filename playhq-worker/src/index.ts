@@ -213,9 +213,13 @@ async function fetchGradeGames(gradeId: string, env: Env): Promise<unknown[]> {
   return all;
 }
 
+// One side of a fixture — the PlayHQ competitor (team) id plus its name.
+type FixtureTeam = { id: string | null; name: string | null };
+
 // A lean fixture record for the discovery endpoint: just what a consuming app
 // needs to identify a fixture and then poll its score by `id`. Strips the
-// heavy venue/address/sub-score detail from the full game object.
+// heavy venue/address/sub-score detail from the full game object. Each side
+// carries the team id AND name so a consumer can map on either.
 type FixtureLite = {
   id: string; // the PlayHQ fixture/game id — poll /api/fixtures/:id/live with it
   status: string | null;
@@ -224,10 +228,17 @@ type FixtureLite = {
   time: string | null; // HH:mm:ss
   timezone: string | null;
   venue: string | null;
-  home: string | null;
-  away: string | null;
+  home: FixtureTeam;
+  away: FixtureTeam;
   url: string | null;
 };
+
+function teamOf(c: Record<string, unknown> | undefined): FixtureTeam {
+  return {
+    id: c ? (c.id as string) ?? null : null,
+    name: c ? (c.name as string) ?? null : null,
+  };
+}
 
 function toFixtureLite(game: Record<string, unknown>): FixtureLite {
   const round = (game.round ?? {}) as Record<string, unknown>;
@@ -246,8 +257,8 @@ function toFixtureLite(game: Record<string, unknown>): FixtureLite {
     time: (schedule.time as string) ?? null,
     timezone: (schedule.timezone as string) ?? null,
     venue: (venue?.name as string) ?? null,
-    home: (home?.name as string) ?? null,
-    away: (away?.name as string) ?? null,
+    home: teamOf(home),
+    away: teamOf(away),
     url: (game.url as string) ?? null,
   };
 }
