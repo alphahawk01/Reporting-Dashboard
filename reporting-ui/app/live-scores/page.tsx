@@ -14,6 +14,7 @@ import {
   RefreshCw,
   MapPin,
   ExternalLink,
+  ChevronDown,
 } from "lucide-react";
 
 import {
@@ -101,6 +102,7 @@ function GameRow({
   game: PlayHqGame;
   live?: NormalisedLive;
 }) {
+  const [scorersOpen, setScorersOpen] = useState(false);
   const { home, away } = sides(game);
 
   // Effective status/score: the REST feed is null for in-play games, so when a
@@ -184,24 +186,42 @@ function GameRow({
         {row(away?.name, awayScore, awayGB, "away")}
       </div>
 
-      {/* Goal scorers (live feed only), one column per team with the team name
-          as a heading so it's clear who each scorer belongs to. */}
+      {/* Goal scorers (live feed only) — collapsed by default, expanded via the
+          toggle. One column per team, labelled, so it's clear who scored. */}
       {liveData &&
         (liveData.home.scorers.length > 0 ||
           liveData.away.scorers.length > 0) && (
-          <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1 border-t border-slate-100 pt-2">
-            <div>
-              <div className="mb-0.5 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                {home?.name ?? "Home"}
+          <div className="mt-2.5 border-t border-slate-100 pt-2">
+            <button
+              type="button"
+              onClick={() => setScorersOpen((o) => !o)}
+              aria-expanded={scorersOpen}
+              className="flex w-full items-center justify-between gap-2 text-xs font-medium text-slate-500 hover:text-slate-700"
+            >
+              <span>Goal scorers</span>
+              <ChevronDown
+                size={15}
+                className={`transition-transform ${
+                  scorersOpen ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+            {scorersOpen && (
+              <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+                <div>
+                  <div className="mb-0.5 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                    {home?.name ?? "Home"}
+                  </div>
+                  <ScorerList scorers={liveData.home.scorers} />
+                </div>
+                <div>
+                  <div className="mb-0.5 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                    {away?.name ?? "Away"}
+                  </div>
+                  <ScorerList scorers={liveData.away.scorers} />
+                </div>
               </div>
-              <ScorerList scorers={liveData.home.scorers} />
-            </div>
-            <div>
-              <div className="mb-0.5 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                {away?.name ?? "Away"}
-              </div>
-              <ScorerList scorers={liveData.away.scorers} />
-            </div>
+            )}
           </div>
         )}
 
