@@ -18,8 +18,11 @@ export const NTFL_PREMIER_WOMENS_GRADE = "61ca876d-f028-4f60-ad85-33e8fb2e5be7";
 
 // The competitions shown on the Live Scores tab (label + grade id).
 export const LIVE_SCORE_GRADES = [
-  { key: "mens", label: "Men's Premier", gradeId: NTFL_PREMIER_MENS_GRADE },
-  { key: "womens", label: "Women's Premier", gradeId: NTFL_PREMIER_WOMENS_GRADE },
+  { key: "ntfl-mens", label: "NTFL Men's", gradeId: NTFL_PREMIER_MENS_GRADE },
+  { key: "ntfl-womens", label: "NTFL Women's", gradeId: NTFL_PREMIER_WOMENS_GRADE },
+  { key: "efnl", label: "EFNL Premier", gradeId: "6f964e7b-a56f-471e-9d9d-30e1f80da8d1" },
+  { key: "gvl", label: "GVL Seniors", gradeId: "6c2c7212-d1b7-48bb-acee-0fd75ce1984f" },
+  { key: "pfl", label: "PFL A-Grade", gradeId: "7540fef1-7fad-4375-8502-b95c09ae6105" },
 ] as const;
 
 export type LiveScoreGradeKey = (typeof LIVE_SCORE_GRADES)[number]["key"];

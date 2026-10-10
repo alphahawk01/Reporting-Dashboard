@@ -42,6 +42,9 @@ export interface Env {
 const DEFAULT_GRADE_IDS = [
   "be950883-7630-4df5-81e4-a5bba0f24cb6", // NTFL Premier Men's
   "61ca876d-f028-4f60-ad85-33e8fb2e5be7", // NTFL Premier Women's
+  "6f964e7b-a56f-471e-9d9d-30e1f80da8d1", // EFNL Premier Men
+  "6c2c7212-d1b7-48bb-acee-0fd75ce1984f", // GVL Seniors
+  "7540fef1-7fad-4375-8502-b95c09ae6105", // PFL A-Grade Men
 ];
 
 const PLAYHQ_URL = "https://spectator.playhq.com/graphql";

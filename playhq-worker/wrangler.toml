@@ -14,8 +14,8 @@ CACHE_TTL_SECONDS = "90"
 # Short edge cache for live score endpoints so in-play scores are near-real-time.
 LIVE_TTL_SECONDS = "15"
 # Grades the /live endpoint searches to attach team id+name to a game (the
-# spectator feed carries no team identity). NTFL Premier Men's + Women's.
-KNOWN_GRADE_IDS = "be950883-7630-4df5-81e4-a5bba0f24cb6,61ca876d-f028-4f60-ad85-33e8fb2e5be7"
+# spectator feed carries no team identity). NTFL Men's/Women's + EFNL, GVL, PFL.
+KNOWN_GRADE_IDS = "be950883-7630-4df5-81e4-a5bba0f24cb6,61ca876d-f028-4f60-ad85-33e8fb2e5be7,6f964e7b-a56f-471e-9d9d-30e1f80da8d1,6c2c7212-d1b7-48bb-acee-0fd75ce1984f,7540fef1-7fad-4375-8502-b95c09ae6105"
 
 # ── Route to your personal domain ───────────────────────────────────────────
 # Uncomment and set once your domain is on Cloudflare. Either a subdomain:

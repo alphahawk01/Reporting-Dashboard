@@ -173,8 +173,8 @@ function GameRow({
 }
 
 export default function LiveScoresPage() {
-  // Which competition (grade) is shown — Men's / Women's.
-  const [comp, setComp] = useState<LiveScoreGradeKey>("mens");
+  // Which competition (grade) is shown.
+  const [comp, setComp] = useState<LiveScoreGradeKey>("ntfl-mens");
   const grade = useMemo(
     () => LIVE_SCORE_GRADES.find((g) => g.key === comp) ?? LIVE_SCORE_GRADES[0],
     [comp]
