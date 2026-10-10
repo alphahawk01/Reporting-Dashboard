@@ -156,14 +156,15 @@ export function sides(game: PlayHqGame): {
   home: Competitor | null;
   away: Competitor | null;
 } {
-  const home = game.competitors.find((c) => c.isHomeTeam) ?? null;
-  const away = game.competitors.find((c) => !c.isHomeTeam) ?? null;
+  const comps = Array.isArray(game.competitors) ? game.competitors : [];
+  const home = comps.find((c) => c.isHomeTeam) ?? null;
+  const away = comps.find((c) => !c.isHomeTeam) ?? null;
   return { home, away };
 }
 
 /** AFL sub-score as "G.B" (goals.behinds), or "" if not available. */
 export function goalsBehinds(c: Competitor | null): string {
-  if (!c) return "";
+  if (!c || !Array.isArray(c.scoreSubTotal)) return "";
   const g = c.scoreSubTotal.find((s) => s.type === "TOTAL_GOALS")?.value;
   const b = c.scoreSubTotal.find((s) => s.type === "TOTAL_BEHINDS")?.value;
   if (g == null && b == null) return "";
