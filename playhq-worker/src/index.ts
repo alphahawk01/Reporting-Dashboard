@@ -21,10 +21,13 @@ export interface Env {
   // PlayHQ tenant (default "afl"). Override per-deployment if you query other
   // sports/competitions.
   PHQ_TENANT?: string;
-  // Seconds to cache each fixture response at the edge. Default 90 — below your
-  // 2-minute poll interval, so a poll always gets fresh-ish data but repeated
-  // dashboard opens within the window are served from cache.
+  // Seconds to cache the slow-moving data (fixtures list, game status) at the
+  // edge. Default 90.
   CACHE_TTL_SECONDS?: string;
+  // Seconds to cache the LIVE score endpoints (/live, /live-scores). Short by
+  // design so in-play scores are near-real-time while still shielding PlayHQ
+  // from bursts. Default 15.
+  LIVE_TTL_SECONDS?: string;
   // PlayHQ REST API key (official API). A SECRET — set with
   // `wrangler secret put PHQ_API_KEY`, never committed. Required for the
   // /api/grades/:id/games endpoint.
@@ -445,12 +448,19 @@ export default {
 
       const bodyText = JSON.stringify(payload);
 
-      // Store in the edge cache with the configured TTL (only when TTL > 0).
-      if (ttl > 0) {
+      // Live score endpoints get a SHORT TTL so in-play scores are near-live;
+      // status (slow-moving) uses the longer TTL.
+      const kindTtl =
+        kind === "status"
+          ? ttl
+          : Math.max(0, Number(env.LIVE_TTL_SECONDS ?? "15") || 15);
+
+      // Store in the edge cache with the kind's TTL (only when TTL > 0).
+      if (kindTtl > 0) {
         const toCache = new Response(bodyText, {
           headers: {
             "Content-Type": "application/json",
-            "Cache-Control": `public, max-age=${ttl}`,
+            "Cache-Control": `public, max-age=${kindTtl}`,
           },
         });
         ctx.waitUntil(cache.put(cacheKey, toCache));
@@ -462,7 +472,7 @@ export default {
           "Content-Type": "application/json",
           "X-Cache": "MISS",
           // Tell the browser not to cache a live score beyond the edge TTL.
-          "Cache-Control": `public, max-age=${ttl}`,
+          "Cache-Control": `public, max-age=${kindTtl}`,
           ...cors,
         },
       });

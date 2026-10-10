@@ -11,6 +11,8 @@ compatibility_date = "2025-07-18"
 ALLOWED_ORIGINS = "*"
 PHQ_TENANT = "afl"
 CACHE_TTL_SECONDS = "90"
+# Short edge cache for live score endpoints so in-play scores are near-real-time.
+LIVE_TTL_SECONDS = "15"
 
 # ── Route to your personal domain ───────────────────────────────────────────
 # Uncomment and set once your domain is on Cloudflare. Either a subdomain:
