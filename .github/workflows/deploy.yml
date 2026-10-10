@@ -52,6 +52,10 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          # PlayHQ live-scores Worker URL. Not secret (the API key lives in the
+          # Worker, not here), so a literal is fine. A repo variable of the same
+          # name overrides it if ever needed.
+          NEXT_PUBLIC_PLAYHQ_WORKER_URL: ${{ vars.NEXT_PUBLIC_PLAYHQ_WORKER_URL || 'https://playhq-scores.premier-data-enterprise.workers.dev' }}
         run: npm run build
 
       - name: Upload Pages artifact

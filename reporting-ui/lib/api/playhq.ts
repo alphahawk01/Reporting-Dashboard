@@ -9,7 +9,7 @@
 
 const WORKER_BASE =
   process.env.NEXT_PUBLIC_PLAYHQ_WORKER_URL?.replace(/\/$/, "") ||
-  "https://playhq-scores.premierdata.workers.dev";
+  "https://playhq-scores.premier-data-enterprise.workers.dev";
 
 // The NTFL Premier Men's grade — fixed for this competition. Other grades can
 // be passed explicitly to getGradeGames().
